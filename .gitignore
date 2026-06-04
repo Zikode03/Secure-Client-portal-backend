@@ -1,0 +1,14 @@
+# Visual Studio / .NET
+.vs/
+**/.vs/
+**/bin/
+**/obj/
+**/*.user
+**/*.suo
+**/*.cache
+
+# Local secrets
+.env
+
+# Local storage and generated files
+storage/
