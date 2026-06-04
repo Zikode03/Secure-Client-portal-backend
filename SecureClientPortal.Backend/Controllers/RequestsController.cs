@@ -247,7 +247,7 @@ public class RequestsController : ControllerBase
             "Request replied to",
             $"New comment on request '{item.Title}'.",
             $"/requests/{item.Id}",
-            new { item.Id, comment.Id });
+            new { requestId = item.Id, commentId = comment.Id });
 
         return Ok(comment);
     }
@@ -291,7 +291,7 @@ public class RequestsController : ControllerBase
             "Request resolved",
             $"Request '{item.Title}' has been resolved.",
             $"/requests/{item.Id}",
-            new { item.Id, request.ResolutionNote });
+            new { requestId = item.Id, request.ResolutionNote });
 
         return Ok(item);
     }

@@ -9,18 +9,18 @@ This repository contains the ASP.NET Core backend for the Secure Client Portal.
 - `SecureClientPortal.Backend.Tests/`: backend test project
 - `database/`: database scripts and restore/backup helpers
 - `storage/`: local storage area for development
-- `docker-compose.mysql.yml`: local MySQL development stack
+- `docker-compose.sqlserver.yml`: local SQL Server development stack
 
-## Start MySQL in Docker
+## Start SQL Server in Docker
 
 ```powershell
-docker compose -f docker-compose.mysql.yml up -d
+docker compose -f docker-compose.sqlserver.yml up -d
 ```
 
-MySQL is exposed at `localhost:3306` with:
+SQL Server is exposed at `localhost:1433` with:
 - Database: `secure_client_portal_dev`
-- User: `portal_user`
-- Password: `portal_password`
+- User: `sa`
+- Password: `StrongPass!12345`
 
 ## Run the API
 

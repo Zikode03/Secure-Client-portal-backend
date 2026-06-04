@@ -482,7 +482,7 @@ public class DocumentsController : ControllerBase
             "Document comment added",
             $"New comment added to document '{item.Name}'.",
             $"/documents/{item.Id}",
-            new { item.Id, comment.Id });
+            new { documentId = item.Id, commentId = comment.Id });
         return Ok(comment);
     }
 
