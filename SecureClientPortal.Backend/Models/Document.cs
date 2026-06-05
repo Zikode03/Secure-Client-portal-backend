@@ -4,10 +4,12 @@ public class Document
 {
     public string Id { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
+    public string MonthlyPackId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Category { get; set; } = "general";
     public string? DocumentSlotId { get; set; }
-    public string Status { get; set; } = "pending";
+    public string Status { get; set; } = "uploaded";
+    public string FileType { get; set; } = "application/octet-stream";
     public long SizeBytes { get; set; }
     public string? StorageKey { get; set; }
     public string UploadedByUserId { get; set; } = string.Empty;

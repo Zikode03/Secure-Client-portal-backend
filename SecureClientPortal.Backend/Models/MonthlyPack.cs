@@ -7,6 +7,7 @@ public class MonthlyPack
     public int Year { get; set; }
     public int Month { get; set; }
     public string Status { get; set; } = "draft";
+    public DateTime? SubmittedAtUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }

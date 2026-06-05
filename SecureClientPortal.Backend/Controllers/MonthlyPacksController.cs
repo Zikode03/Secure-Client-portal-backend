@@ -9,6 +9,7 @@ using System.Text.Json;
 namespace SecureClientPortal.Backend.Controllers;
 
 public record CreateMonthlyPackRequest(string ClientId, int Year, int Month, string? Status);
+public record UpdateMonthlyPackStatusRequest(string Status);
 
 [ApiController]
 [Route("api/monthly-packs")]
@@ -97,6 +98,45 @@ public class MonthlyPacksController : ControllerBase
         return Created($"/api/monthly-packs/{pack.ClientId}/{pack.Year}/{pack.Month}", pack);
     }
 
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<MonthlyPack>> Submit(string id, CancellationToken ct)
+    {
+        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (pack is null)
+        {
+            return NotFound();
+        }
+
+        var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(pack.ClientId))
+        {
+            return Forbid();
+        }
+
+        var requiredSlots = await _db.DocumentSlots
+            .Where(x => x.MonthlyPackId == pack.Id && x.IsRequired)
+            .ToListAsync(ct);
+        if (requiredSlots.Any(x => x.Status == "missing"))
+        {
+            return BadRequest(new { error = "All required document slots must be uploaded before submission." });
+        }
+
+        pack.Status = "submitted";
+        pack.SubmittedAtUtc = DateTime.UtcNow;
+        pack.UpdatedAtUtc = pack.SubmittedAtUtc.Value;
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            User,
+            "monthly_packs.submitted",
+            "monthly_pack",
+            pack.Id,
+            pack.ClientId,
+            JsonSerializer.Serialize(new { pack.ClientId, pack.Year, pack.Month, pack.Status }),
+            ct);
+
+        return Ok(pack);
+    }
+
     private static string NormalizeStatus(string? value)
     {
         var normalized = string.IsNullOrWhiteSpace(value) ? "draft" : value.Trim().ToLowerInvariant();
@@ -107,6 +147,7 @@ public class MonthlyPacksController : ControllerBase
             "submitted" => "submitted",
             "under_review" => "under_review",
             "completed" => "completed",
+            "reopened" => "reopened",
             _ => "draft"
         };
     }

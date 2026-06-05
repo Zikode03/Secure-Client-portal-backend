@@ -7,6 +7,11 @@ public interface IFileStorage
     Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default);
 }
 
-public sealed record StoredFile(string StorageKey, string OriginalFileName, long SizeBytes);
+public sealed record StoredFile(
+    string StorageKey,
+    string OriginalFileName,
+    string StoredFileName,
+    string ContentType,
+    long SizeBytes);
 
 public sealed record StoredFileContent(Stream Stream, string ContentType);

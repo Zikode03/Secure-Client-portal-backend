@@ -80,10 +80,12 @@ public class PortalDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasMaxLength(100);
             entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.MonthlyPackId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(260).IsRequired();
             entity.Property(x => x.Category).HasMaxLength(80).IsRequired();
             entity.Property(x => x.DocumentSlotId).HasMaxLength(100);
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.FileType).HasMaxLength(200).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(500);
             entity.Property(x => x.UploadedByUserId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.FiledByUserId).HasMaxLength(100);
@@ -92,10 +94,11 @@ public class PortalDbContext : DbContext
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.IsFiled });
             entity.HasIndex(x => new { x.ClientId, x.Status });
+            entity.HasIndex(x => x.MonthlyPackId);
             entity.HasIndex(x => x.UploadedAtUtc);
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppDocuments_Status", "Status IN ('draft','pending','under_review','accepted','rejected','filed')");
+                table.HasCheckConstraint("CK_AppDocuments_Status", "Status IN ('draft','uploaded','under_review','accepted','rejected','filed')");
             });
         });
 
@@ -205,12 +208,13 @@ public class PortalDbContext : DbContext
             entity.Property(x => x.Id).HasMaxLength(100);
             entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.SubmittedAtUtc);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.Year, x.Month }).IsUnique();
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('draft','in_progress','submitted','under_review','completed')");
+                table.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('draft','in_progress','submitted','under_review','completed','reopened')");
                 table.HasCheckConstraint("CK_AppMonthlyPacks_Month", "Month >= 1 AND Month <= 12");
             });
         });
@@ -244,11 +248,15 @@ public class PortalDbContext : DbContext
             entity.Property(x => x.Id).HasMaxLength(100);
             entity.Property(x => x.DocumentId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(260).IsRequired();
+            entity.Property(x => x.OriginalFileName).HasMaxLength(260).IsRequired();
+            entity.Property(x => x.StoredFileName).HasMaxLength(260).IsRequired();
+            entity.Property(x => x.FileType).HasMaxLength(200).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(500);
             entity.Property(x => x.UploadedByUserId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.DocumentId);
             entity.HasIndex(x => new { x.DocumentId, x.VersionNumber }).IsUnique();
+            entity.HasIndex(x => new { x.DocumentId, x.IsCurrentVersion });
         });
 
         modelBuilder.Entity<ReviewDecision>(entity =>
@@ -261,6 +269,7 @@ public class PortalDbContext : DbContext
             entity.Property(x => x.ReviewerUserId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.ReviewerRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(1000);
+            entity.Property(x => x.InternalNote).HasMaxLength(2000);
             entity.Property(x => x.DecidedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.DocumentId);
             entity.HasIndex(x => x.DecidedAtUtc);

@@ -13,8 +13,8 @@ namespace SecureClientPortal.Backend.Controllers;
 public record UpdateDocumentStatusRequest(string Status);
 public record FilingRuleUpdateRequest(bool IsEnabled);
 public record AddDocumentCommentRequest(string Message);
-public record AddReviewDecisionRequest(string Decision, string? Reason);
-public record RequestReuploadRequest(string Reason);
+public record AddReviewDecisionRequest(string Decision, string? Reason, string? InternalNote);
+public record RequestReuploadRequest(string Reason, string? InternalNote);
 
 public class UploadDocumentRequest
 {
@@ -129,10 +129,12 @@ public class DocumentsController : ControllerBase
             {
                 Id = $"doc_{Guid.NewGuid():N}",
                 ClientId = request.ClientId,
+                MonthlyPackId = pack.Id,
                 Name = stored.OriginalFileName,
                 Category = normalizedCategory,
                 DocumentSlotId = slot.Id,
-                Status = "pending",
+                Status = "uploaded",
+                FileType = stored.ContentType,
                 SizeBytes = stored.SizeBytes,
                 StorageKey = stored.StorageKey,
                 UploadedByUserId = actorUserId,
@@ -157,18 +159,28 @@ public class DocumentsController : ControllerBase
             }
 
             document.Name = stored.OriginalFileName;
+            document.MonthlyPackId = pack.Id;
             document.Category = normalizedCategory;
             document.DocumentSlotId = slot.Id;
+            document.FileType = stored.ContentType;
             document.SizeBytes = stored.SizeBytes;
             document.StorageKey = stored.StorageKey;
             document.UploadedByUserId = actorUserId;
-            document.Status = "pending";
+            document.Status = "uploaded";
             document.CurrentVersionNumber += 1;
             document.IsFiled = false;
             document.FiledAtUtc = null;
             document.FiledByUserId = null;
             document.UpdatedAtUtc = now;
             document.UploadedAtUtc = now;
+
+            var previousVersions = await _db.DocumentVersions
+                .Where(x => x.DocumentId == document.Id && x.IsCurrentVersion)
+                .ToListAsync(ct);
+            foreach (var previousVersion in previousVersions)
+            {
+                previousVersion.IsCurrentVersion = false;
+            }
         }
 
         _db.DocumentVersions.Add(new DocumentVersion
@@ -177,8 +189,12 @@ public class DocumentsController : ControllerBase
             DocumentId = document.Id,
             VersionNumber = document.CurrentVersionNumber,
             Name = stored.OriginalFileName,
+            OriginalFileName = stored.OriginalFileName,
+            StoredFileName = stored.StoredFileName,
+            FileType = stored.ContentType,
             SizeBytes = stored.SizeBytes,
             StorageKey = stored.StorageKey,
+            IsCurrentVersion = true,
             UploadedByUserId = actorUserId,
             CreatedAtUtc = now
         });
@@ -187,7 +203,8 @@ public class DocumentsController : ControllerBase
         slot.Status = "uploaded";
         slot.UpdatedAtUtc = now;
 
-        pack.Status = "submitted";
+        pack.Status = isNewDocument ? "in_progress" : "reopened";
+        pack.SubmittedAtUtc = null;
         pack.UpdatedAtUtc = now;
 
         await _db.SaveChangesAsync(ct);
@@ -207,18 +224,36 @@ public class DocumentsController : ControllerBase
                 document.StorageKey
             }),
             ct);
-
-        var accountants = await _db.ResolveNotificationRecipientsAsync(document.ClientId, "accountant", ct);
-        await _db.AddNotificationsAsync(
+        await _db.WriteAuditLogAsync(
             User,
-            accountants,
+            "documents.version_created",
+            "document_version",
+            $"{document.Id}:v{document.CurrentVersionNumber}",
             document.ClientId,
-            "monthly_pack.submitted",
-            "Monthly pack submitted",
-            $"A new document was submitted for review in monthly pack {pack.Year:D4}-{pack.Month:D2}.",
-            $"/documents/{document.Id}",
-            new { document.Id, monthlyPackId = pack.Id, versionNumber = document.CurrentVersionNumber },
+            JsonSerializer.Serialize(new
+            {
+                document.Id,
+                document.CurrentVersionNumber,
+                stored.OriginalFileName,
+                stored.StoredFileName,
+                stored.ContentType
+            }),
             ct);
+
+        if (pack.Status is "submitted" or "under_review")
+        {
+            var accountants = await _db.ResolveNotificationRecipientsAsync(document.ClientId, "accountant", ct);
+            await _db.AddNotificationsAsync(
+                User,
+                accountants,
+                document.ClientId,
+                "monthly_pack.submitted",
+                "Monthly pack submitted",
+                $"A new document was submitted for review in monthly pack {pack.Year:D4}-{pack.Month:D2}.",
+                $"/documents/{document.Id}",
+                new { document.Id, monthlyPackId = pack.Id, versionNumber = document.CurrentVersionNumber },
+                ct);
+        }
 
         return Created($"/api/documents/{document.Id}", await BuildDocumentResponseAsync(document, ct));
     }
@@ -246,8 +281,12 @@ public class DocumentsController : ControllerBase
             DocumentId = request.Id,
             VersionNumber = 1,
             Name = request.Name,
+            OriginalFileName = request.Name,
+            StoredFileName = Path.GetFileName(request.StorageKey ?? request.Name),
+            FileType = request.FileType,
             SizeBytes = request.SizeBytes,
             StorageKey = request.StorageKey,
+            IsCurrentVersion = true,
             UploadedByUserId = request.UploadedByUserId,
             CreatedAtUtc = request.UploadedAtUtc
         });
@@ -266,6 +305,15 @@ public class DocumentsController : ControllerBase
         {
             return Forbid();
         }
+
+        await _db.WriteAuditLogAsync(
+            User,
+            "documents.viewed",
+            "document",
+            item.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { item.Id, item.CurrentVersionNumber }),
+            ct);
 
         return Ok(await BuildDocumentResponseAsync(item, ct));
     }
@@ -294,11 +342,14 @@ public class DocumentsController : ControllerBase
             version.DocumentId,
             version.VersionNumber,
             version.Name,
+            version.OriginalFileName,
+            version.StoredFileName,
+            version.FileType,
             version.SizeBytes,
             version.StorageKey,
             version.UploadedByUserId,
             version.CreatedAtUtc,
-            isCurrent = version.VersionNumber == item.CurrentVersionNumber
+            isCurrent = version.IsCurrentVersion
         }));
     }
 
@@ -324,6 +375,15 @@ public class DocumentsController : ControllerBase
         {
             return NotFound(new { error = "Document file could not be found in storage." });
         }
+
+        await _db.WriteAuditLogAsync(
+            User,
+            "documents.downloaded",
+            "document",
+            item.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { item.Id, item.CurrentVersionNumber, item.StorageKey }),
+            ct);
 
         return File(file.Stream, file.ContentType, item.Name);
     }
@@ -364,7 +424,7 @@ public class DocumentsController : ControllerBase
             return Forbid();
         }
 
-        await ApplyLifecycleDecisionAsync(document, NormalizeDocumentStatus(request.Status), null, ct);
+        await ApplyLifecycleDecisionAsync(document, NormalizeDocumentStatus(request.Status), null, null, ct);
         return Ok(document);
     }
 
@@ -387,12 +447,13 @@ public class DocumentsController : ControllerBase
             return Forbid();
         }
 
-        var reviewDecision = await ApplyLifecycleDecisionAsync(document, decision, request.Reason, ct);
+        var reviewDecision = await ApplyLifecycleDecisionAsync(document, decision, request.Reason, request.InternalNote, ct);
         return Ok(new
         {
             reviewDecision.Id,
             reviewDecision.Decision,
             reviewDecision.Reason,
+            reviewDecision.InternalNote,
             reviewDecision.DecidedAtUtc,
             documentId = document.Id,
             documentStatus = document.Status
@@ -417,12 +478,13 @@ public class DocumentsController : ControllerBase
             return Forbid();
         }
 
-        var reviewDecision = await ApplyLifecycleDecisionAsync(document, "request_reupload", request.Reason, ct);
+        var reviewDecision = await ApplyLifecycleDecisionAsync(document, "request_reupload", request.Reason, request.InternalNote, ct);
         return Ok(new
         {
             reviewDecision.Id,
             reviewDecision.Decision,
             reviewDecision.Reason,
+            reviewDecision.InternalNote,
             reviewDecision.DecidedAtUtc,
             documentId = document.Id,
             documentStatus = document.Status
@@ -446,9 +508,9 @@ public class DocumentsController : ControllerBase
         }
 
         var authorId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
-        var authorRole = User.IsInRole("admin")
+        var authorRole = User.IsAdmin()
             ? "admin"
-            : User.IsInRole("accountant")
+            : User.IsAccountant()
                 ? "accountant"
                 : "client";
 
@@ -526,6 +588,7 @@ public class DocumentsController : ControllerBase
             documentType = item.Category,
             item.Name,
             item.Status,
+            item.FileType,
             item.SizeBytes,
             item.StorageKey,
             item.UploadedByUserId,
@@ -566,7 +629,7 @@ public class DocumentsController : ControllerBase
             x.ClientId == clientId && x.MonthlyPackId == monthlyPackId && x.Category == category, ct);
     }
 
-    private async Task<ReviewDecision> ApplyLifecycleDecisionAsync(Document document, string decision, string? reason, CancellationToken ct)
+    private async Task<ReviewDecision> ApplyLifecycleDecisionAsync(Document document, string decision, string? reason, string? internalNote, CancellationToken ct)
     {
         var reviewerUserId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
         var reviewerRole = User.IsAdmin() ? "admin" : "accountant";
@@ -580,6 +643,7 @@ public class DocumentsController : ControllerBase
             ReviewerUserId = reviewerUserId,
             ReviewerRole = reviewerRole,
             Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+            InternalNote = string.IsNullOrWhiteSpace(internalNote) ? null : internalNote.Trim(),
             DecidedAtUtc = now
         };
 
@@ -605,6 +669,7 @@ public class DocumentsController : ControllerBase
                 if (pack is not null)
                 {
                     pack.Status = "under_review";
+                    pack.SubmittedAtUtc ??= now;
                     pack.UpdatedAtUtc = now;
                 }
                 break;
@@ -633,6 +698,12 @@ public class DocumentsController : ControllerBase
                     slot.Status = "rejected";
                     slot.CurrentDocumentId = document.Id;
                     slot.UpdatedAtUtc = now;
+                }
+                if (pack is not null)
+                {
+                    pack.Status = "reopened";
+                    pack.SubmittedAtUtc = null;
+                    pack.UpdatedAtUtc = now;
                 }
                 break;
 
@@ -669,6 +740,7 @@ public class DocumentsController : ControllerBase
                 document.Id,
                 decision,
                 reason = reviewDecision.Reason,
+                internalNote = reviewDecision.InternalNote,
                 document.Status
             }),
             ct);
@@ -757,13 +829,18 @@ public class DocumentsController : ControllerBase
         {
             pack.Status = "completed";
         }
+        else if (slots.Any(x => x.Status == "rejected"))
+        {
+            pack.Status = "reopened";
+            pack.SubmittedAtUtc = null;
+        }
         else if (slots.Any(x => x.Status == "under_review"))
         {
             pack.Status = "under_review";
         }
         else if (slots.Any(x => x.Status == "uploaded"))
         {
-            pack.Status = "submitted";
+            pack.Status = pack.SubmittedAtUtc.HasValue ? "submitted" : "in_progress";
         }
         else if (slots.Any(x => x.Status is "accepted" or "rejected" or "filed"))
         {
@@ -806,17 +883,18 @@ public class DocumentsController : ControllerBase
 
     private static string NormalizeDocumentStatus(string rawStatus)
     {
-        var normalized = string.IsNullOrWhiteSpace(rawStatus) ? "pending" : rawStatus.Trim().ToLowerInvariant();
+        var normalized = string.IsNullOrWhiteSpace(rawStatus) ? "uploaded" : rawStatus.Trim().ToLowerInvariant();
         return normalized switch
         {
             "draft" => "draft",
-            "pending" => "pending",
-            "submitted" => "pending",
+            "pending" => "uploaded",
+            "submitted" => "uploaded",
+            "uploaded" => "uploaded",
             "under_review" => "under_review",
             "accepted" => "accepted",
             "rejected" => "rejected",
             "filed" => "filed",
-            _ => "pending"
+            _ => "uploaded"
         };
     }
 }

@@ -35,7 +35,10 @@ public class LocalFileStorage : IFileStorage
         await file.CopyToAsync(target, ct);
 
         var storageKey = relativePath.Replace('\\', '/');
-        return new StoredFile(storageKey, Path.GetFileName(file.FileName), file.Length);
+        var contentType = string.IsNullOrWhiteSpace(file.ContentType)
+            ? (_contentTypes.TryGetContentType(file.FileName, out var detected) ? detected : "application/octet-stream")
+            : file.ContentType;
+        return new StoredFile(storageKey, Path.GetFileName(file.FileName), storageFileName, contentType, file.Length);
     }
 
     public Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)

@@ -8,5 +8,6 @@ public class ReviewDecision
     public string ReviewerUserId { get; set; } = string.Empty;
     public string ReviewerRole { get; set; } = string.Empty;
     public string? Reason { get; set; }
+    public string? InternalNote { get; set; }
     public DateTime DecidedAtUtc { get; set; } = DateTime.UtcNow;
 }
