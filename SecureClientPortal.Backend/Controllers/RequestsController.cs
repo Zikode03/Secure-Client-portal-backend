@@ -19,6 +19,7 @@ public record CreateRequestRequest(
     string? RelatedDocumentId);
 
 public record AddRequestCommentRequest(string Message);
+public record UpdateRequestStatusRequest(string Status);
 public record ResolveRequestRequest(string? ResolutionNote);
 
 [ApiController]
@@ -29,10 +30,19 @@ public class RequestsController : ControllerBase
     private static readonly HashSet<string> AllowedRequestTypes =
     [
         "missing_document",
-        "reupload",
-        "clarification",
-        "renewal",
-        "signature"
+        "reupload_required",
+        "clarification_needed",
+        "signature_required",
+        "compliance_renewal"
+    ];
+
+    private static readonly HashSet<string> AllowedStatuses =
+    [
+        "open",
+        "waiting_on_client",
+        "waiting_on_accountant",
+        "resolved",
+        "overdue"
     ];
 
     private readonly PortalDbContext _db;
@@ -45,6 +55,7 @@ public class RequestsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<RequestItem>>> GetAll()
     {
+        await RefreshOverdueRequestsAsync();
         var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db);
         return Ok(await _db.Requests
             .Where(x => allowedClientIds.Contains(x.ClientId))
@@ -83,7 +94,7 @@ public class RequestsController : ControllerBase
 
         var authorId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
         var authorRole = User.IsAdmin() ? "admin" : User.IsAccountant() ? "accountant" : "client";
-        var status = authorRole == "client" ? "awaiting_accountant" : "awaiting_client";
+        var status = authorRole == "client" ? "waiting_on_accountant" : "waiting_on_client";
 
         var item = new RequestItem
         {
@@ -129,6 +140,7 @@ public class RequestsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<RequestItem>> GetById(string id)
     {
+        await RefreshOverdueRequestsAsync();
         var item = await _db.Requests.FindAsync(id);
         if (item is null) return NotFound();
         var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db);
@@ -152,12 +164,24 @@ public class RequestsController : ControllerBase
             return Forbid();
         }
 
-        item.Title = request.Title;
-        item.Description = request.Description;
-        item.Priority = request.Priority;
-        item.Status = request.Status;
+        item.Title = request.Title.Trim();
+        item.Description = request.Description.Trim();
+        item.Priority = request.Priority.Trim().ToLowerInvariant();
+        var normalizedStatus = NormalizeStatus(request.Status);
+        if (!AllowedStatuses.Contains(normalizedStatus))
+        {
+            return BadRequest(new { error = "Unsupported request status." });
+        }
+
+        var normalizedType = NormalizeRequestType(request.RequestType);
+        if (!AllowedRequestTypes.Contains(normalizedType))
+        {
+            return BadRequest(new { error = "Unsupported request type." });
+        }
+
+        item.Status = normalizedStatus;
         item.DueDateUtc = request.DueDateUtc;
-        item.RequestType = NormalizeRequestType(request.RequestType);
+        item.RequestType = normalizedType;
         item.RelatedDocumentId = request.RelatedDocumentId;
         item.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -169,6 +193,53 @@ public class RequestsController : ControllerBase
             item.Id,
             item.ClientId,
             JsonSerializer.Serialize(new { item.Status, item.Priority, item.RequestType }));
+        return Ok(item);
+    }
+
+    [HttpPatch("{id}/status")]
+    public async Task<ActionResult<RequestItem>> UpdateStatus(string id, [FromBody] UpdateRequestStatusRequest request)
+    {
+        var item = await _db.Requests.FindAsync(id);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db);
+        if (!allowedClientIds.Contains(item.ClientId))
+        {
+            return Forbid();
+        }
+
+        var normalizedStatus = NormalizeStatus(request.Status);
+        if (!AllowedStatuses.Contains(normalizedStatus))
+        {
+            return BadRequest(new { error = "Unsupported request status." });
+        }
+
+        item.Status = normalizedStatus;
+        item.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (normalizedStatus == "resolved")
+        {
+            item.ResolvedByUserId = User.GetUserId();
+            item.ResolvedAtUtc = item.UpdatedAtUtc;
+        }
+        else
+        {
+            item.ResolvedByUserId = null;
+            item.ResolvedAtUtc = null;
+        }
+
+        await _db.SaveChangesAsync();
+        await _db.WriteAuditLogAsync(
+            User,
+            "request.status_updated",
+            "request",
+            item.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { item.Status }));
+
         return Ok(item);
     }
 
@@ -225,7 +296,7 @@ public class RequestsController : ControllerBase
         };
         _db.RequestComments.Add(comment);
 
-        item.Status = authorRole == "client" ? "awaiting_accountant" : "awaiting_client";
+        item.Status = authorRole == "client" ? "waiting_on_accountant" : "waiting_on_client";
         item.UpdatedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -316,12 +387,59 @@ public class RequestsController : ControllerBase
 
     private static string NormalizeRequestType(string value)
     {
-        return value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
+        var normalized = value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
+        return normalized switch
+        {
+            "reupload" => "reupload_required",
+            "re_upload" => "reupload_required",
+            "clarification" => "clarification_needed",
+            "signature" => "signature_required",
+            "renewal" => "compliance_renewal",
+            _ => normalized
+        };
+    }
+
+    private static string NormalizeStatus(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
+        normalized = normalized switch
+        {
+            "awaiting_client" => "waiting_on_client",
+            "awaiting_accountant" => "waiting_on_accountant",
+            _ => normalized
+        };
+
+        return normalized;
     }
 
     private static bool IsAllowedPriority(string value)
     {
         var normalized = value.Trim().ToLowerInvariant();
         return normalized is "low" or "medium" or "high" or "urgent";
+    }
+
+    private async Task RefreshOverdueRequestsAsync()
+    {
+        var now = DateTime.UtcNow;
+        var overdueRequests = await _db.Requests
+            .Where(x =>
+                x.Status != "resolved" &&
+                x.DueDateUtc != null &&
+                x.DueDateUtc < now &&
+                x.Status != "overdue")
+            .ToListAsync();
+
+        if (overdueRequests.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in overdueRequests)
+        {
+            item.Status = "overdue";
+            item.UpdatedAtUtc = now;
+        }
+
+        await _db.SaveChangesAsync();
     }
 }

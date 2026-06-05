@@ -548,6 +548,29 @@ public class DocumentsController : ControllerBase
         return Ok(comment);
     }
 
+    [HttpGet("{id}/comments")]
+    public async Task<ActionResult<IEnumerable<DocumentComment>>> GetComments(string id, CancellationToken ct)
+    {
+        var item = await _db.Documents.FindAsync([id], ct);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(item.ClientId))
+        {
+            return Forbid();
+        }
+
+        var comments = await _db.DocumentComments
+            .Where(x => x.DocumentId == item.Id)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+
+        return Ok(comments);
+    }
+
     [HttpDelete("{id}")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<IActionResult> Delete(string id)
@@ -751,6 +774,21 @@ public class DocumentsController : ControllerBase
             await EnsureReuploadRequestAsync(document, reviewDecision.Reason ?? "Please re-upload a corrected document.", ct);
         }
 
+        if (decision == "accepted")
+        {
+            var recipients = await _db.ResolveNotificationRecipientsAsync(document.ClientId, "client", ct);
+            await _db.AddNotificationsAsync(
+                User,
+                recipients,
+                document.ClientId,
+                "document.approved",
+                "Document approved",
+                $"Document '{document.Name}' was approved.",
+                $"/documents/{document.Id}",
+                new { document.Id, reason = reviewDecision.Reason },
+                ct);
+        }
+
         if (decision is "rejected" or "request_reupload")
         {
             var recipients = await _db.ResolveNotificationRecipientsAsync(document.ClientId, "client", ct);
@@ -776,12 +814,12 @@ public class DocumentsController : ControllerBase
         var existing = await _db.Requests.FirstOrDefaultAsync(x =>
             x.ClientId == document.ClientId &&
             x.RelatedDocumentId == document.Id &&
-            x.RequestType == "reupload" &&
+            x.RequestType == "reupload_required" &&
             x.Status != "resolved", ct);
 
         if (existing is not null)
         {
-            existing.Status = "awaiting_client";
+            existing.Status = "waiting_on_client";
             existing.Description = reason.Trim();
             existing.UpdatedAtUtc = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
@@ -792,12 +830,12 @@ public class DocumentsController : ControllerBase
         {
             Id = $"req_{Guid.NewGuid():N}",
             ClientId = document.ClientId,
-            RequestType = "reupload",
+            RequestType = "reupload_required",
             RelatedDocumentId = document.Id,
             Title = $"Re-upload required: {document.Name}",
             Description = reason.Trim(),
             Priority = "high",
-            Status = "awaiting_client",
+            Status = "waiting_on_client",
             RequestedByUserId = User.GetUserId() ?? "unknown",
             RequestedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow

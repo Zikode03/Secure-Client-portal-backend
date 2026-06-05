@@ -44,12 +44,12 @@ public class Phase3WorkflowPlatformTests
 
         var reject = await accountantDocuments.Review(
             document.Id,
-            new AddReviewDecisionRequest("rejected", "Please include all pages."),
+            new AddReviewDecisionRequest("rejected", "Please include all pages.", null),
             CancellationToken.None);
         Assert.IsType<OkObjectResult>(reject.Result);
 
         var request = await db.Requests.SingleAsync();
-        Assert.Equal("reupload", request.RequestType);
+        Assert.Equal("reupload_required", request.RequestType);
         Assert.Equal(document.Id, request.RelatedDocumentId);
 
         var notificationsController = new NotificationsController(db)
@@ -185,23 +185,23 @@ public class Phase3WorkflowPlatformTests
     {
         private readonly Dictionary<string, byte[]> _files = [];
 
-        public async Task<StoredFileResult> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
+        public async Task<StoredFile> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
         {
             await using var stream = new MemoryStream();
             await file.CopyToAsync(stream, ct);
             var key = $"{clientId}/{Guid.NewGuid():N}-{file.FileName}";
             _files[key] = stream.ToArray();
-            return new StoredFileResult(key, file.FileName, file.ContentType, file.Length);
+            return new StoredFile(key, file.FileName, file.FileName, file.ContentType, file.Length);
         }
 
-        public Task<StoredFileReadResult?> OpenReadAsync(string storageKey, CancellationToken ct = default)
+        public Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)
         {
             if (!_files.TryGetValue(storageKey, out var bytes))
             {
-                return Task.FromResult<StoredFileReadResult?>(null);
+                return Task.FromResult<StoredFileContent?>(null);
             }
 
-            return Task.FromResult<StoredFileReadResult?>(new StoredFileReadResult(new MemoryStream(bytes), Path.GetFileName(storageKey), "application/pdf"));
+            return Task.FromResult<StoredFileContent?>(new StoredFileContent(new MemoryStream(bytes), "application/pdf"));
         }
     }
 }

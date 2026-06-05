@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Controllers;
@@ -30,6 +31,12 @@ public class NotificationsController : ControllerBase
         }
 
         var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db);
+        await _db.AddDeadlineApproachingNotificationsAsync(
+            User.Identity?.IsAuthenticated == true ? User : new ClaimsPrincipal(new ClaimsIdentity()),
+            userId,
+            allowedClientIds,
+            HttpContext.RequestAborted);
+
         var data = await _db.Notifications
             .Where(x => x.UserId == userId && (x.ClientId == null || allowedClientIds.Contains(x.ClientId)))
             .OrderByDescending(x => x.CreatedAtUtc)

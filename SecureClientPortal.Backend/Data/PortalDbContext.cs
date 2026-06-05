@@ -173,9 +173,9 @@ public class PortalDbContext : DbContext
             entity.HasIndex(x => x.RelatedDocumentId);
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppRequests_Status", "Status IN ('open','awaiting_client','awaiting_accountant','resolved')");
+                table.HasCheckConstraint("CK_AppRequests_Status", "Status IN ('open','waiting_on_client','waiting_on_accountant','resolved','overdue')");
                 table.HasCheckConstraint("CK_AppRequests_Priority", "Priority IN ('low','medium','high','urgent')");
-                table.HasCheckConstraint("CK_AppRequests_RequestType", "RequestType IN ('missing_document','reupload','clarification','renewal','signature')");
+                table.HasCheckConstraint("CK_AppRequests_RequestType", "RequestType IN ('missing_document','reupload_required','clarification_needed','signature_required','compliance_renewal')");
             });
         });
 

@@ -74,9 +74,9 @@ public class ReportsController : ControllerBase
             {
                 requestType = group.Key,
                 total = group.Count(),
-                awaitingClient = group.Count(x => x.Status == "awaiting_client"),
-                awaitingAccountant = group.Count(x => x.Status == "awaiting_accountant"),
-                overdue = group.Count(x => x.DueDateUtc < DateTime.UtcNow)
+                awaitingClient = group.Count(x => x.Status == "waiting_on_client"),
+                awaitingAccountant = group.Count(x => x.Status == "waiting_on_accountant"),
+                overdue = group.Count(x => x.Status == "overdue" || (x.Status != "resolved" && x.DueDateUtc < DateTime.UtcNow))
             })
             .OrderByDescending(x => x.total)
             .ToList();
@@ -154,7 +154,7 @@ public class ReportsController : ControllerBase
                     workload = new
                     {
                         openTasks = tasks.Count(task => task.CreatedByUserId == accountant.Id && task.Status != "done"),
-                        pendingDocuments = assignedDocuments.Count(document => document.Status is "pending" or "under_review"),
+                        pendingDocuments = assignedDocuments.Count(document => document.Status is "uploaded" or "under_review"),
                         openRequests = requests.Count(request => assignedClientIds.Contains(request.ClientId) && request.Status != "resolved")
                     },
                     reviewTime = new

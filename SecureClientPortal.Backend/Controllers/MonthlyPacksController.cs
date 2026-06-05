@@ -134,6 +134,18 @@ public class MonthlyPacksController : ControllerBase
             JsonSerializer.Serialize(new { pack.ClientId, pack.Year, pack.Month, pack.Status }),
             ct);
 
+        var recipients = await _db.ResolveNotificationRecipientsAsync(pack.ClientId, "accountant", ct);
+        await _db.AddNotificationsAsync(
+            User,
+            recipients,
+            pack.ClientId,
+            "monthly_pack.submitted",
+            "Monthly pack submitted",
+            $"Monthly pack {pack.Year:D4}-{pack.Month:D2} was submitted for review.",
+            $"/monthly-packs/{pack.ClientId}/{pack.Year}/{pack.Month}",
+            new { pack.Id, pack.ClientId, pack.Year, pack.Month, pack.Status },
+            ct);
+
         return Ok(pack);
     }
 

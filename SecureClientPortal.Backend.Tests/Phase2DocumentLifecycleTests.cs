@@ -39,12 +39,12 @@ public class Phase2DocumentLifecycleTests
         Assert.Equal(201, uploadOneCreated.StatusCode);
 
         var document = await db.Documents.SingleAsync();
-        Assert.Equal("pending", document.Status);
+        Assert.Equal("uploaded", document.Status);
         Assert.Equal(1, document.CurrentVersionNumber);
 
         var packAfterUpload = await db.MonthlyPacks.SingleAsync();
         var slotAfterUpload = await db.DocumentSlots.SingleAsync();
-        Assert.Equal("submitted", packAfterUpload.Status);
+        Assert.Equal("in_progress", packAfterUpload.Status);
         Assert.Equal("uploaded", slotAfterUpload.Status);
 
         var accountantController = new DocumentsController(db, storage)
@@ -57,7 +57,7 @@ public class Phase2DocumentLifecycleTests
 
         var rejectResult = await accountantController.Review(
             document.Id,
-            new AddReviewDecisionRequest("rejected", "The closing balance is cut off."),
+            new AddReviewDecisionRequest("rejected", "The closing balance is cut off.", null),
             CancellationToken.None);
 
         var rejectOk = Assert.IsType<OkObjectResult>(rejectResult.Result);
@@ -67,8 +67,8 @@ public class Phase2DocumentLifecycleTests
         var rejectedDocument = await db.Documents.SingleAsync();
         Assert.Equal("rejected", rejectedDocument.Status);
         var reuploadRequest = await db.Requests.SingleAsync();
-        Assert.Equal("reupload", reuploadRequest.RequestType);
-        Assert.Equal("awaiting_client", reuploadRequest.Status);
+        Assert.Equal("reupload_required", reuploadRequest.RequestType);
+        Assert.Equal("waiting_on_client", reuploadRequest.Status);
         Assert.Equal(document.Id, reuploadRequest.RelatedDocumentId);
 
         var clientNotifications = await db.Notifications.Where(x => x.UserId == "u_client_001").ToListAsync();
@@ -92,7 +92,7 @@ public class Phase2DocumentLifecycleTests
         Assert.IsType<CreatedResult>(uploadTwo.Result);
 
         var finalDocument = await db.Documents.SingleAsync();
-        Assert.Equal("pending", finalDocument.Status);
+        Assert.Equal("uploaded", finalDocument.Status);
         Assert.Equal(2, finalDocument.CurrentVersionNumber);
 
         var requestController = new RequestsController(db)
@@ -103,7 +103,7 @@ public class Phase2DocumentLifecycleTests
         Assert.IsType<OkObjectResult>(commentResult.Result);
 
         reuploadRequest = await db.Requests.SingleAsync();
-        Assert.Equal("awaiting_accountant", reuploadRequest.Status);
+        Assert.Equal("waiting_on_accountant", reuploadRequest.Status);
 
         var versionsResult = await clientReuploadController.GetVersions(document.Id, CancellationToken.None);
         var versionsOk = Assert.IsType<OkObjectResult>(versionsResult.Result);
@@ -114,7 +114,7 @@ public class Phase2DocumentLifecycleTests
 
         var finalPack = await db.MonthlyPacks.SingleAsync();
         var finalSlot = await db.DocumentSlots.SingleAsync();
-        Assert.Equal("submitted", finalPack.Status);
+        Assert.Equal("reopened", finalPack.Status);
         Assert.Equal("uploaded", finalSlot.Status);
 
         var accountantRequestController = new RequestsController(db)
@@ -171,7 +171,7 @@ public class Phase2DocumentLifecycleTests
 
         var requestReupload = await accountantController.RequestReupload(
             document.Id,
-            new RequestReuploadRequest("Please upload the full statement with all pages."),
+            new RequestReuploadRequest("Please upload the full statement with all pages.", null),
             CancellationToken.None);
         Assert.IsType<OkObjectResult>(requestReupload.Result);
 
@@ -295,24 +295,24 @@ public class Phase2DocumentLifecycleTests
     {
         private readonly Dictionary<string, byte[]> _files = [];
 
-        public async Task<StoredFileResult> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
+        public async Task<StoredFile> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
         {
             await using var stream = new MemoryStream();
             await file.CopyToAsync(stream, ct);
             var key = $"{clientId}/{Guid.NewGuid():N}-{file.FileName}";
             _files[key] = stream.ToArray();
-            return new StoredFileResult(key, file.FileName, file.ContentType, file.Length);
+            return new StoredFile(key, file.FileName, file.FileName, file.ContentType, file.Length);
         }
 
-        public Task<StoredFileReadResult?> OpenReadAsync(string storageKey, CancellationToken ct = default)
+        public Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)
         {
             if (!_files.TryGetValue(storageKey, out var bytes))
             {
-                return Task.FromResult<StoredFileReadResult?>(null);
+                return Task.FromResult<StoredFileContent?>(null);
             }
 
-            return Task.FromResult<StoredFileReadResult?>(
-                new StoredFileReadResult(new MemoryStream(bytes), Path.GetFileName(storageKey), "application/pdf"));
+            return Task.FromResult<StoredFileContent?>(
+                new StoredFileContent(new MemoryStream(bytes), "application/pdf"));
         }
     }
 }

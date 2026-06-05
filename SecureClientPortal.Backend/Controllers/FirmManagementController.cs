@@ -204,9 +204,9 @@ public class FirmManagementController : ControllerBase
 
     private static RequestTemplateDto[] DefaultRequestTemplates() =>
     [
-        new("rqt_reupload", "Re-upload Request", "reupload", "Re-upload required: {{documentName}}", "{{reason}}", "high", 2),
+        new("rqt_reupload", "Re-upload Request", "reupload_required", "Re-upload required: {{documentName}}", "{{reason}}", "high", 2),
         new("rqt_missing", "Missing Document Request", "missing_document", "Missing document: {{documentName}}", "Please upload the required document.", "medium", 3),
-        new("rqt_signature", "Signature Request", "signature", "Signature required: {{documentName}}", "Please review and sign the attached item.", "medium", 5)
+        new("rqt_signature", "Signature Request", "signature_required", "Signature required: {{documentName}}", "Please review and sign the attached item.", "medium", 5)
     ];
 
     private static ReminderRuleDto[] DefaultReminderRules() =>

@@ -147,7 +147,7 @@ public class Phase6ReportingAnalyticsTests
                 ClientId = "c_002",
                 Name = "Invoices",
                 Category = "invoices",
-                Status = "pending",
+                Status = "uploaded",
                 SizeBytes = 123,
                 UploadedByUserId = "u_client_002",
                 UploadedAtUtc = DateTime.UtcNow.AddHours(-3)
@@ -168,11 +168,11 @@ public class Phase6ReportingAnalyticsTests
             {
                 Id = "req_001",
                 ClientId = "c_001",
-                RequestType = "clarification",
+                RequestType = "clarification_needed",
                 Title = "Clarify bank statement",
                 Description = "Need explanation",
                 Priority = "high",
-                Status = "awaiting_client",
+                Status = "waiting_on_client",
                 DueDateUtc = DateTime.UtcNow.AddDays(-1),
                 RequestedByUserId = "u_acc_001"
             },

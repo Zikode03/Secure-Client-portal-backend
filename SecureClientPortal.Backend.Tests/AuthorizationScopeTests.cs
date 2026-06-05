@@ -74,7 +74,7 @@ public class AuthorizationScopeTests
             ClientId = "c_002",
             Name = "Forbidden",
             Category = "invoices",
-            Status = "pending",
+            Status = "uploaded",
             SizeBytes = 10,
             UploadedByUserId = "u_acc_001"
         });
@@ -88,7 +88,7 @@ public class AuthorizationScopeTests
 
         var forbiddenRequest = await requestsController.Create(new CreateRequestRequest(
             "c_002",
-            "clarification",
+            "clarification_needed",
             "Bad",
             "Bad",
             "medium",
@@ -175,7 +175,7 @@ public class AuthorizationScopeTests
             ControllerContext = BuildControllerContext(BuildUser("u_client_001", "client", ["c_001"]))
         };
 
-        var result = await controller.Me();
+        var result = await controller.Me(CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result);
         var json = JsonSerializer.Serialize(ok.Value);
 
@@ -368,7 +368,7 @@ public class AuthorizationScopeTests
                 ClientId = "c_001",
                 Name = "Doc 1",
                 Category = "invoices",
-                Status = "pending",
+                Status = "uploaded",
                 SizeBytes = 1,
                 UploadedByUserId = "u_client_001"
             },
@@ -378,7 +378,7 @@ public class AuthorizationScopeTests
                 ClientId = "c_002",
                 Name = "Doc 2",
                 Category = "invoices",
-                Status = "pending",
+                Status = "uploaded",
                 SizeBytes = 1,
                 UploadedByUserId = "u_client_002"
             });
@@ -430,14 +430,14 @@ public class AuthorizationScopeTests
 
     private sealed class TestFileStorage : IFileStorage
     {
-        public Task<StoredFileReadResult?> OpenReadAsync(string storageKey, CancellationToken ct = default)
+        public Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)
         {
-            return Task.FromResult<StoredFileReadResult?>(null);
+            return Task.FromResult<StoredFileContent?>(null);
         }
 
-        public Task<StoredFileResult> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
+        public Task<StoredFile> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
         {
-            return Task.FromResult(new StoredFileResult($"{clientId}/test.bin", file.FileName, "application/octet-stream", file.Length));
+            return Task.FromResult(new StoredFile($"{clientId}/test.bin", file.FileName, file.FileName, "application/octet-stream", file.Length));
         }
     }
 }

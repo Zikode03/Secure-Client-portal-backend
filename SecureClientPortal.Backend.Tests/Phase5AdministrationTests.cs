@@ -95,7 +95,7 @@ public class Phase5AdministrationTests
 
         var putRequests = await controller.PutRequestTemplates(
         [
-            new RequestTemplateDto("r1", "Clarification", "clarification", "Clarify {{item}}", "Need more detail", "medium", 2)
+            new RequestTemplateDto("r1", "Clarification", "clarification_needed", "Clarify {{item}}", "Need more detail", "medium", 2)
         ]);
         Assert.IsType<OkObjectResult>(putRequests);
 
