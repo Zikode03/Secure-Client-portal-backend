@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
 using System.Text.Json;
@@ -44,17 +45,23 @@ public class AdminController : ControllerBase
         {
             return Conflict(new { error = "A user with this email already exists." });
         }
+        var roleName = request.Role.Trim().ToLowerInvariant();
+        var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == roleName && x.IsActive);
+        if (role is null)
+        {
+            return BadRequest(new { error = "Role does not exist or is inactive." });
+        }
 
         var user = new User
         {
             Id = $"u_{Guid.NewGuid():N}",
             FullName = request.FullName.Trim(),
             Email = email,
-            Role = request.Role.Trim().ToLowerInvariant(),
+            Role = roleName,
             PasswordHash = Auth.PasswordHasher.Hash("ChangeMe123!"),
             ClientIdsJson = "[]",
             ProfileJson = string.IsNullOrWhiteSpace(request.Company) ? null : $"{{\"company\":\"{request.Company}\"}}",
-            SecurityJson = "{\"status\":\"invited\"}",
+            SecurityJson = UserSecurityProfile.SetStatus(null, "invited"),
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
@@ -76,7 +83,14 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FindAsync(id);
         if (user is null) return NotFound();
-        user.Role = request.Role.Trim().ToLowerInvariant();
+        var roleName = request.Role.Trim().ToLowerInvariant();
+        var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == roleName && x.IsActive);
+        if (role is null)
+        {
+            return BadRequest(new { error = "Role does not exist or is inactive." });
+        }
+
+        user.Role = roleName;
         user.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         await _db.WriteAuditLogAsync(
@@ -94,8 +108,22 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FindAsync(id);
         if (user is null) return NotFound();
-        user.SecurityJson = JsonSerializer.Serialize(new { status = request.Status.Trim().ToLowerInvariant() });
+        var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, normalizedStatus);
         user.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (normalizedStatus is "disabled" or "locked")
+        {
+            var activeSessions = await _db.UserSessions
+                .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
+                .ToListAsync();
+            foreach (var session in activeSessions)
+            {
+                session.RevokedAtUtc = DateTime.UtcNow;
+                session.RevokedReason = $"status_{normalizedStatus}";
+            }
+        }
+
         await _db.SaveChangesAsync();
         await _db.WriteAuditLogAsync(
             User,
@@ -103,8 +131,8 @@ public class AdminController : ControllerBase
             "user",
             user.Id,
             null,
-            JsonSerializer.Serialize(new { user.Email, status = request.Status.Trim().ToLowerInvariant() }));
-        return Ok(new { user.Id, status = request.Status });
+            JsonSerializer.Serialize(new { user.Email, status = normalizedStatus }));
+        return Ok(new { user.Id, status = normalizedStatus });
     }
 
     [HttpPost("users/{id}/disable")]
@@ -124,7 +152,7 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FindAsync(id);
         if (user is null) return NotFound();
-        user.SecurityJson = $"{{\"status\":\"reset_pending\",\"reason\":\"{request.Reason}\"}}";
+        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, "reset_pending", request.Reason);
         user.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(new { user.Id, reset = true });
@@ -141,12 +169,19 @@ public class AdminController : ControllerBase
             : request.NewPassword.Trim();
 
         user.PasswordHash = Auth.PasswordHasher.Hash(temporaryPassword);
-        user.SecurityJson = JsonSerializer.Serialize(new
-        {
-            status = "password_reset_required",
-            reason = string.IsNullOrWhiteSpace(request.Reason) ? "admin_reset" : request.Reason.Trim()
-        });
+        user.SecurityJson = UserSecurityProfile.SetStatus(
+            user.SecurityJson,
+            "password_reset_required",
+            string.IsNullOrWhiteSpace(request.Reason) ? "admin_reset" : request.Reason.Trim());
         user.UpdatedAtUtc = DateTime.UtcNow;
+        var activeSessions = await _db.UserSessions
+            .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
+            .ToListAsync();
+        foreach (var session in activeSessions)
+        {
+            session.RevokedAtUtc = DateTime.UtcNow;
+            session.RevokedReason = "password_reset";
+        }
         await _db.SaveChangesAsync();
         await _db.WriteAuditLogAsync(
             User,

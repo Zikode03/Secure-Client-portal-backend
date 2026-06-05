@@ -12,6 +12,7 @@ public static class SeedData
         var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
 
         await db.Database.MigrateAsync();
+        await UpsertDefaultRoles(db);
 
         await UpsertUser(db, new User
         {
@@ -215,6 +216,38 @@ public static class SeedData
         byId.Role = expected.Role;
         byId.ClientIdsJson = expected.ClientIdsJson;
         byId.UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    private static async Task UpsertDefaultRoles(PortalDbContext db)
+    {
+        foreach (var defaultRole in RolePermissions.DefaultRoles)
+        {
+            var existing = await db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == defaultRole.Name);
+            if (existing is null)
+            {
+                db.RoleDefinitions.Add(new RoleDefinition
+                {
+                    Name = defaultRole.Name,
+                    DisplayName = defaultRole.DisplayName,
+                    Scope = defaultRole.Scope,
+                    PermissionsJson = RolePermissions.SerializePermissions(defaultRole.Permissions),
+                    IsSystemRole = true,
+                    IsActive = true,
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow
+                });
+                continue;
+            }
+
+            existing.DisplayName = defaultRole.DisplayName;
+            existing.Scope = defaultRole.Scope;
+            existing.PermissionsJson = RolePermissions.SerializePermissions(defaultRole.Permissions);
+            existing.IsSystemRole = true;
+            existing.IsActive = true;
+            existing.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private static async Task UpsertFilingRule(PortalDbContext db, FilingRule expected)

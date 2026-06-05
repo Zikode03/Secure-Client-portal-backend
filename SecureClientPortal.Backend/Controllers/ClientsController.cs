@@ -9,6 +9,8 @@ using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Controllers;
 
+public record UpdateClientStatusRequest(string Status);
+
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Policy = "ClientOrAccountant")]
@@ -69,8 +71,12 @@ public class ClientsController : ControllerBase
             return BadRequest(new { error = "Assigned accountant is required." });
         }
 
+        var assignedAccountantRoleNames = await _db.RoleDefinitions
+            .Where(x => x.Scope == "accountant" && x.IsActive)
+            .Select(x => x.Name)
+            .ToListAsync();
         var assignedAccountantExists = await _db.Users.AnyAsync(x =>
-            x.Id == normalizedAssignedAccountantId && x.Role == "accountant");
+            x.Id == normalizedAssignedAccountantId && assignedAccountantRoleNames.Contains(x.Role));
         if (!assignedAccountantExists)
         {
             return BadRequest(new { error = "Assigned accountant user does not exist or is not an accountant." });
@@ -78,6 +84,7 @@ public class ClientsController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(request.Id)) request.Id = $"c_{Guid.NewGuid():N}";
         request.AssignedAccountantId = normalizedAssignedAccountantId;
+        request.Status = NormalizeStatus(request.Status);
         request.CreatedAtUtc = DateTime.UtcNow;
         request.UpdatedAtUtc = request.CreatedAtUtc;
 
@@ -116,7 +123,7 @@ public class ClientsController : ControllerBase
 
         existing.Name = request.Name;
         existing.EntityType = request.EntityType;
-        existing.Status = request.Status;
+        existing.Status = NormalizeStatus(request.Status);
         existing.ComplianceHealth = request.ComplianceHealth;
         existing.AssignedAccountantId = request.AssignedAccountantId;
         existing.PrimaryContact = request.PrimaryContact;
@@ -124,6 +131,36 @@ public class ClientsController : ControllerBase
         existing.UpdatedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
+    [HttpPut("{id}/status")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<ActionResult<Client>> UpdateStatus(string id, [FromBody] UpdateClientStatusRequest request)
+    {
+        var allowedClientIds = await User.GetAccessibleClientIdsAsync(_db);
+        if (!allowedClientIds.Contains(id))
+        {
+            return Forbid();
+        }
+
+        var existing = await _db.Clients.FindAsync(id);
+        if (existing is null)
+        {
+            return NotFound();
+        }
+
+        existing.Status = NormalizeStatus(request.Status);
+        existing.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        await _db.WriteAuditLogAsync(
+            User,
+            "clients.status_updated",
+            "client",
+            existing.Id,
+            existing.Id,
+            JsonSerializer.Serialize(new { existing.Status }));
+
         return Ok(existing);
     }
 
@@ -142,5 +179,19 @@ public class ClientsController : ControllerBase
         _db.Clients.Remove(existing);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private static string NormalizeStatus(string? rawStatus)
+    {
+        var normalized = string.IsNullOrWhiteSpace(rawStatus) ? "active" : rawStatus.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "active" => "active",
+            "inactive" => "inactive",
+            "pending" => "inactive",
+            "archived" => "inactive",
+            "at_risk" => "inactive",
+            _ => "active"
+        };
     }
 }

@@ -15,13 +15,13 @@ public record CreateUserRequest(
     string? Password,
     string[]? ClientIds,
     string? Company);
+public record UpdateUserActivationRequest(bool IsActive, string? Reason);
 
 [ApiController]
 [Route("api/users")]
 [Authorize(Policy = "AdminOnly")]
 public class UsersController : ControllerBase
 {
-    private static readonly HashSet<string> AllowedRoles = ["admin", "accountant", "client"];
     private readonly PortalDbContext _db;
 
     public UsersController(PortalDbContext db)
@@ -35,18 +35,25 @@ public class UsersController : ControllerBase
         var users = await _db.Users
             .OrderBy(x => x.FullName)
             .ToListAsync();
+        var roles = (await _db.RoleDefinitions.ToListAsync())
+            .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
         var payload = users.Select(user =>
         {
             var clientIds = ParseClientIds(user.ClientIdsJson);
+            roles.TryGetValue(user.Role, out var role);
             return new
             {
                 user.Id,
                 user.FullName,
                 user.Email,
                 user.Role,
+                roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role),
+                roleActive = role?.IsActive ?? true,
                 clientIds,
-                permissions = RolePermissions.ForRole(user.Role),
+                permissions = role is null
+                    ? RolePermissions.ForRole(user.Role)
+                    : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name),
                 user.ProfileJson,
                 user.SecurityJson,
                 user.CreatedAtUtc,
@@ -61,9 +68,10 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateUserRequest request)
     {
         var normalizedRole = request.Role.Trim().ToLowerInvariant();
-        if (!AllowedRoles.Contains(normalizedRole))
+        var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == normalizedRole);
+        if (role is null || !role.IsActive)
         {
-            return BadRequest(new { error = "Role must be admin, accountant, or client." });
+            return BadRequest(new { error = "Role does not exist or is inactive." });
         }
 
         var email = request.Email.Trim().ToLowerInvariant();
@@ -72,11 +80,12 @@ public class UsersController : ControllerBase
             return Conflict(new { error = "A user with this email already exists." });
         }
 
-        var clientIds = normalizedRole == "client"
+        var roleScope = RolePermissions.NormalizeScope(role.Scope);
+        var clientIds = roleScope == "client"
             ? (request.ClientIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             : [];
 
-        if (normalizedRole == "client" && clientIds.Length == 0)
+        if (roleScope == "client" && clientIds.Length == 0)
         {
             return BadRequest(new { error = "Client users must be linked to at least one client." });
         }
@@ -104,7 +113,7 @@ public class UsersController : ControllerBase
             ProfileJson = string.IsNullOrWhiteSpace(request.Company)
                 ? null
                 : JsonSerializer.Serialize(new { company = request.Company.Trim() }),
-            SecurityJson = JsonSerializer.Serialize(new { status = "invited" }),
+            SecurityJson = UserSecurityProfile.SetStatus(null, "invited"),
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
@@ -125,9 +134,57 @@ public class UsersController : ControllerBase
             user.FullName,
             user.Email,
             user.Role,
+            roleScope,
             clientIds,
-            permissions = RolePermissions.ForRole(user.Role)
+            permissions = RolePermissions.ParsePermissions(role.PermissionsJson, role.Name)
         });
+    }
+
+    [HttpPost("{id}/activate")]
+    public async Task<IActionResult> Activate(string id)
+    {
+        return await UpdateActivationAsync(id, true, null);
+    }
+
+    [HttpPost("{id}/deactivate")]
+    public async Task<IActionResult> Deactivate(string id, [FromBody] UpdateUserActivationRequest? request = null)
+    {
+        return await UpdateActivationAsync(id, false, request?.Reason);
+    }
+
+    private async Task<IActionResult> UpdateActivationAsync(string id, bool isActive, string? reason)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, isActive ? "active" : "disabled", reason);
+        user.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (!isActive)
+        {
+            var activeSessions = await _db.UserSessions
+                .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
+                .ToListAsync();
+            foreach (var session in activeSessions)
+            {
+                session.RevokedAtUtc = DateTime.UtcNow;
+                session.RevokedReason = "user_deactivated";
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        await _db.WriteAuditLogAsync(
+            User,
+            isActive ? "users.activated" : "users.deactivated",
+            "user",
+            user.Id,
+            null,
+            JsonSerializer.Serialize(new { user.Email, isActive, reason }));
+
+        return Ok(new { user.Id, isActive, securityStatus = UserSecurityProfile.GetStatus(user.SecurityJson) });
     }
 
     private static string[] ParseClientIds(string rawJson)

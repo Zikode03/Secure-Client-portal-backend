@@ -23,6 +23,8 @@ public class PortalDbContext : DbContext
     public DbSet<RequestComment> RequestComments => Set<RequestComment>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<RoleDefinition> RoleDefinitions => Set<RoleDefinition>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
     public DbSet<ComplianceItem> ComplianceItems => Set<ComplianceItem>();
     public DbSet<ComplianceReminder> ComplianceReminders => Set<ComplianceReminder>();
@@ -67,7 +69,7 @@ public class PortalDbContext : DbContext
             entity.HasIndex(x => x.Status);
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppClients_Status", "Status IN ('pending','active','at_risk','archived')");
+                table.HasCheckConstraint("CK_AppClients_Status", "Status IN ('active','inactive')");
                 table.HasCheckConstraint("CK_AppClients_ComplianceHealth", "ComplianceHealth >= 0 AND ComplianceHealth <= 100");
             });
         });
@@ -323,6 +325,37 @@ public class PortalDbContext : DbContext
             {
                 table.HasCheckConstraint("CK_AppAuditLogs_ActorRole", "ActorRole IN ('admin','accountant','client','unknown')");
             });
+        });
+
+        modelBuilder.Entity<RoleDefinition>(entity =>
+        {
+            entity.ToTable("AppRoles");
+            entity.HasKey(x => x.Name);
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.DisplayName).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Scope).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.PermissionsJson).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.HasIndex(x => x.DisplayName).IsUnique();
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_AppRoles_Scope", "Scope IN ('admin','accountant','client')");
+            });
+        });
+
+        modelBuilder.Entity<UserSession>(entity =>
+        {
+            entity.ToTable("AppUserSessions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.UserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.JwtId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.RevokedReason).HasMaxLength(200);
+            entity.Property(x => x.ClientIp).HasMaxLength(120);
+            entity.Property(x => x.UserAgent).HasMaxLength(500);
+            entity.HasIndex(x => x.JwtId).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.RevokedAtUtc, x.ExpiresAtUtc });
         });
 
         modelBuilder.Entity<ComplianceCategory>(entity =>

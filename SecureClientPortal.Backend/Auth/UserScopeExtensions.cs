@@ -7,15 +7,26 @@ namespace SecureClientPortal.Backend.Auth;
 
 public static class UserScopeExtensions
 {
+    public static bool HasPermission(this ClaimsPrincipal user, string permission)
+    {
+        return user.FindAll("permission")
+            .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static string? GetUserId(this ClaimsPrincipal user)
     {
         return user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
             ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
     }
 
-    public static bool IsAdmin(this ClaimsPrincipal user) => user.IsInRole("admin");
-    public static bool IsAccountant(this ClaimsPrincipal user) => user.IsInRole("accountant");
-    public static bool IsClient(this ClaimsPrincipal user) => user.IsInRole("client");
+    public static string? GetRoleScope(this ClaimsPrincipal user)
+    {
+        return user.FindFirst("role_scope")?.Value?.Trim().ToLowerInvariant();
+    }
+
+    public static bool IsAdmin(this ClaimsPrincipal user) => user.HasPermission("access.admin");
+    public static bool IsAccountant(this ClaimsPrincipal user) => user.HasPermission("access.accountant");
+    public static bool IsClient(this ClaimsPrincipal user) => user.HasPermission("access.client");
 
     public static async Task<HashSet<string>> GetAccessibleClientIdsAsync(this ClaimsPrincipal user, PortalDbContext db, CancellationToken ct = default)
     {

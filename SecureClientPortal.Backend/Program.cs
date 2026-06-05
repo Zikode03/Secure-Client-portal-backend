@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Storage;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -47,13 +48,59 @@ builder.Services
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var principal = context.Principal;
+                var userId = principal?.GetUserId();
+                var jwtId = principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(jwtId))
+                {
+                    context.Fail("Session is invalid.");
+                    return;
+                }
+
+                var db = context.HttpContext.RequestServices.GetRequiredService<PortalDbContext>();
+                var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, context.HttpContext.RequestAborted);
+                if (user is null)
+                {
+                    context.Fail("User does not exist.");
+                    return;
+                }
+
+                if (UserSecurityProfile.GetStatus(user.SecurityJson) is "disabled" or "locked")
+                {
+                    context.Fail("User access is disabled.");
+                    return;
+                }
+
+                var role = await db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == user.Role, context.HttpContext.RequestAborted);
+                if (role is null || !role.IsActive)
+                {
+                    context.Fail("Role is inactive.");
+                    return;
+                }
+
+                var session = await db.UserSessions.FirstOrDefaultAsync(x => x.JwtId == jwtId, context.HttpContext.RequestAborted);
+                if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= DateTime.UtcNow)
+                {
+                    context.Fail("Session has expired.");
+                }
+            }
+        };
     });
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("admin"));
-    options.AddPolicy("AccountantOnly", policy => policy.RequireRole("accountant", "admin"));
-    options.AddPolicy("ClientOrAccountant", policy => policy.RequireRole("client", "accountant", "admin"));
+    options.AddPolicy("AdminOnly", policy => policy.RequireAssertion(ctx => ctx.User.HasPermission("access.admin")));
+    options.AddPolicy("AccountantOnly", policy => policy.RequireAssertion(ctx =>
+        ctx.User.HasPermission("access.admin") || ctx.User.HasPermission("access.accountant")));
+    options.AddPolicy("ClientOrAccountant", policy => policy.RequireAssertion(ctx =>
+        ctx.User.HasPermission("access.admin") ||
+        ctx.User.HasPermission("access.accountant") ||
+        ctx.User.HasPermission("access.client")));
 });
 
 var app = builder.Build();

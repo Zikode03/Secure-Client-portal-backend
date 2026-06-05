@@ -76,7 +76,11 @@ public class AssignmentsController : ControllerBase
     [Authorize(Policy = "AdminOnly")]
     public async Task<IActionResult> Create([FromBody] CreateAssignmentRequest request)
     {
-        var accountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.AccountantUserId && x.Role == "accountant");
+        var accountantRoleNames = await _db.RoleDefinitions
+            .Where(x => x.Scope == "accountant" && x.IsActive)
+            .Select(x => x.Name)
+            .ToListAsync();
+        var accountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.AccountantUserId && accountantRoleNames.Contains(x.Role));
         if (accountant is null)
         {
             return BadRequest(new { error = "Accountant user does not exist or is not an accountant." });
@@ -183,7 +187,11 @@ public class AssignmentsController : ControllerBase
             return BadRequest(new { error = "Client does not exist." });
         }
 
-        var targetAccountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.ToAccountantUserId && x.Role == "accountant");
+        var accountantRoleNames = await _db.RoleDefinitions
+            .Where(x => x.Scope == "accountant" && x.IsActive)
+            .Select(x => x.Name)
+            .ToListAsync();
+        var targetAccountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.ToAccountantUserId && accountantRoleNames.Contains(x.Role));
         if (targetAccountant is null)
         {
             return BadRequest(new { error = "Target accountant user does not exist or is not an accountant." });
