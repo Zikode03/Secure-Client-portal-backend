@@ -1,3 +1,7 @@
 <Solution>
-  <Project Path="SecureClientPortal.Backend/SecureClientPortal.Backend.csproj" />
+  <Project Path="src/SecureClientPortal.Domain/SecureClientPortal.Domain.csproj" />
+  <Project Path="src/SecureClientPortal.Application/SecureClientPortal.Application.csproj" />
+  <Project Path="src/SecureClientPortal.Infrastructure/SecureClientPortal.Infrastructure.csproj" />
+  <Project Path="src/SecureClientPortal.Api/SecureClientPortal.Api.csproj" />
+  <Project Path="test/SecureClientPortal.Tests/SecureClientPortal.Tests.csproj" />
 </Solution>
