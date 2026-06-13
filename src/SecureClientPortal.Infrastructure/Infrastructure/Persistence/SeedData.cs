@@ -474,7 +474,9 @@ public static class SeedData
     {
         foreach (var permissionKey in permissions)
         {
-            var existing = await db.Permissions.FirstOrDefaultAsync(x => x.Key == permissionKey);
+            var existing = db.Permissions.Local.FirstOrDefault(x =>
+                string.Equals(x.Key, permissionKey, StringComparison.OrdinalIgnoreCase))
+                ?? await db.Permissions.FirstOrDefaultAsync(x => x.Key == permissionKey);
             if (existing is null)
             {
                 db.Permissions.Add(new Permission
@@ -627,3 +629,4 @@ public static class SeedData
         existing.UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
