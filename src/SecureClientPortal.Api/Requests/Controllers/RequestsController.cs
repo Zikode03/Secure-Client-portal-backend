@@ -314,7 +314,7 @@ public class RequestsController : ControllerBase
             User,
             recipientIds,
             item.ClientId,
-            "request.replied",
+            "request.comment",
             "Request replied to",
             $"New comment on request '{item.Title}'.",
             $"/requests/{item.Id}",

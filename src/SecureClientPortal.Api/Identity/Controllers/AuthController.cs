@@ -193,18 +193,24 @@ public class AuthController : ControllerBase
 
         var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == user.Role, ct);
         var accessibleClientIds = await User.GetAccessibleClientIdsAsync(_db, ct);
+        var effectivePermissions = (role is null
+                ? RolePermissions.ForRole(user.Role)
+                : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name))
+            .Where(permission => !permission.StartsWith("access.", StringComparison.OrdinalIgnoreCase))
+            .Where(permission => !string.Equals(permission, "auth.logout", StringComparison.OrdinalIgnoreCase))
+            .Where(permission => !string.Equals(permission, "auth.me", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
         return Ok(new
         {
             user = new
             {
-                user.Id,
-                user.FullName,
-                user.Email,
-                user.Role,
+                id = user.Id,
+                fullName = user.FullName,
+                email = user.Email,
+                role = user.Role,
                 roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role),
-                permissions = role is null
-                    ? RolePermissions.ForRole(user.Role)
-                    : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name),
+                permissions = effectivePermissions,
                 clientIds = accessibleClientIds.OrderBy(x => x).ToArray()
             }
         });
