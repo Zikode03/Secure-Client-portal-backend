@@ -15,7 +15,17 @@ public static class UserScopeExtensions
             return true;
         }
 
+        if (explicitPermissions.Any(x => string.Equals(x, "access.admin", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
         var effectiveRole = GetEffectiveRole(user);
+        if (string.Equals(effectiveRole, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return !string.IsNullOrWhiteSpace(effectiveRole) &&
             RolePermissions.ForRole(effectiveRole).Contains(permission, StringComparer.OrdinalIgnoreCase);
     }

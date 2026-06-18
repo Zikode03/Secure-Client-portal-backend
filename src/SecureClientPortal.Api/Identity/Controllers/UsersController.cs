@@ -23,10 +23,14 @@ public record UpdateUserActivationRequest(bool IsActive, string? Reason);
 public class UsersController : ControllerBase
 {
     private readonly PortalDbContext _db;
+    private readonly IAccessEmailSender _accessEmailSender;
+    private readonly IAccessLinkBuilder _accessLinkBuilder;
 
-    public UsersController(PortalDbContext db)
+    public UsersController(PortalDbContext db, IAccessEmailSender accessEmailSender, IAccessLinkBuilder accessLinkBuilder)
     {
         _db = db;
+        _accessEmailSender = accessEmailSender;
+        _accessLinkBuilder = accessLinkBuilder;
     }
 
     [HttpGet]
@@ -37,12 +41,12 @@ public class UsersController : ControllerBase
             .ToListAsync();
         var roles = (await _db.RoleDefinitions.ToListAsync())
             .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
-
-        var payload = users.Select(user =>
+        var payload = new List<object>(users.Count);
+        foreach (var user in users)
         {
             var clientIds = ParseClientIds(user.ClientIdsJson);
             roles.TryGetValue(user.Role, out var role);
-            return new
+            payload.Add(new
             {
                 user.Id,
                 user.FullName,
@@ -51,31 +55,29 @@ public class UsersController : ControllerBase
                 roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role),
                 roleActive = role?.IsActive ?? true,
                 clientIds,
-                permissions = role is null
-                    ? RolePermissions.ForRole(user.Role)
-                    : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name),
+                permissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, user.Role),
                 user.ProfileJson,
                 user.SecurityJson,
                 user.CreatedAtUtc,
                 user.UpdatedAtUtc
-            };
-        });
+            });
+        }
 
         return Ok(payload);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateUserRequest request)
+    public async Task<IActionResult> Create([FromBody] CreateUserRequest request, CancellationToken ct)
     {
         var normalizedRole = request.Role.Trim().ToLowerInvariant();
-        var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == normalizedRole);
+        var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == normalizedRole, ct);
         if (role is null || !role.IsActive)
         {
             return BadRequest(new { error = "Role does not exist or is inactive." });
         }
 
         var email = request.Email.Trim().ToLowerInvariant();
-        if (await _db.Users.AnyAsync(x => x.Email == email))
+        if (await _db.Users.AnyAsync(x => x.Email == email, ct))
         {
             return Conflict(new { error = "A user with this email already exists." });
         }
@@ -95,13 +97,15 @@ public class UsersController : ControllerBase
             var knownClientIds = await _db.Clients
                 .Where(x => clientIds.Contains(x.Id))
                 .Select(x => x.Id)
-                .ToListAsync();
+                .ToListAsync(ct);
             if (knownClientIds.Count != clientIds.Length)
             {
                 return BadRequest(new { error = "One or more client ids are invalid." });
             }
         }
 
+        var inviteToken = AccessTokenCodec.GenerateToken();
+        var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
         var user = new User
         {
             Id = $"u_{Guid.NewGuid():N}",
@@ -117,16 +121,30 @@ public class UsersController : ControllerBase
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
+        var invite = new UserAccessToken
+        {
+            Id = $"uat_{Guid.NewGuid():N}",
+            UserId = user.Id,
+            Purpose = "invite",
+            TokenHash = AccessTokenCodec.HashToken(inviteToken),
+            CreatedByUserId = User.GetUserId(),
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = inviteExpiresAtUtc
+        };
+        var setupUrl = _accessLinkBuilder.BuildSetupUrl(user.Email, inviteToken);
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        _db.UserAccessTokens.Add(invite);
+        await _db.SaveChangesAsync(ct);
+        var dispatch = await _accessEmailSender.SendInviteAsync(user.Email, user.FullName, setupUrl, inviteExpiresAtUtc, ct);
         await _db.WriteAuditLogAsync(
             User,
             "users.created",
             "user",
             user.Id,
             clientIds.FirstOrDefault(),
-            JsonSerializer.Serialize(new { user.Email, user.Role, clientIds }));
+            JsonSerializer.Serialize(new { user.Email, user.Role, clientIds, inviteExpiresAtUtc, dispatch.DeliveryMode }),
+            ct);
 
         return Created($"/api/users/{user.Id}", new
         {
@@ -136,7 +154,13 @@ public class UsersController : ControllerBase
             user.Role,
             roleScope,
             clientIds,
-            permissions = RolePermissions.ParsePermissions(role.PermissionsJson, role.Name)
+            permissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, user.Role, ct),
+            invite = new
+            {
+                expiresAtUtc = inviteExpiresAtUtc,
+                setupUrl
+            },
+            delivery = dispatch.DeliveryMode
         });
     }
 

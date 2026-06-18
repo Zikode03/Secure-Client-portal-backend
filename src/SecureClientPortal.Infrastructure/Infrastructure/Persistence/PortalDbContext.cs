@@ -27,6 +27,7 @@ public class PortalDbContext : DbContext
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<UserAccessToken> UserAccessTokens => Set<UserAccessToken>();
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
     public DbSet<ComplianceItem> ComplianceItems => Set<ComplianceItem>();
     public DbSet<ComplianceReminder> ComplianceReminders => Set<ComplianceReminder>();
@@ -398,6 +399,28 @@ public class PortalDbContext : DbContext
             entity.Property(x => x.UserAgent).HasMaxLength(500);
             entity.HasIndex(x => x.JwtId).IsUnique();
             entity.HasIndex(x => new { x.UserId, x.RevokedAtUtc, x.ExpiresAtUtc });
+        });
+
+        modelBuilder.Entity<UserAccessToken>(entity =>
+        {
+            entity.ToTable("AppUserAccessTokens");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.UserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Purpose).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.SessionId).HasMaxLength(100);
+            entity.Property(x => x.CreatedByUserId).HasMaxLength(100);
+            entity.Property(x => x.InvalidatedReason).HasMaxLength(200);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.Purpose, x.ExpiresAtUtc });
+            entity.HasIndex(x => new { x.SessionId, x.Purpose });
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_AppUserAccessTokens_Purpose",
+                    "Purpose IN ('invite','password_reset','refresh')");
+            });
         });
 
         modelBuilder.Entity<ComplianceCategory>(entity =>

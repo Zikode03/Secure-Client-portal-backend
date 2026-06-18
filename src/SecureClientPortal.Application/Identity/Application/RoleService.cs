@@ -34,19 +34,29 @@ public sealed class RoleService : IRoleService
                     .ToArray(),
                 ct);
 
-        return roles.Select(role => (object)new
+        var payload = new List<object>(roles.Count);
+        foreach (var role in roles)
         {
-            role.Name,
-            role.DisplayName,
-            role.Scope,
-            permissions = rolePermissionMap.TryGetValue(role.Name, out var permissions) && permissions.Count > 0
+            var configuredPermissions = rolePermissionMap.TryGetValue(role.Name, out var permissions) && permissions.Count > 0
                 ? permissions
-                : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name),
-            role.IsSystemRole,
-            role.IsActive,
-            role.CreatedAtUtc,
-            role.UpdatedAtUtc
-        }).ToArray();
+                : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name);
+            var effectivePermissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, role.Name, ct);
+
+            payload.Add(new
+            {
+                role.Name,
+                role.DisplayName,
+                role.Scope,
+                permissions = effectivePermissions,
+                configuredPermissions,
+                role.IsSystemRole,
+                role.IsActive,
+                role.CreatedAtUtc,
+                role.UpdatedAtUtc
+            });
+        }
+
+        return payload;
     }
 
     public async Task<object> CreateAsync(CreateRoleRequest request, CurrentUserContext actor, CancellationToken ct = default)
