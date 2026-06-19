@@ -4,6 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>SecureClientPortal.Api-0d729b4c-7d8a-48fc-a459-5b2ef124799a</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

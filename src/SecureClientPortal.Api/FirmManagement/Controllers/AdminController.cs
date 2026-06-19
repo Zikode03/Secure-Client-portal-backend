@@ -94,14 +94,26 @@ public class AdminController : ControllerBase
         _db.Users.Add(user);
         _db.UserAccessTokens.Add(invite);
         await _db.SaveChangesAsync(ct);
-        var dispatch = await _accessEmailSender.SendInviteAsync(user.Email, user.FullName, setupUrl, inviteExpiresAtUtc, ct);
+
+        AccessEmailDispatchResult dispatch;
+        string? deliveryError = null;
+        try
+        {
+            dispatch = await _accessEmailSender.SendInviteAsync(user.Email, user.FullName, setupUrl, inviteExpiresAtUtc, ct);
+        }
+        catch (Exception exception)
+        {
+            dispatch = new AccessEmailDispatchResult("failed", setupUrl);
+            deliveryError = exception.Message;
+        }
+
         await _db.WriteAuditLogAsync(
             User,
             "users.created",
             "user",
             user.Id,
             null,
-            JsonSerializer.Serialize(new { user.Email, user.Role, inviteExpiresAtUtc, dispatch.DeliveryMode }),
+            JsonSerializer.Serialize(new { user.Email, user.Role, inviteExpiresAtUtc, dispatch.DeliveryMode, deliveryError }),
             ct);
         return Ok(new
         {
@@ -114,7 +126,8 @@ public class AdminController : ControllerBase
                 expiresAtUtc = inviteExpiresAtUtc,
                 setupUrl
             },
-            delivery = dispatch.DeliveryMode
+            delivery = dispatch.DeliveryMode,
+            deliveryError
         });
     }
 
@@ -225,14 +238,26 @@ public class AdminController : ControllerBase
         var setupUrl = _accessLinkBuilder.BuildPasswordResetUrl(user.Email, resetToken);
         _db.UserAccessTokens.Add(resetAccessToken);
         await _db.SaveChangesAsync(ct);
-        var dispatch = await _accessEmailSender.SendPasswordResetAsync(user.Email, user.FullName, setupUrl, resetExpiresAtUtc, ct);
+
+        AccessEmailDispatchResult dispatch;
+        string? deliveryError = null;
+        try
+        {
+            dispatch = await _accessEmailSender.SendPasswordResetAsync(user.Email, user.FullName, setupUrl, resetExpiresAtUtc, ct);
+        }
+        catch (Exception exception)
+        {
+            dispatch = new AccessEmailDispatchResult("failed", setupUrl);
+            deliveryError = exception.Message;
+        }
+
         await _db.WriteAuditLogAsync(
             User,
             "users.reset_access_requested",
             "user",
             user.Id,
             null,
-            JsonSerializer.Serialize(new { user.Email, resetExpiresAtUtc, dispatch.DeliveryMode }),
+            JsonSerializer.Serialize(new { user.Email, resetExpiresAtUtc, dispatch.DeliveryMode, deliveryError }),
             ct);
         return Ok(new
         {
@@ -243,7 +268,8 @@ public class AdminController : ControllerBase
                 expiresAtUtc = resetExpiresAtUtc,
                 setupUrl
             },
-            delivery = dispatch.DeliveryMode
+            delivery = dispatch.DeliveryMode,
+            deliveryError
         });
     }
 
