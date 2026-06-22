@@ -2,16 +2,9 @@ using System.Net;
 using System.Net.Mail;
 using System.Text;
 using Microsoft.Extensions.Options;
+using SecureClientPortal.Backend.Application.Identity;
 
 namespace SecureClientPortal.Backend.Auth;
-
-public record AccessEmailDispatchResult(string DeliveryMode, string? PreviewUrl = null);
-
-public interface IAccessEmailSender
-{
-    Task<AccessEmailDispatchResult> SendInviteAsync(string recipientEmail, string recipientName, string setupUrl, DateTime expiresAtUtc, CancellationToken ct);
-    Task<AccessEmailDispatchResult> SendPasswordResetAsync(string recipientEmail, string recipientName, string setupUrl, DateTime expiresAtUtc, CancellationToken ct);
-}
 
 public class AccessEmailSender : IAccessEmailSender
 {

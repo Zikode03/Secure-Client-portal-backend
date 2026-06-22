@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
@@ -6,65 +5,68 @@ namespace SecureClientPortal.Backend.Storage;
 
 public sealed class LocalFileStorage : IFileStorage
 {
-    private readonly string _rootPath;
+    private readonly StorageOptions _options;
 
-    public LocalFileStorage(IOptions<StorageOptions> options, IWebHostEnvironment environment)
+    public LocalFileStorage(IOptions<StorageOptions> options)
     {
-        var configuredRoot = options.Value.RootPath?.Trim();
-        var relativeRoot = string.IsNullOrWhiteSpace(configuredRoot) ? "App_Data/uploads" : configuredRoot;
-        _rootPath = Path.IsPathRooted(relativeRoot)
-            ? relativeRoot
-            : Path.Combine(environment.ContentRootPath, relativeRoot);
+        _options = options.Value;
     }
 
     public async Task<StoredFile> SaveAsync(IFormFile file, string clientId, CancellationToken ct = default)
     {
-        var safeClientId = string.IsNullOrWhiteSpace(clientId) ? "unknown" : clientId.Trim();
-        var originalFileName = Path.GetFileName(file.FileName);
-        var extension = Path.GetExtension(originalFileName);
-        var storedFileName = $"{Guid.NewGuid():N}{extension}";
-        var clientFolder = Path.Combine(_rootPath, safeClientId);
+        var rootPath = ResolveRootPath();
+        var clientPath = Path.Combine(rootPath, Sanitize(clientId));
+        Directory.CreateDirectory(clientPath);
 
-        Directory.CreateDirectory(clientFolder);
-
-        var absolutePath = Path.Combine(clientFolder, storedFileName);
-        await using (var stream = File.Create(absolutePath))
+        var storedFileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
+        var fullPath = Path.Combine(clientPath, storedFileName);
+        await using (var stream = File.Create(fullPath))
         {
             await file.CopyToAsync(stream, ct);
         }
 
-        var storageKey = Path.Combine(safeClientId, storedFileName).Replace('\\', '/');
-        return new StoredFile(storageKey, originalFileName, storedFileName, file.ContentType, file.Length);
+        var storageKey = Path.GetRelativePath(rootPath, fullPath).Replace('\\', '/');
+        return new StoredFile(storageKey, file.FileName, storedFileName, file.ContentType, file.Length);
     }
 
-    public Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)
+    public async Task<StoredFileContent?> OpenReadAsync(string storageKey, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(storageKey))
+        var rootPath = ResolveRootPath();
+        var fullPath = Path.Combine(rootPath, storageKey.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(fullPath))
         {
-            return Task.FromResult<StoredFileContent?>(null);
+            return null;
         }
 
-        var normalizedKey = storageKey.Replace('/', Path.DirectorySeparatorChar);
-        var absolutePath = Path.Combine(_rootPath, normalizedKey);
-        if (!File.Exists(absolutePath))
+        var memory = new MemoryStream();
+        await using (var stream = File.OpenRead(fullPath))
         {
-            return Task.FromResult<StoredFileContent?>(null);
+            await stream.CopyToAsync(memory, ct);
         }
 
-        Stream stream = new FileStream(
-            absolutePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 81920,
-            options: FileOptions.Asynchronous);
-
-        return Task.FromResult<StoredFileContent?>(new StoredFileContent(stream, GetContentType(absolutePath)));
+        memory.Position = 0;
+        return new StoredFileContent(memory, GuessContentType(fullPath));
     }
 
-    private static string GetContentType(string path)
+    private string ResolveRootPath()
     {
-        return Path.GetExtension(path).ToLowerInvariant() switch
+        var configured = _options.RootPath;
+        return Path.GetFullPath(Path.IsPathRooted(configured) ? configured : Path.Combine(AppContext.BaseDirectory, configured));
+    }
+
+    private static string Sanitize(string value)
+    {
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(invalid, '_');
+        }
+
+        return value;
+    }
+
+    private static string GuessContentType(string fullPath)
+    {
+        return Path.GetExtension(fullPath).ToLowerInvariant() switch
         {
             ".pdf" => "application/pdf",
             ".png" => "image/png",

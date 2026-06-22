@@ -1,12 +1,7 @@
 using Microsoft.Extensions.Options;
+using SecureClientPortal.Backend.Application.Identity;
 
 namespace SecureClientPortal.Backend.Auth;
-
-public interface IAccessLinkBuilder
-{
-    string BuildSetupUrl(string email, string token);
-    string BuildPasswordResetUrl(string email, string token);
-}
 
 public class AccessLinkBuilder : IAccessLinkBuilder
 {
