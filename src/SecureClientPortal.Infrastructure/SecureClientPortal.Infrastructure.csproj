@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SecureClientPortal.Domain\SecureClientPortal.Domain.csproj" />
+    <ProjectReference Include="..\SecureClientPortal.Domain.Shared\SecureClientPortal.Domain.Shared.csproj" />
+    <ProjectReference Include="..\SecureClientPortal.Application.Contracts\SecureClientPortal.Application.Contracts.csproj" />
+    <ProjectReference Include="..\SecureClientPortal.Application\SecureClientPortal.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

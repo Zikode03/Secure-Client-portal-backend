@@ -5,6 +5,17 @@ using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Application.Assignments;
 using SecureClientPortal.Backend.Application.FirmManagement;
 using SecureClientPortal.Backend.Application.Roles;
+using SecureClientPortal.Backend.Application.Requests;
+using SecureClientPortal.Backend.Application.Documents;
+using SecureClientPortal.Backend.Application.Platform;
+using SecureClientPortal.Backend.Application.Reporting;
+using SecureClientPortal.Backend.Infrastructure.Documents;
+using SecureClientPortal.Backend.Infrastructure.FirmManagement;
+using SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
+using SecureClientPortal.Backend.Infrastructure.Identity.Application;
+using SecureClientPortal.Backend.Infrastructure.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Platform;
+using SecureClientPortal.Backend.Infrastructure.Reporting;
 using Microsoft.IdentityModel.Tokens;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
@@ -118,6 +129,15 @@ builder.Services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFact
 builder.Services.AddScoped<IRoleService, RoleService>();
 builder.Services.AddScoped<IFirmManagementService, FirmManagementService>();
 builder.Services.AddScoped<IAssignmentService, AssignmentService>();
+builder.Services.AddScoped<IClientService, ClientService>();
+builder.Services.AddScoped<IRequestService, RequestService>();
+builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IDocumentSlotService, DocumentSlotService>();
+builder.Services.AddScoped<IMonthlyPackService, MonthlyPackService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<IHealthService, HealthService>();
+builder.Services.AddScoped<IReportService, ReportService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -213,3 +233,7 @@ static string PartitionKey(HttpContext httpContext)
     var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     return $"{path}:{remoteIp}";
 }
+
+
+
+

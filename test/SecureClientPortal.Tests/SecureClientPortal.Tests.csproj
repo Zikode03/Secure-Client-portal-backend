@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -24,6 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\SecureClientPortal.Domain.Shared\SecureClientPortal.Domain.Shared.csproj" />
+    <ProjectReference Include="..\..\src\SecureClientPortal.Application.Contracts\SecureClientPortal.Application.Contracts.csproj" />
     <ProjectReference Include="..\..\src\SecureClientPortal.Api\SecureClientPortal.Api.csproj" />
     <ProjectReference Include="..\..\src\SecureClientPortal.Infrastructure\SecureClientPortal.Infrastructure.csproj" />
   </ItemGroup>
