@@ -68,10 +68,9 @@ public sealed class MonthlyPackService : IMonthlyPackService
             ClientId = request.ClientId,
             Year = request.Year,
             Month = request.Month,
-            Status = NormalizeStatus(request.Status),
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
+            CreatedAtUtc = DateTime.UtcNow
         };
+        ApplyStatus(pack, NormalizeStatus(request.Status));
 
         _db.MonthlyPacks.Add(pack);
         await _db.SaveChangesAsync(ct);
@@ -101,14 +100,12 @@ public sealed class MonthlyPackService : IMonthlyPackService
         }
 
         var requiredSlots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id && x.IsRequired).ToListAsync(ct);
-        if (requiredSlots.Any(x => x.Status == "missing"))
+        if (requiredSlots.Any(x => x.Status == DocumentSlotStatus.Missing.ToStorageValue()))
         {
             return (false, true, "All required document slots must be uploaded before submission.", null);
         }
 
-        pack.Status = "submitted";
-        pack.SubmittedAtUtc = DateTime.UtcNow;
-        pack.UpdatedAtUtc = pack.SubmittedAtUtc.Value;
+        pack.MarkSubmitted();
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             user,
@@ -132,6 +129,31 @@ public sealed class MonthlyPackService : IMonthlyPackService
             ct);
 
         return (false, false, null, pack);
+    }
+
+    private static void ApplyStatus(MonthlyPack pack, string status)
+    {
+        switch (status)
+        {
+            case "in_progress":
+                pack.MarkInProgress();
+                break;
+            case "submitted":
+                pack.MarkSubmitted();
+                break;
+            case "under_review":
+                pack.MarkUnderReview();
+                break;
+            case "completed":
+                pack.Complete();
+                break;
+            case "reopened":
+                pack.Reopen();
+                break;
+            default:
+                pack.MarkDraft();
+                break;
+        }
     }
 
     private static string NormalizeStatus(string? value)

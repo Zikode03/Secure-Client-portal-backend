@@ -54,14 +54,12 @@ public sealed class DocumentSlotService : IDocumentSlotService
             return (true, null!);
         }
 
-        var normalizedCategory = NormalizeCategory(request.Category);
+        var normalizedCategory = DocumentDomainValues.NormalizeCategory(request.Category);
         var existing = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.MonthlyPackId == request.MonthlyPackId && x.Category == normalizedCategory, ct);
         if (existing is not null)
         {
-            existing.Label = request.Label.Trim();
-            existing.IsRequired = request.IsRequired;
+            existing.UpdateDefinition(normalizedCategory, request.Label, request.IsRequired);
             existing.DueDateUtc = request.DueDateUtc;
-            existing.UpdatedAtUtc = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
             return (false, existing);
         }
@@ -71,22 +69,14 @@ public sealed class DocumentSlotService : IDocumentSlotService
             Id = $"slot_{Guid.NewGuid():N}",
             MonthlyPackId = request.MonthlyPackId,
             ClientId = pack.ClientId,
-            Category = normalizedCategory,
-            Label = request.Label.Trim(),
-            IsRequired = request.IsRequired,
-            Status = "missing",
             DueDateUtc = request.DueDateUtc,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
+            CreatedAtUtc = DateTime.UtcNow
         };
+        slot.UpdateDefinition(normalizedCategory, request.Label, request.IsRequired);
+        slot.MarkMissing();
 
         _db.DocumentSlots.Add(slot);
         await _db.SaveChangesAsync(ct);
         return (false, slot);
-    }
-
-    private static string NormalizeCategory(string value)
-    {
-        return value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
     }
 }

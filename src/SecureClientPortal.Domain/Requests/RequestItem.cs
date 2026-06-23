@@ -4,16 +4,70 @@ public class RequestItem
 {
     public string Id { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
-    public string RequestType { get; set; } = "clarification_needed";
-    public string? RelatedDocumentId { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string Priority { get; set; } = "medium";
-    public string Status { get; set; } = "open";
-    public DateTime? DueDateUtc { get; set; }
-    public string RequestedByUserId { get; set; } = string.Empty;
-    public string? ResolvedByUserId { get; set; }
-    public DateTime RequestedAtUtc { get; set; } = DateTime.UtcNow;
-    public DateTime? ResolvedAtUtc { get; set; }
-    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public string RequestType { get; private set; } = "clarification_needed";
+    public string? RelatedDocumentId { get; private set; }
+    public string Title { get; private set; } = string.Empty;
+    public string Description { get; private set; } = string.Empty;
+    public string Priority { get; private set; } = RequestPriority.Medium.ToStorageValue();
+    public string Status { get; private set; } = RequestStatus.Open.ToStorageValue();
+    public DateTime? DueDateUtc { get; private set; }
+    public string RequestedByUserId { get; private set; } = string.Empty;
+    public string? ResolvedByUserId { get; private set; }
+    public DateTime RequestedAtUtc { get; private set; } = DateTime.UtcNow;
+    public DateTime? ResolvedAtUtc { get; private set; }
+    public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
+
+    public static RequestItem Create(string id, string clientId, string requestType, string? relatedDocumentId, string title, string description, RequestPriority priority, string requestedByUserId, RequestStatus initialStatus, DateTime? dueDateUtc)
+    {
+        var item = new RequestItem
+        {
+            Id = id,
+            ClientId = clientId,
+            RequestedByUserId = requestedByUserId,
+            RequestedAtUtc = DateTime.UtcNow
+        };
+        item.UpdateDetails(requestType, relatedDocumentId, title, description, priority, dueDateUtc);
+        item.SetStatus(initialStatus);
+        item.UpdatedAtUtc = item.RequestedAtUtc;
+        return item;
+    }
+
+    public void UpdateDetails(string requestType, string? relatedDocumentId, string title, string description, RequestPriority priority, DateTime? dueDateUtc)
+    {
+        RequestType = RequestDomainValues.NormalizeRequestType(requestType);
+        RelatedDocumentId = string.IsNullOrWhiteSpace(relatedDocumentId) ? null : relatedDocumentId.Trim();
+        Title = title.Trim();
+        Description = description.Trim();
+        Priority = priority.ToStorageValue();
+        DueDateUtc = dueDateUtc;
+        Touch();
+    }
+
+    public void SetStatus(RequestStatus status)
+    {
+        Status = status.ToStorageValue();
+        if (status != RequestStatus.Resolved)
+        {
+            ResolvedByUserId = null;
+            ResolvedAtUtc = null;
+        }
+        Touch();
+    }
+
+    public void MarkWaitingOnClient() => SetStatus(RequestStatus.WaitingOnClient);
+    public void MarkWaitingOnAccountant() => SetStatus(RequestStatus.WaitingOnAccountant);
+    public void MarkOverdue() => SetStatus(RequestStatus.Overdue);
+
+    public void Resolve(string resolvedByUserId)
+    {
+        Status = RequestStatus.Resolved.ToStorageValue();
+        ResolvedByUserId = resolvedByUserId;
+        ResolvedAtUtc = DateTime.UtcNow;
+        UpdatedAtUtc = ResolvedAtUtc.Value;
+    }
+
+    private void Touch()
+    {
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
 }

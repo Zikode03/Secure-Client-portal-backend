@@ -84,18 +84,14 @@ public static class NotificationWorkflowExtensions
 
         foreach (var recipientUserId in recipients)
         {
-            db.Notifications.Add(new Notification
-            {
-                Id = $"ntf_{Guid.NewGuid():N}",
-                UserId = recipientUserId,
-                ClientId = clientId,
-                Type = type,
-                Title = title,
-                Message = message,
-                LinkUrl = linkUrl,
-                IsRead = false,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+            db.Notifications.Add(Notification.Create(
+                $"ntf_{Guid.NewGuid():N}",
+                recipientUserId,
+                clientId,
+                type,
+                title,
+                message,
+                linkUrl));
         }
 
         if (recipients.Count > 0)
@@ -149,18 +145,15 @@ public static class NotificationWorkflowExtensions
                 continue;
             }
 
-            db.Notifications.Add(new Notification
-            {
-                Id = $"ntf_{Guid.NewGuid():N}",
-                UserId = userId,
-                ClientId = request.ClientId,
-                Type = "deadline.approaching",
-                Title = "Deadline approaching",
-                Message = $"Request '{request.Title}' is due on {request.DueDateUtc:yyyy-MM-dd HH:mm} UTC.",
-                LinkUrl = linkUrl,
-                IsRead = false,
-                CreatedAtUtc = now
-            });
+            db.Notifications.Add(Notification.Create(
+                $"ntf_{Guid.NewGuid():N}",
+                userId,
+                request.ClientId,
+                "deadline.approaching",
+                "Deadline approaching",
+                $"Request '{request.Title}' is due on {request.DueDateUtc:yyyy-MM-dd HH:mm} UTC.",
+                linkUrl,
+                now));
 
             createdCount++;
         }

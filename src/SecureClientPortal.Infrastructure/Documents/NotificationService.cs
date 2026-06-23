@@ -60,8 +60,7 @@ public sealed class NotificationService : INotificationService
             return (false, true, null);
         }
 
-        item.IsRead = true;
-        item.ReadAtUtc = DateTime.UtcNow;
+        item.MarkRead();
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(user, "notification.read", "notification", item.Id, item.ClientId, JsonSerializer.Serialize(new { item.Type }), ct);
         return (false, false, item);
@@ -82,8 +81,7 @@ public sealed class NotificationService : INotificationService
 
         foreach (var item in items)
         {
-            item.IsRead = true;
-            item.ReadAtUtc = DateTime.UtcNow;
+            item.MarkRead();
         }
 
         await _db.SaveChangesAsync(ct);

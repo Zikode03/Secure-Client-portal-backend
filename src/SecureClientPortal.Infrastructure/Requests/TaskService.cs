@@ -52,20 +52,21 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("Client does not exist.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Id))
-        {
-            request.Id = $"task_{Guid.NewGuid():N}";
-        }
-
-        request.CreatedByUserId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+        var createdByUserId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
             ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? request.CreatedByUserId;
-        request.CreatedAtUtc = DateTime.UtcNow;
-        request.UpdatedAtUtc = request.CreatedAtUtc;
+        var created = TaskItem.Create(
+            string.IsNullOrWhiteSpace(request.Id) ? $"task_{Guid.NewGuid():N}" : request.Id,
+            request.ClientId,
+            request.Title,
+            request.Status,
+            request.Priority,
+            request.DueDateUtc,
+            createdByUserId);
 
-        _db.Tasks.Add(request);
+        _db.Tasks.Add(created);
         await _db.SaveChangesAsync(ct);
-        return (false, request);
+        return (false, created);
     }
 
     public async Task<(bool forbidden, TaskItem? updated)> UpdateAsync(string id, TaskItem request, ClaimsPrincipal user, CancellationToken ct = default)
@@ -82,11 +83,7 @@ public sealed class TaskService : ITaskService
             return (true, null);
         }
 
-        item.Title = request.Title;
-        item.Status = request.Status;
-        item.Priority = request.Priority;
-        item.DueDateUtc = request.DueDateUtc;
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        item.Update(request.Title, request.Status, request.Priority, request.DueDateUtc);
 
         await _db.SaveChangesAsync(ct);
         return (false, item);
@@ -111,3 +108,4 @@ public sealed class TaskService : ITaskService
         return (false, true);
     }
 }
+

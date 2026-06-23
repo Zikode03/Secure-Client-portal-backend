@@ -15,321 +15,245 @@ public static class SeedData
         await db.Database.MigrateAsync();
         await UpsertDefaultRoles(db);
 
-        await UpsertUser(db, new User
-        {
-            Id = "u_admin_001",
-            FullName = "System Admin",
-            Email = "admin@secureportal.local",
-            PasswordHash = PasswordHasher.Hash("Password123!"),
-            Role = "admin",
-            ClientIdsJson = "[]"
-        });
-
-        await UpsertUser(db, new User
-        {
-            Id = "u_acc_001",
-            FullName = "Default Accountant",
-            Email = "accountant@secureportal.local",
-            PasswordHash = PasswordHasher.Hash("Password123!"),
-            Role = "accountant",
-            ClientIdsJson = "[]"
-        });
-
-        await UpsertUser(db, new User
-        {
-            Id = "u_client_001",
-            FullName = "Default Client",
-            Email = "client@secureportal.local",
-            PasswordHash = PasswordHasher.Hash("Password123!"),
-            Role = "client",
-            ClientIdsJson = "[\"c_001\"]"
-        });
+        await UpsertUser(db, CreateSeedUser("u_admin_001", "System Admin", "admin@secureportal.local", UserRole.Admin, "[]"));
+        await UpsertUser(db, CreateSeedUser("u_acc_001", "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, "[]"));
+        await UpsertUser(db, CreateSeedUser("u_client_001", "Default Client", "client@secureportal.local", UserRole.Client, "[\"c_001\"]"));
 
         var client = await db.Clients.FirstOrDefaultAsync(x => x.Id == "c_001");
         if (client is null)
         {
-            db.Clients.Add(new Client
-            {
-                Id = "c_001",
-                Name = "Acme Holdings",
-                EntityType = "Pty Ltd",
-                Status = "active",
-                ComplianceHealth = 92,
-                AssignedAccountantId = "u_acc_001",
-                PrimaryContact = "Jane Doe",
-                Email = "jane.doe@acme.test"
-            });
+            db.Clients.Add(CreateSeedClient());
         }
 
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_bank_statement",
-            Category = "bank_statement",
-            Description = "Business account bank statements eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_invoices",
-            Category = "invoices",
-            Description = "Sales and supplier invoice evidence eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_signed_documents",
-            Category = "signed_documents",
-            Description = "Signed approvals and authorisations eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_compliance_record",
-            Category = "compliance_record",
-            Description = "Compliance support records eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_payroll_summary",
-            Category = "payroll_summary",
-            Description = "Payroll summaries and payroll support eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_tax_working_papers",
-            Category = "tax_working_papers",
-            Description = "Tax working papers and VAT support eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_proof_of_payment",
-            Category = "proof_of_payment",
-            Description = "Payment confirmations and remittance evidence eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_credit_notes",
-            Category = "credit_notes",
-            Description = "Credit note support eligible for auto-filing.",
-            IsEnabled = true,
-        });
-        await UpsertFilingRule(db, new FilingRule
-        {
-            Id = "filing_debit_notes",
-            Category = "debit_notes",
-            Description = "Debit note support eligible for auto-filing.",
-            IsEnabled = true,
-        });
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_bank_statement",
+            "bank_statement",
+            "Business account bank statements eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_invoices",
+            "invoices",
+            "Sales and supplier invoice evidence eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_signed_documents",
+            "signed_documents",
+            "Signed approvals and authorisations eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_compliance_record",
+            "compliance_record",
+            "Compliance support records eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_payroll_summary",
+            "payroll_summary",
+            "Payroll summaries and payroll support eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_tax_working_papers",
+            "tax_working_papers",
+            "Tax working papers and VAT support eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_proof_of_payment",
+            "proof_of_payment",
+            "Payment confirmations and remittance evidence eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_credit_notes",
+            "credit_notes",
+            "Credit note support eligible for auto-filing.",
+            true));
+        await UpsertFilingRule(db, FilingRule.Create(
+            "filing_debit_notes",
+            "debit_notes",
+            "Debit note support eligible for auto-filing.",
+            true));
 
-        await UpsertClientAssignment(db, new ClientAssignment
-        {
-            Id = "ca_u_acc_001_c_001",
-            AccountantUserId = "u_acc_001",
-            ClientId = "c_001"
-        });
+        await UpsertClientAssignment(db, ClientAssignment.Create(
+            "ca_u_acc_001_c_001",
+            "u_acc_001",
+            "c_001"));
 
-        await UpsertMonthlyPack(db, new MonthlyPack
+        await UpsertMonthlyPack(db, CreateSeedMonthlyPack());
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot("slot_mp_c001_2026_06_bank_statement", "bank_statement", "Bank Statement"));
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot("slot_mp_c001_2026_06_invoices", "invoices", "Invoices"));
+
+        await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
+            "rdt_bank_statement",
+            "Bank Statement",
+            "Default monthly bank statement requirement.",
+            "bank_statement",
+            true,
+            5,
+            true));
+        await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
+            "rdt_invoices",
+            "Invoices",
+            "Default monthly invoice support requirement.",
+            "invoices",
+            true,
+            5,
+            true));
+        await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
+            "rdt_signed_docs",
+            "Signed Documents",
+            "Approvals and signatures where needed.",
+            "signed_documents",
+            false,
+            null,
+            true));
+
+        await UpsertMonthlyPackTemplate(db, MonthlyPackTemplate.Create(
+            "mpt_default",
+            "Default Monthly Pack",
+            "Standard monthly client collection pack.",
+            1,
+            true));
+        await UpsertMonthlyPackTemplateItem(db, MonthlyPackTemplateItem.Create(
+            "mpti_default_bank_statement",
+            "mpt_default",
+            "rdt_bank_statement",
+            1));
+        await UpsertMonthlyPackTemplateItem(db, MonthlyPackTemplateItem.Create(
+            "mpti_default_invoices",
+            "mpt_default",
+            "rdt_invoices",
+            2));
+
+        await UpsertRequestTemplate(db, RequestTemplate.Create(
+            "rqt_reupload",
+            "Re-upload Request",
+            "reupload_required",
+            "Re-upload required: {{documentName}}",
+            "{{reason}}",
+            "high",
+            2,
+            true));
+        await UpsertRequestTemplate(db, RequestTemplate.Create(
+            "rqt_missing",
+            "Missing Document Request",
+            "missing_document",
+            "Missing document: {{documentName}}",
+            "Please upload the required document.",
+            "medium",
+            3,
+            true));
+        await UpsertRequestTemplate(db, RequestTemplate.Create(
+            "rqt_signature",
+            "Signature Request",
+            "signature_required",
+            "Signature required: {{documentName}}",
+            "Please review and sign the attached item.",
+            "medium",
+            5,
+            true));
+
+        await UpsertReminderRule(db, ReminderRule.Create(
+            "rr_deadline_7",
+            "7-day reminder",
+            "deadline_approaching",
+            7,
+            "client",
+            "A compliance deadline is due in 7 days.",
+            true));
+        await UpsertReminderRule(db, ReminderRule.Create(
+            "rr_deadline_1",
+            "1-day reminder",
+            "deadline_approaching",
+            1,
+            "client",
+            "A compliance deadline is due tomorrow.",
+            true));
+
+        await UpsertDeadlineRule(db, DeadlineRule.Create(
+            "dr_monthly_pack",
+            "Monthly pack due date",
+            "monthly_pack",
+            5,
+            2,
+            "high",
+            true));
+        await UpsertDeadlineRule(db, DeadlineRule.Create(
+            "dr_compliance_item",
+            "Compliance item due date",
+            "compliance_item",
+            25,
+            0,
+            "critical",
+            true));
+
+        await db.SaveChangesAsync();
+
+        await UpsertComplianceCategory(db, ComplianceCategory.Create(
+            "cc_tax_compliance",
+            "Tax Compliance",
+            "Income tax, VAT, and tax authority filing obligations.",
+            "TAX",
+            true));
+
+        await UpsertComplianceCategory(db, ComplianceCategory.Create(
+            "cc_cipc_compliance",
+            "CIPC Compliance",
+            "Company registration, annual returns, and beneficial ownership obligations.",
+            "CIPC",
+            true));
+
+        await UpsertComplianceCategory(db, ComplianceCategory.Create(
+            "cc_payroll_compliance",
+            "Payroll Compliance",
+            "Payroll submissions, UIF, PAYE, and employee record obligations.",
+            "PAYROLL",
+            true));
+
+        await UpsertComplianceCategory(db, ComplianceCategory.Create(
+            "cc_popia_compliance",
+            "POPIA Compliance",
+            "Privacy controls, processing evidence, and consent obligations.",
+            "POPIA",
+            true));
+    }
+
+    private static User CreateSeedUser(string id, string fullName, string email, UserRole role, string clientIdsJson)
+    {
+        var user = User.CreateInvited(id, fullName, email, role, PasswordHasher.Hash("Password123!"), clientIdsJson, null);
+        user.SetSecurityStatus(SecurityStatus.Active);
+        return user;
+    }
+
+    private static Client CreateSeedClient()
+    {
+        var client = Client.Create("c_001", "Acme Holdings", "Pty Ltd", "Jane Doe", "jane.doe@acme.test", ClientStatus.Active);
+        client.AssignAccountant("u_acc_001");
+        client.UpdateComplianceHealth(92);
+        return client;
+    }
+
+    private static MonthlyPack CreateSeedMonthlyPack()
+    {
+        var pack = new MonthlyPack
         {
             Id = "mp_c001_2026_06",
             ClientId = "c_001",
             Year = 2026,
-            Month = 6,
-            Status = "draft"
-        });
+            Month = 6
+        };
+        pack.MarkDraft();
+        return pack;
+    }
 
-        await UpsertDocumentSlot(db, new DocumentSlot
+    private static DocumentSlot CreateSeedDocumentSlot(string id, string category, string label)
+    {
+        var slot = new DocumentSlot
         {
-            Id = "slot_mp_c001_2026_06_bank_statement",
+            Id = id,
             MonthlyPackId = "mp_c001_2026_06",
-            ClientId = "c_001",
-            Category = "bank_statement",
-            Label = "Bank Statement",
-            IsRequired = true,
-            Status = "missing"
-        });
-
-        await UpsertDocumentSlot(db, new DocumentSlot
-        {
-            Id = "slot_mp_c001_2026_06_invoices",
-            MonthlyPackId = "mp_c001_2026_06",
-            ClientId = "c_001",
-            Category = "invoices",
-            Label = "Invoices",
-            IsRequired = true,
-            Status = "missing"
-        });
-
-        await UpsertRequiredDocumentTemplate(db, new RequiredDocumentTemplate
-        {
-            Id = "rdt_bank_statement",
-            Name = "Bank Statement",
-            Description = "Default monthly bank statement requirement.",
-            DocumentCategory = "bank_statement",
-            IsRequired = true,
-            DefaultDueDayOfMonth = 5,
-            IsActive = true
-        });
-        await UpsertRequiredDocumentTemplate(db, new RequiredDocumentTemplate
-        {
-            Id = "rdt_invoices",
-            Name = "Invoices",
-            Description = "Default monthly invoice support requirement.",
-            DocumentCategory = "invoices",
-            IsRequired = true,
-            DefaultDueDayOfMonth = 5,
-            IsActive = true
-        });
-        await UpsertRequiredDocumentTemplate(db, new RequiredDocumentTemplate
-        {
-            Id = "rdt_signed_docs",
-            Name = "Signed Documents",
-            Description = "Approvals and signatures where needed.",
-            DocumentCategory = "signed_documents",
-            IsRequired = false,
-            DefaultDueDayOfMonth = null,
-            IsActive = true
-        });
-
-        await UpsertMonthlyPackTemplate(db, new MonthlyPackTemplate
-        {
-            Id = "mpt_default",
-            Name = "Default Monthly Pack",
-            Description = "Standard monthly client collection pack.",
-            AutoCreateDayOfMonth = 1,
-            IsActive = true
-        });
-        await UpsertMonthlyPackTemplateItem(db, new MonthlyPackTemplateItem
-        {
-            Id = "mpti_default_bank_statement",
-            MonthlyPackTemplateId = "mpt_default",
-            RequiredDocumentTemplateId = "rdt_bank_statement",
-            SortOrder = 1
-        });
-        await UpsertMonthlyPackTemplateItem(db, new MonthlyPackTemplateItem
-        {
-            Id = "mpti_default_invoices",
-            MonthlyPackTemplateId = "mpt_default",
-            RequiredDocumentTemplateId = "rdt_invoices",
-            SortOrder = 2
-        });
-
-        await UpsertRequestTemplate(db, new RequestTemplate
-        {
-            Id = "rqt_reupload",
-            Name = "Re-upload Request",
-            RequestType = "reupload_required",
-            TitleTemplate = "Re-upload required: {{documentName}}",
-            DescriptionTemplate = "{{reason}}",
-            Priority = "high",
-            DefaultDueInDays = 2,
-            IsActive = true
-        });
-        await UpsertRequestTemplate(db, new RequestTemplate
-        {
-            Id = "rqt_missing",
-            Name = "Missing Document Request",
-            RequestType = "missing_document",
-            TitleTemplate = "Missing document: {{documentName}}",
-            DescriptionTemplate = "Please upload the required document.",
-            Priority = "medium",
-            DefaultDueInDays = 3,
-            IsActive = true
-        });
-        await UpsertRequestTemplate(db, new RequestTemplate
-        {
-            Id = "rqt_signature",
-            Name = "Signature Request",
-            RequestType = "signature_required",
-            TitleTemplate = "Signature required: {{documentName}}",
-            DescriptionTemplate = "Please review and sign the attached item.",
-            Priority = "medium",
-            DefaultDueInDays = 5,
-            IsActive = true
-        });
-
-        await UpsertReminderRule(db, new ReminderRule
-        {
-            Id = "rr_deadline_7",
-            Name = "7-day reminder",
-            TriggerType = "deadline_approaching",
-            DaysBeforeDue = 7,
-            AudienceRole = "client",
-            MessageTemplate = "A compliance deadline is due in 7 days.",
-            IsEnabled = true
-        });
-        await UpsertReminderRule(db, new ReminderRule
-        {
-            Id = "rr_deadline_1",
-            Name = "1-day reminder",
-            TriggerType = "deadline_approaching",
-            DaysBeforeDue = 1,
-            AudienceRole = "client",
-            MessageTemplate = "A compliance deadline is due tomorrow.",
-            IsEnabled = true
-        });
-
-        await UpsertDeadlineRule(db, new DeadlineRule
-        {
-            Id = "dr_monthly_pack",
-            Name = "Monthly pack due date",
-            Scope = "monthly_pack",
-            DueDayOfMonth = 5,
-            GraceDays = 2,
-            Priority = "high",
-            IsEnabled = true
-        });
-        await UpsertDeadlineRule(db, new DeadlineRule
-        {
-            Id = "dr_compliance_item",
-            Name = "Compliance item due date",
-            Scope = "compliance_item",
-            DueDayOfMonth = 25,
-            GraceDays = 0,
-            Priority = "critical",
-            IsEnabled = true
-        });
-
-        await db.SaveChangesAsync();
-
-        await UpsertComplianceCategory(db, new ComplianceCategory
-        {
-            Id = "cc_tax_compliance",
-            Name = "Tax Compliance",
-            Code = "TAX",
-            Description = "Income tax, VAT, and tax authority filing obligations.",
-            IsActive = true
-        });
-
-        await UpsertComplianceCategory(db, new ComplianceCategory
-        {
-            Id = "cc_cipc_compliance",
-            Name = "CIPC Compliance",
-            Code = "CIPC",
-            Description = "Company registration, annual returns, and beneficial ownership obligations.",
-            IsActive = true
-        });
-
-        await UpsertComplianceCategory(db, new ComplianceCategory
-        {
-            Id = "cc_payroll_compliance",
-            Name = "Payroll Compliance",
-            Code = "PAYROLL",
-            Description = "Payroll submissions, UIF, PAYE, and employee record obligations.",
-            IsActive = true
-        });
-
-        await UpsertComplianceCategory(db, new ComplianceCategory
-        {
-            Id = "cc_popia_compliance",
-            Name = "POPIA Compliance",
-            Code = "POPIA",
-            Description = "Privacy controls, processing evidence, and consent obligations.",
-            IsActive = true
-        });
+            ClientId = "c_001"
+        };
+        slot.UpdateDefinition(category, label, true);
+        slot.MarkMissing();
+        return slot;
     }
 
     private static async Task UpsertUser(PortalDbContext db, User expected)
@@ -341,12 +265,13 @@ public static class SeedData
             return;
         }
 
-        byId.FullName = expected.FullName;
-        byId.Email = expected.Email;
-        byId.PasswordHash = expected.PasswordHash;
-        byId.Role = expected.Role;
-        byId.ClientIdsJson = expected.ClientIdsJson;
-        byId.UpdatedAtUtc = DateTime.UtcNow;
+        byId.SetFullName(expected.FullName);
+        byId.SetEmail(expected.Email);
+        byId.SetPasswordHash(expected.PasswordHash);
+        byId.AssignRole(IdentityDomainValues.ToUserRole(expected.Role));
+        byId.SetClientIdsJson(expected.ClientIdsJson);
+        byId.SetProfileJson(expected.ProfileJson);
+        byId.SetSecurityStatus(SecurityStatus.Active);
     }
 
     private static async Task UpsertDefaultRoles(PortalDbContext db)
@@ -359,26 +284,22 @@ public static class SeedData
             var existing = await db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == defaultRole.Name);
             if (existing is null)
             {
-                db.RoleDefinitions.Add(new RoleDefinition
-                {
-                    Name = defaultRole.Name,
-                    DisplayName = defaultRole.DisplayName,
-                    Scope = defaultRole.Scope,
-                    PermissionsJson = RolePermissions.SerializePermissions(normalizedPermissions),
-                    IsSystemRole = true,
-                    IsActive = true,
-                    CreatedAtUtc = DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.UtcNow
-                });
+                db.RoleDefinitions.Add(RoleDefinition.Create(
+                    defaultRole.Name,
+                    defaultRole.DisplayName,
+                    defaultRole.Scope,
+                    RolePermissions.SerializePermissions(normalizedPermissions),
+                    true,
+                    true));
             }
             else
             {
-                existing.DisplayName = defaultRole.DisplayName;
-                existing.Scope = defaultRole.Scope;
-                existing.PermissionsJson = RolePermissions.SerializePermissions(normalizedPermissions);
-                existing.IsSystemRole = true;
-                existing.IsActive = true;
-                existing.UpdatedAtUtc = DateTime.UtcNow;
+                existing.UpdateDefinition(
+                    defaultRole.DisplayName,
+                    defaultRole.Scope,
+                    RolePermissions.SerializePermissions(normalizedPermissions),
+                    true);
+                existing.SetActivation(true);
             }
 
             await UpsertPermissionsAsync(db, normalizedPermissions, true);
@@ -392,8 +313,11 @@ public static class SeedData
         var systemPermissions = await db.Permissions.Where(x => x.IsSystemPermission).ToListAsync();
         foreach (var permission in systemPermissions)
         {
-            permission.IsActive = activeSystemPermissions.Contains(permission.Key);
-            permission.UpdatedAtUtc = DateTime.UtcNow;
+            permission.UpdateDetails(
+                permission.Name,
+                permission.Description,
+                permission.IsSystemPermission,
+                activeSystemPermissions.Contains(permission.Key));
         }
 
         await db.SaveChangesAsync();
@@ -408,10 +332,7 @@ public static class SeedData
             return;
         }
 
-        byId.Category = expected.Category;
-        byId.Description = expected.Description;
-        byId.IsEnabled = expected.IsEnabled;
-        byId.UpdatedAtUtc = DateTime.UtcNow;
+        byId.Update(expected.Category, expected.Description, expected.IsEnabled);
     }
 
     private static async Task UpsertClientAssignment(PortalDbContext db, ClientAssignment expected)
@@ -434,8 +355,32 @@ public static class SeedData
             return;
         }
 
-        existing.Status = expected.Status;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        ApplyMonthlyPackStatus(existing, expected.Status);
+    }
+
+    private static void ApplyMonthlyPackStatus(MonthlyPack pack, string status)
+    {
+        switch (status)
+        {
+            case "in_progress":
+                pack.MarkInProgress();
+                break;
+            case "submitted":
+                pack.MarkSubmitted();
+                break;
+            case "under_review":
+                pack.MarkUnderReview();
+                break;
+            case "reopened":
+                pack.Reopen();
+                break;
+            case "completed":
+                pack.Complete();
+                break;
+            default:
+                pack.MarkDraft();
+                break;
+        }
     }
 
     private static async Task UpsertDocumentSlot(PortalDbContext db, DocumentSlot expected)
@@ -448,10 +393,31 @@ public static class SeedData
             return;
         }
 
-        existing.Label = expected.Label;
-        existing.IsRequired = expected.IsRequired;
-        existing.Status = expected.Status;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.UpdateDefinition(expected.Category, expected.Label, expected.IsRequired);
+        existing.DueDateUtc = expected.DueDateUtc;
+        ApplySlotStatus(existing, expected.Status);
+    }
+
+    private static void ApplySlotStatus(DocumentSlot slot, string status)
+    {
+        switch (status)
+        {
+            case "uploaded":
+                slot.MarkUploaded(slot.CurrentDocumentId ?? string.Empty);
+                break;
+            case "under_review":
+                slot.MarkUnderReview();
+                break;
+            case "accepted":
+                slot.Accept(slot.CurrentDocumentId ?? string.Empty);
+                break;
+            case "rejected":
+                slot.Reject(slot.CurrentDocumentId ?? string.Empty);
+                break;
+            default:
+                slot.MarkMissing();
+                break;
+        }
     }
 
     private static async Task UpsertComplianceCategory(PortalDbContext db, ComplianceCategory expected)
@@ -463,11 +429,7 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.Code = expected.Code;
-        existing.Description = expected.Description;
-        existing.IsActive = expected.IsActive;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.UpdateDetails(expected.Name, expected.Description, expected.Code, expected.IsActive);
     }
 
     private static async Task UpsertPermissionsAsync(PortalDbContext db, IEnumerable<string> permissions, bool isSystemPermission)
@@ -479,23 +441,20 @@ public static class SeedData
                 ?? await db.Permissions.FirstOrDefaultAsync(x => x.Key == permissionKey);
             if (existing is null)
             {
-                db.Permissions.Add(new Permission
-                {
-                    Key = permissionKey,
-                    Name = permissionKey,
-                    Description = $"Permission {permissionKey}",
-                    IsSystemPermission = isSystemPermission,
-                    IsActive = true,
-                    CreatedAtUtc = DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.UtcNow
-                });
+                db.Permissions.Add(Permission.Create(
+                    permissionKey,
+                    permissionKey,
+                    $"Permission {permissionKey}",
+                    isSystemPermission,
+                    true));
                 continue;
             }
 
-            existing.Name = permissionKey;
-            existing.IsSystemPermission = isSystemPermission || existing.IsSystemPermission;
-            existing.IsActive = true;
-            existing.UpdatedAtUtc = DateTime.UtcNow;
+            existing.UpdateDetails(
+                permissionKey,
+                existing.Description,
+                isSystemPermission || existing.IsSystemPermission,
+                true);
         }
     }
 
@@ -516,13 +475,10 @@ public static class SeedData
                 continue;
             }
 
-            db.RolePermissions.Add(new RolePermission
-            {
-                Id = $"rp_{Guid.NewGuid():N}",
-                RoleName = roleName,
-                PermissionKey = permissionKey,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+            db.RolePermissions.Add(RolePermission.Create(
+                $"rp_{Guid.NewGuid():N}",
+                roleName,
+                permissionKey));
         }
     }
 
@@ -535,13 +491,13 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.Description = expected.Description;
-        existing.DocumentCategory = expected.DocumentCategory;
-        existing.IsRequired = expected.IsRequired;
-        existing.DefaultDueDayOfMonth = expected.DefaultDueDayOfMonth;
-        existing.IsActive = expected.IsActive;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.Update(
+            expected.Name,
+            expected.Description,
+            expected.DocumentCategory,
+            expected.IsRequired,
+            expected.DefaultDueDayOfMonth,
+            expected.IsActive);
     }
 
     private static async Task UpsertMonthlyPackTemplate(PortalDbContext db, MonthlyPackTemplate expected)
@@ -553,11 +509,11 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.Description = expected.Description;
-        existing.AutoCreateDayOfMonth = expected.AutoCreateDayOfMonth;
-        existing.IsActive = expected.IsActive;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.Update(
+            expected.Name,
+            expected.Description,
+            expected.AutoCreateDayOfMonth,
+            expected.IsActive);
     }
 
     private static async Task UpsertMonthlyPackTemplateItem(PortalDbContext db, MonthlyPackTemplateItem expected)
@@ -571,7 +527,7 @@ public static class SeedData
             return;
         }
 
-        existing.SortOrder = expected.SortOrder;
+        existing.UpdateSortOrder(expected.SortOrder);
     }
 
     private static async Task UpsertRequestTemplate(PortalDbContext db, RequestTemplate expected)
@@ -583,14 +539,14 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.RequestType = expected.RequestType;
-        existing.TitleTemplate = expected.TitleTemplate;
-        existing.DescriptionTemplate = expected.DescriptionTemplate;
-        existing.Priority = expected.Priority;
-        existing.DefaultDueInDays = expected.DefaultDueInDays;
-        existing.IsActive = expected.IsActive;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.Update(
+            expected.Name,
+            expected.RequestType,
+            expected.TitleTemplate,
+            expected.DescriptionTemplate,
+            expected.Priority,
+            expected.DefaultDueInDays,
+            expected.IsActive);
     }
 
     private static async Task UpsertReminderRule(PortalDbContext db, ReminderRule expected)
@@ -602,13 +558,13 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.TriggerType = expected.TriggerType;
-        existing.DaysBeforeDue = expected.DaysBeforeDue;
-        existing.AudienceRole = expected.AudienceRole;
-        existing.MessageTemplate = expected.MessageTemplate;
-        existing.IsEnabled = expected.IsEnabled;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.Update(
+            expected.Name,
+            expected.TriggerType,
+            expected.DaysBeforeDue,
+            expected.AudienceRole,
+            expected.MessageTemplate,
+            expected.IsEnabled);
     }
 
     private static async Task UpsertDeadlineRule(PortalDbContext db, DeadlineRule expected)
@@ -620,13 +576,15 @@ public static class SeedData
             return;
         }
 
-        existing.Name = expected.Name;
-        existing.Scope = expected.Scope;
-        existing.DueDayOfMonth = expected.DueDayOfMonth;
-        existing.GraceDays = expected.GraceDays;
-        existing.Priority = expected.Priority;
-        existing.IsEnabled = expected.IsEnabled;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.Update(
+            expected.Name,
+            expected.Scope,
+            expected.DueDayOfMonth,
+            expected.GraceDays,
+            expected.Priority,
+            expected.IsEnabled);
     }
 }
+
+
 

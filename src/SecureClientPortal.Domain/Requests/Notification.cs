@@ -3,13 +3,44 @@ namespace SecureClientPortal.Backend.Models;
 public class Notification
 {
     public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string? ClientId { get; set; }
-    public string Type { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
-    public string? LinkUrl { get; set; }
-    public bool IsRead { get; set; }
+    public string UserId { get; private set; } = string.Empty;
+    public string? ClientId { get; private set; }
+    public string Type { get; private set; } = string.Empty;
+    public string Title { get; private set; } = string.Empty;
+    public string Message { get; private set; } = string.Empty;
+    public string? LinkUrl { get; private set; }
+    public bool IsRead { get; private set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-    public DateTime? ReadAtUtc { get; set; }
+    public DateTime? ReadAtUtc { get; private set; }
+
+    public static Notification Create(string id, string userId, string? clientId, string type, string title, string message, string? linkUrl, DateTime? createdAtUtc = null)
+    {
+        var item = new Notification
+        {
+            Id = id,
+            CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow
+        };
+
+        item.UserId = userId;
+        item.ClientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId.Trim();
+        item.Type = type.Trim();
+        item.Title = title.Trim();
+        item.Message = message.Trim();
+        item.LinkUrl = string.IsNullOrWhiteSpace(linkUrl) ? null : linkUrl.Trim();
+        item.IsRead = false;
+        item.ReadAtUtc = null;
+
+        return item;
+    }
+
+    public void MarkRead()
+    {
+        if (IsRead)
+        {
+            return;
+        }
+
+        IsRead = true;
+        ReadAtUtc = DateTime.UtcNow;
+    }
 }

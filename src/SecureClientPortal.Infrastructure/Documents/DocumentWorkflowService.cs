@@ -64,8 +64,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             return ServiceResult<FilingRule>.NotFoundResult();
         }
 
-        item.IsEnabled = request.IsEnabled;
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        item.Update(item.Category, item.Description, request.IsEnabled);
         await _db.SaveChangesAsync(ct);
         return ServiceResult<FilingRule>.Success(item);
     }
@@ -101,23 +100,17 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         var isNewDocument = string.IsNullOrWhiteSpace(request.DocumentId);
         if (isNewDocument)
         {
-            document = new Document
-            {
-                Id = $"doc_{Guid.NewGuid():N}",
-                ClientId = request.ClientId,
-                MonthlyPackId = pack.Id,
-                Name = stored.OriginalFileName,
-                Category = normalizedCategory,
-                DocumentSlotId = slot.Id,
-                Status = "uploaded",
-                FileType = stored.ContentType,
-                SizeBytes = stored.SizeBytes,
-                StorageKey = stored.StorageKey,
-                UploadedByUserId = actorUserId,
-                CurrentVersionNumber = 1,
-                UploadedAtUtc = now,
-                UpdatedAtUtc = now
-            };
+            document = Document.CreateUploaded(
+                $"doc_{Guid.NewGuid():N}",
+                request.ClientId,
+                pack.Id,
+                stored.OriginalFileName,
+                normalizedCategory,
+                slot.Id,
+                stored.ContentType,
+                stored.SizeBytes,
+                stored.StorageKey,
+                actorUserId);
             _db.Documents.Add(document);
         }
         else
@@ -134,54 +127,49 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
                 return ServiceResult<object>.ForbiddenResult();
             }
 
-            document.Name = stored.OriginalFileName;
-            document.MonthlyPackId = pack.Id;
-            document.Category = normalizedCategory;
-            document.DocumentSlotId = slot.Id;
-            document.FileType = stored.ContentType;
-            document.SizeBytes = stored.SizeBytes;
-            document.StorageKey = stored.StorageKey;
-            document.UploadedByUserId = actorUserId;
-            document.Status = "uploaded";
-            document.CurrentVersionNumber += 1;
-            document.IsFiled = false;
-            document.FiledAtUtc = null;
-            document.FiledByUserId = null;
-            document.UpdatedAtUtc = now;
-            document.UploadedAtUtc = now;
+            document.ReplaceUpload(
+                pack.Id,
+                stored.OriginalFileName,
+                normalizedCategory,
+                slot.Id,
+                stored.ContentType,
+                stored.SizeBytes,
+                stored.StorageKey,
+                actorUserId);
 
             var previousVersions = await _db.DocumentVersions
                 .Where(x => x.DocumentId == document.Id && x.IsCurrentVersion)
                 .ToListAsync(ct);
             foreach (var previousVersion in previousVersions)
             {
-                previousVersion.IsCurrentVersion = false;
+                previousVersion.MarkNotCurrent();
             }
         }
 
-        _db.DocumentVersions.Add(new DocumentVersion
+        _db.DocumentVersions.Add(DocumentVersion.Create(
+            $"dv_{Guid.NewGuid():N}",
+            document.Id,
+            document.CurrentVersionNumber,
+            stored.OriginalFileName,
+            stored.OriginalFileName,
+            stored.StoredFileName,
+            stored.ContentType,
+            stored.SizeBytes,
+            stored.StorageKey,
+            true,
+            actorUserId,
+            now));
+
+        slot.MarkUploaded(document.Id);
+
+        if (isNewDocument)
         {
-            Id = $"dv_{Guid.NewGuid():N}",
-            DocumentId = document.Id,
-            VersionNumber = document.CurrentVersionNumber,
-            Name = stored.OriginalFileName,
-            OriginalFileName = stored.OriginalFileName,
-            StoredFileName = stored.StoredFileName,
-            FileType = stored.ContentType,
-            SizeBytes = stored.SizeBytes,
-            StorageKey = stored.StorageKey,
-            IsCurrentVersion = true,
-            UploadedByUserId = actorUserId,
-            CreatedAtUtc = now
-        });
-
-        slot.CurrentDocumentId = document.Id;
-        slot.Status = "uploaded";
-        slot.UpdatedAtUtc = now;
-
-        pack.Status = isNewDocument ? "in_progress" : "reopened";
-        pack.SubmittedAtUtc = null;
-        pack.UpdatedAtUtc = now;
+            pack.MarkInProgress();
+        }
+        else
+        {
+            pack.Reopen();
+        }
 
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -227,32 +215,51 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             return ServiceResult<Document>.ForbiddenResult();
         }
 
-        if (string.IsNullOrWhiteSpace(request.Id)) request.Id = $"doc_{Guid.NewGuid():N}";
-        request.Category = NormalizeCategory(request.Category);
-        request.Status = NormalizeDocumentStatus(request.Status);
-        request.UploadedAtUtc = DateTime.UtcNow;
-        request.UpdatedAtUtc = request.UploadedAtUtc;
-        request.CurrentVersionNumber = 1;
+        var created = Document.CreateUploaded(
+            string.IsNullOrWhiteSpace(request.Id) ? $"doc_{Guid.NewGuid():N}" : request.Id,
+            request.ClientId,
+            request.MonthlyPackId,
+            request.Name,
+            NormalizeCategory(request.Category),
+            request.DocumentSlotId,
+            request.FileType,
+            request.SizeBytes,
+            request.StorageKey,
+            request.UploadedByUserId);
 
-        _db.Documents.Add(request);
-        _db.DocumentVersions.Add(new DocumentVersion
+        switch (NormalizeDocumentStatus(request.Status))
         {
-            Id = $"dv_{Guid.NewGuid():N}",
-            DocumentId = request.Id,
-            VersionNumber = 1,
-            Name = request.Name,
-            OriginalFileName = request.Name,
-            StoredFileName = Path.GetFileName(request.StorageKey ?? request.Name),
-            FileType = request.FileType,
-            SizeBytes = request.SizeBytes,
-            StorageKey = request.StorageKey,
-            IsCurrentVersion = true,
-            UploadedByUserId = request.UploadedByUserId,
-            CreatedAtUtc = request.UploadedAtUtc
-        });
+            case "under_review":
+                created.MarkUnderReview();
+                break;
+            case "accepted":
+                created.Accept();
+                break;
+            case "rejected":
+                created.Reject();
+                break;
+            case "filed":
+                created.File(request.UploadedByUserId);
+                break;
+        }
+
+        _db.Documents.Add(created);
+        _db.DocumentVersions.Add(DocumentVersion.Create(
+            $"dv_{Guid.NewGuid():N}",
+            created.Id,
+            1,
+            created.Name,
+            created.Name,
+            Path.GetFileName(created.StorageKey ?? created.Name),
+            created.FileType,
+            created.SizeBytes,
+            created.StorageKey,
+            true,
+            created.UploadedByUserId,
+            created.UploadedAtUtc));
 
         await _db.SaveChangesAsync(ct);
-        return ServiceResult<Document>.Success(request);
+        return ServiceResult<Document>.Success(created);
     }
 
     public async Task<ServiceResult<object>> GetByIdAsync(string id, System.Security.Claims.ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
@@ -393,12 +400,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             return ServiceResult<Document>.ForbiddenResult();
         }
 
-        item.Name = request.Name;
-        item.Category = NormalizeCategory(request.Category);
-        item.Status = NormalizeDocumentStatus(request.Status);
-        item.SizeBytes = request.SizeBytes;
-        item.StorageKey = request.StorageKey;
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        item.UpdateMetadata(
+            request.Name,
+            NormalizeCategory(request.Category),
+            DocumentDomainValues.ToDocumentStatus(NormalizeDocumentStatus(request.Status)),
+            request.SizeBytes,
+            request.StorageKey);
 
         await _db.SaveChangesAsync(ct);
         return ServiceResult<Document>.Success(item);
@@ -499,15 +506,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
 
-        var comment = new DocumentComment
-        {
-            Id = $"dc_{Guid.NewGuid():N}",
-            DocumentId = item.Id,
-            AuthorUserId = authorId,
-            AuthorRole = authorRole,
-            Message = request.Message.Trim(),
-            CreatedAtUtc = DateTime.UtcNow,
-        };
+        var comment = DocumentComment.Create(
+            $"dc_{Guid.NewGuid():N}",
+            item.Id,
+            authorId,
+            authorRole,
+            request.Message);
 
         _db.DocumentComments.Add(comment);
         await _db.SaveChangesAsync(ct);
@@ -645,17 +649,15 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         var reviewerRole = user.IsAdmin() ? "admin" : "accountant";
         var now = DateTime.UtcNow;
 
-        var reviewDecision = new ReviewDecision
-        {
-            Id = $"rd_{Guid.NewGuid():N}",
-            DocumentId = document.Id,
-            Decision = decision,
-            ReviewerUserId = reviewerUserId,
-            ReviewerRole = reviewerRole,
-            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
-            InternalNote = string.IsNullOrWhiteSpace(internalNote) ? null : internalNote.Trim(),
-            DecidedAtUtc = now
-        };
+        var reviewDecision = ReviewDecision.Create(
+            $"rd_{Guid.NewGuid():N}",
+            document.Id,
+            decision,
+            reviewerUserId,
+            reviewerRole,
+            reason,
+            internalNote,
+            now);
 
         _db.ReviewDecisions.Add(reviewDecision);
 
@@ -669,55 +671,38 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         switch (decision)
         {
             case "under_review":
-                document.Status = "under_review";
+                document.MarkUnderReview();
                 if (slot is not null)
                 {
-                    slot.Status = "under_review";
-                    slot.UpdatedAtUtc = now;
+                    slot.MarkUnderReview();
                 }
                 if (pack is not null)
                 {
-                    pack.Status = "under_review";
-                    pack.SubmittedAtUtc ??= now;
-                    pack.UpdatedAtUtc = now;
+                    pack.MarkUnderReview();
                 }
                 break;
             case "accepted":
-                document.Status = "accepted";
-                document.IsFiled = false;
-                document.FiledAtUtc = null;
-                document.FiledByUserId = null;
+                document.Accept();
                 if (slot is not null)
                 {
-                    slot.Status = "accepted";
-                    slot.CurrentDocumentId = document.Id;
-                    slot.UpdatedAtUtc = now;
+                    slot.Accept(document.Id);
                 }
                 break;
             case "rejected":
             case "request_reupload":
-                document.Status = "rejected";
-                document.IsFiled = false;
-                document.FiledAtUtc = null;
-                document.FiledByUserId = null;
+                document.Reject();
                 if (slot is not null)
                 {
-                    slot.Status = "rejected";
-                    slot.CurrentDocumentId = document.Id;
-                    slot.UpdatedAtUtc = now;
+                    slot.Reject(document.Id);
                 }
                 if (pack is not null)
                 {
-                    pack.Status = "reopened";
-                    pack.SubmittedAtUtc = null;
-                    pack.UpdatedAtUtc = now;
+                    pack.Reopen();
                 }
                 break;
             default:
                 throw new InvalidOperationException("Unsupported document lifecycle decision.");
         }
-
-        document.UpdatedAtUtc = now;
 
         if (pack is not null)
         {
@@ -801,27 +786,29 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
         if (existing is not null)
         {
-            existing.Status = "waiting_on_client";
-            existing.Description = reason.Trim();
-            existing.UpdatedAtUtc = DateTime.UtcNow;
+            existing.UpdateDetails(
+                existing.RequestType,
+                existing.RelatedDocumentId,
+                existing.Title,
+                reason.Trim(),
+                RequestDomainValues.ToRequestPriority(existing.Priority),
+                existing.DueDateUtc);
+            existing.MarkWaitingOnClient();
             await _db.SaveChangesAsync(ct);
             return;
         }
 
-        var requestItem = new RequestItem
-        {
-            Id = $"req_{Guid.NewGuid():N}",
-            ClientId = document.ClientId,
-            RequestType = "reupload_required",
-            RelatedDocumentId = document.Id,
-            Title = $"Re-upload required: {document.Name}",
-            Description = reason.Trim(),
-            Priority = "high",
-            Status = "waiting_on_client",
-            RequestedByUserId = user.GetUserId() ?? "unknown",
-            RequestedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var requestItem = RequestItem.Create(
+            $"req_{Guid.NewGuid():N}",
+            document.ClientId,
+            "reupload_required",
+            document.Id,
+            $"Re-upload required: {document.Name}",
+            reason.Trim(),
+            RequestPriority.High,
+            user.GetUserId() ?? "unknown",
+            RequestStatus.WaitingOnClient,
+            null);
 
         _db.Requests.Add(requestItem);
         await _db.SaveChangesAsync(ct);
@@ -840,65 +827,46 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
         if (slots.Count == 0)
         {
-            pack.Status = "draft";
-            pack.UpdatedAtUtc = DateTime.UtcNow;
+            pack.MarkDraft();
             return;
         }
 
-        if (slots.Where(x => x.IsRequired).All(x => x.Status == "accepted"))
+        if (slots.Where(x => x.IsRequired).All(x => x.Status == DocumentSlotStatus.Accepted.ToStorageValue()))
         {
-            pack.Status = "completed";
+            pack.Complete();
         }
-        else if (slots.Any(x => x.Status == "rejected"))
+        else if (slots.Any(x => x.Status == DocumentSlotStatus.Rejected.ToStorageValue()))
         {
-            pack.Status = "reopened";
-            pack.SubmittedAtUtc = null;
+            pack.Reopen();
         }
-        else if (slots.Any(x => x.Status == "under_review"))
+        else if (slots.Any(x => x.Status == DocumentSlotStatus.UnderReview.ToStorageValue()))
         {
-            pack.Status = "under_review";
+            pack.MarkUnderReview();
         }
-        else if (slots.Any(x => x.Status == "uploaded"))
+        else if (slots.Any(x => x.Status == DocumentSlotStatus.Uploaded.ToStorageValue()))
         {
-            pack.Status = pack.SubmittedAtUtc.HasValue ? "submitted" : "in_progress";
+            if (pack.SubmittedAtUtc.HasValue)
+            {
+                pack.MarkSubmitted();
+            }
+            else
+            {
+                pack.MarkInProgress();
+            }
         }
         else if (slots.Any(x => x.Status is "accepted" or "rejected" or "filed"))
         {
-            pack.Status = "in_progress";
+            pack.MarkInProgress();
         }
         else
         {
-            pack.Status = "draft";
+            pack.MarkDraft();
         }
-
-        pack.UpdatedAtUtc = DateTime.UtcNow;
     }
 
     private static string NormalizeCategory(string value)
     {
-        var raw = value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
-        return raw switch
-        {
-            "bankstatement" => "bank_statement",
-            "bank_statement" => "bank_statement",
-            "invoice" => "invoices",
-            "invoices" => "invoices",
-            "signeddocuments" => "signed_documents",
-            "signed_documents" => "signed_documents",
-            "compliancerecord" => "compliance_record",
-            "compliance_record" => "compliance_record",
-            "payrollsummary" => "payroll_summary",
-            "payroll_summary" => "payroll_summary",
-            "taxworkingpapers" => "tax_working_papers",
-            "tax_working_papers" => "tax_working_papers",
-            "proofofpayment" => "proof_of_payment",
-            "proof_of_payment" => "proof_of_payment",
-            "creditnotes" => "credit_notes",
-            "credit_notes" => "credit_notes",
-            "debitnotes" => "debit_notes",
-            "debit_notes" => "debit_notes",
-            _ => raw
-        };
+        return DocumentDomainValues.NormalizeCategory(value);
     }
 
     private static string NormalizeDocumentStatus(string rawStatus)
@@ -918,3 +886,6 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         };
     }
 }
+
+
+

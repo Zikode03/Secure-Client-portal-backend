@@ -78,17 +78,13 @@ public sealed class RoleService : IRoleService
         var normalizedPermissions = RolePermissions.NormalizePermissions(
             request.Permissions?.Length > 0 ? request.Permissions : RolePermissions.ForRole(normalizedScope));
 
-        var role = new RoleDefinition
-        {
-            Name = roleName,
-            DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? roleName : request.DisplayName.Trim(),
-            Scope = normalizedScope,
-            PermissionsJson = RolePermissions.SerializePermissions(normalizedPermissions),
-            IsSystemRole = false,
-            IsActive = true,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var role = RoleDefinition.Create(
+            roleName,
+            string.IsNullOrWhiteSpace(request.DisplayName) ? roleName : request.DisplayName,
+            normalizedScope,
+            RolePermissions.SerializePermissions(normalizedPermissions),
+            false,
+            true);
 
         _db.RoleDefinitions.Add(role);
         await UpsertPermissionsAsync(normalizedPermissions, false, ct);
@@ -126,10 +122,12 @@ public sealed class RoleService : IRoleService
         var normalizedPermissions = RolePermissions.NormalizePermissions(
             request.Permissions?.Length > 0 ? request.Permissions : RolePermissions.ForRole(normalizedScope));
 
-        role.DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? role.DisplayName : request.DisplayName.Trim();
-        role.Scope = normalizedScope;
-        role.PermissionsJson = RolePermissions.SerializePermissions(normalizedPermissions);
-        role.UpdatedAtUtc = DateTime.UtcNow;
+        role.UpdateDefinition(
+            string.IsNullOrWhiteSpace(request.DisplayName) ? role.DisplayName : request.DisplayName,
+            normalizedScope,
+            RolePermissions.SerializePermissions(normalizedPermissions),
+            role.IsSystemRole);
+
         await UpsertPermissionsAsync(normalizedPermissions, false, ct);
         await ReplaceRolePermissionsAsync(role.Name, normalizedPermissions, ct);
         await _db.SaveChangesAsync(ct);
@@ -161,8 +159,7 @@ public sealed class RoleService : IRoleService
             return null;
         }
 
-        role.IsActive = isActive;
-        role.UpdatedAtUtc = DateTime.UtcNow;
+        role.SetActivation(isActive);
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor.UserId,
@@ -195,22 +192,20 @@ public sealed class RoleService : IRoleService
             var existing = await _db.Permissions.FirstOrDefaultAsync(x => x.Key == permissionKey, ct);
             if (existing is null)
             {
-                _db.Permissions.Add(new Permission
-                {
-                    Key = permissionKey,
-                    Name = permissionKey,
-                    Description = $"Permission {permissionKey}",
-                    IsSystemPermission = isSystemPermission,
-                    IsActive = true,
-                    CreatedAtUtc = DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.UtcNow
-                });
+                _db.Permissions.Add(Permission.Create(
+                    permissionKey,
+                    permissionKey,
+                    $"Permission {permissionKey}",
+                    isSystemPermission,
+                    true));
                 continue;
             }
 
-            existing.Name = permissionKey;
-            existing.IsActive = true;
-            existing.UpdatedAtUtc = DateTime.UtcNow;
+            existing.UpdateDetails(
+                permissionKey,
+                existing.Description,
+                existing.IsSystemPermission || isSystemPermission,
+                true);
         }
     }
 
@@ -224,13 +219,10 @@ public sealed class RoleService : IRoleService
 
         foreach (var permissionKey in permissions)
         {
-            _db.RolePermissions.Add(new RolePermission
-            {
-                Id = $"rp_{Guid.NewGuid():N}",
-                RoleName = roleName,
-                PermissionKey = permissionKey,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+            _db.RolePermissions.Add(RolePermission.Create(
+                $"rp_{Guid.NewGuid():N}",
+                roleName,
+                permissionKey));
         }
     }
 
@@ -239,5 +231,4 @@ public sealed class RoleService : IRoleService
         return value.Trim().ToLowerInvariant().Replace(" ", "_");
     }
 }
-
 

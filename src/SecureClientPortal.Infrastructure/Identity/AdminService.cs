@@ -60,29 +60,23 @@ public sealed class AdminService : IAdminService
 
         var inviteToken = AccessTokenCodec.GenerateToken();
         var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
-        var user = new User
-        {
-            Id = $"u_{Guid.NewGuid():N}",
-            FullName = request.FullName.Trim(),
-            Email = email,
-            Role = roleName,
-            PasswordHash = PasswordHasher.Hash("ChangeMe123!"),
-            ClientIdsJson = "[]",
-            ProfileJson = string.IsNullOrWhiteSpace(request.Company) ? null : JsonSerializer.Serialize(new { company = request.Company.Trim() }),
-            SecurityJson = UserSecurityProfile.SetStatus(null, "invited"),
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
-        var invite = new UserAccessToken
-        {
-            Id = $"uat_{Guid.NewGuid():N}",
-            UserId = user.Id,
-            Purpose = "invite",
-            TokenHash = AccessTokenCodec.HashToken(inviteToken),
-            CreatedByUserId = actor.GetUserId(),
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = inviteExpiresAtUtc
-        };
+        var user = User.CreateInvited(
+            $"u_{Guid.NewGuid():N}",
+            request.FullName,
+            email,
+            IdentityDomainValues.ToUserRole(roleName),
+            PasswordHasher.Hash("ChangeMe123!"),
+            "[]",
+            string.IsNullOrWhiteSpace(request.Company) ? null : JsonSerializer.Serialize(new { company = request.Company.Trim() }));
+
+        var invite = UserAccessToken.Create(
+            $"uat_{Guid.NewGuid():N}",
+            user.Id,
+            "invite",
+            AccessTokenCodec.HashToken(inviteToken),
+            inviteExpiresAtUtc,
+            null,
+            actor.GetUserId());
         var setupUrl = _accessLinkBuilder.BuildSetupUrl(user.Email, inviteToken);
 
         _db.Users.Add(user);
@@ -143,8 +137,7 @@ public sealed class AdminService : IAdminService
             return ServiceResult<object>.ErrorResult("Role does not exist or is inactive.");
         }
 
-        user.Role = roleName;
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.AssignRole(IdentityDomainValues.ToUserRole(roleName));
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor,
@@ -169,8 +162,7 @@ public sealed class AdminService : IAdminService
         }
 
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
-        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, normalizedStatus);
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.SetSecurityStatus(IdentityDomainValues.ToSecurityStatus(normalizedStatus));
 
         if (normalizedStatus is "disabled" or "locked")
         {
@@ -179,8 +171,7 @@ public sealed class AdminService : IAdminService
                 .ToListAsync(ct);
             foreach (var session in activeSessions)
             {
-                session.RevokedAtUtc = DateTime.UtcNow;
-                session.RevokedReason = $"status_{normalizedStatus}";
+                session.Revoke($"status_{normalizedStatus}");
             }
         }
 
@@ -209,16 +200,14 @@ public sealed class AdminService : IAdminService
 
         var resetToken = AccessTokenCodec.GenerateToken();
         var resetExpiresAtUtc = DateTime.UtcNow.AddDays(7);
-        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, "password_reset_required", request.Reason);
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.SetSecurityStatus(SecurityStatus.PasswordResetRequired, request.Reason);
 
         var activeSessions = await _db.UserSessions
             .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
             .ToListAsync(ct);
         foreach (var session in activeSessions)
         {
-            session.RevokedAtUtc = DateTime.UtcNow;
-            session.RevokedReason = "reset_access";
+            session.Revoke("reset_access");
         }
 
         var existingTokens = await _db.UserAccessTokens
@@ -226,20 +215,17 @@ public sealed class AdminService : IAdminService
             .ToListAsync(ct);
         foreach (var token in existingTokens)
         {
-            token.InvalidatedAtUtc = DateTime.UtcNow;
-            token.InvalidatedReason = "superseded";
+            token.Invalidate("superseded");
         }
 
-        var resetAccessToken = new UserAccessToken
-        {
-            Id = $"uat_{Guid.NewGuid():N}",
-            UserId = user.Id,
-            Purpose = "password_reset",
-            TokenHash = AccessTokenCodec.HashToken(resetToken),
-            CreatedByUserId = actor.GetUserId(),
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = resetExpiresAtUtc
-        };
+        var resetAccessToken = UserAccessToken.Create(
+            $"uat_{Guid.NewGuid():N}",
+            user.Id,
+            "password_reset",
+            AccessTokenCodec.HashToken(resetToken),
+            resetExpiresAtUtc,
+            null,
+            actor.GetUserId());
         var setupUrl = _accessLinkBuilder.BuildPasswordResetUrl(user.Email, resetToken);
         _db.UserAccessTokens.Add(resetAccessToken);
         await _db.SaveChangesAsync(ct);
@@ -293,20 +279,17 @@ public sealed class AdminService : IAdminService
             ? $"Tmp!{Guid.NewGuid():N}"[..12]
             : request.NewPassword.Trim();
 
-        user.PasswordHash = PasswordHasher.Hash(temporaryPassword);
-        user.SecurityJson = UserSecurityProfile.SetStatus(
-            user.SecurityJson,
-            "password_reset_required",
+        user.SetPasswordHash(PasswordHasher.Hash(temporaryPassword));
+        user.SetSecurityStatus(
+            SecurityStatus.PasswordResetRequired,
             string.IsNullOrWhiteSpace(request.Reason) ? "admin_reset" : request.Reason.Trim());
-        user.UpdatedAtUtc = DateTime.UtcNow;
 
         var activeSessions = await _db.UserSessions
             .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
             .ToListAsync(ct);
         foreach (var session in activeSessions)
         {
-            session.RevokedAtUtc = DateTime.UtcNow;
-            session.RevokedReason = "password_reset";
+            session.Revoke("password_reset");
         }
 
         await _db.SaveChangesAsync(ct);
@@ -337,16 +320,18 @@ public sealed class AdminService : IAdminService
         var item = await _db.SystemSettings.FindAsync([key], ct);
         if (item is null)
         {
-            item = new SystemSetting { Key = key, ValueJson = request.ValueJson, UpdatedAtUtc = DateTime.UtcNow };
+            item = SystemSetting.Create(key, request.ValueJson);
             _db.SystemSettings.Add(item);
         }
         else
         {
-            item.ValueJson = request.ValueJson;
-            item.UpdatedAtUtc = DateTime.UtcNow;
+            item.UpdateValue(request.ValueJson);
         }
 
         await _db.SaveChangesAsync(ct);
         return new { key = item.Key, valueJson = item.ValueJson };
     }
 }
+
+
+

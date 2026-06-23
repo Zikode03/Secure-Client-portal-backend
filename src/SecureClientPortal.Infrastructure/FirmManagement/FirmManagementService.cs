@@ -88,18 +88,14 @@ public sealed class FirmManagementService : IFirmManagementService
         _db.RequiredDocumentTemplates.RemoveRange(_db.RequiredDocumentTemplates);
         foreach (var template in templates)
         {
-            _db.RequiredDocumentTemplates.Add(new RequiredDocumentTemplate
-            {
-                Id = template.Id,
-                Name = template.Name,
-                Description = template.Description,
-                DocumentCategory = template.DocumentCategory,
-                IsRequired = template.IsRequired,
-                DefaultDueDayOfMonth = template.DefaultDueDayOfMonth,
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-                UpdatedAtUtc = DateTime.UtcNow
-            });
+            _db.RequiredDocumentTemplates.Add(RequiredDocumentTemplate.Create(
+                template.Id,
+                template.Name,
+                template.Description,
+                template.DocumentCategory,
+                template.IsRequired,
+                template.DefaultDueDayOfMonth,
+                true));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -113,27 +109,20 @@ public sealed class FirmManagementService : IFirmManagementService
 
         foreach (var template in templates)
         {
-            _db.MonthlyPackTemplates.Add(new MonthlyPackTemplate
-            {
-                Id = template.Id,
-                Name = template.Name,
-                Description = template.Description,
-                AutoCreateDayOfMonth = template.AutoCreateDayOfMonth,
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-                UpdatedAtUtc = DateTime.UtcNow
-            });
+            _db.MonthlyPackTemplates.Add(MonthlyPackTemplate.Create(
+                template.Id,
+                template.Name,
+                template.Description,
+                template.AutoCreateDayOfMonth,
+                true));
 
             for (var index = 0; index < template.RequiredDocumentTemplateIds.Length; index++)
             {
-                _db.MonthlyPackTemplateItems.Add(new MonthlyPackTemplateItem
-                {
-                    Id = $"mpti_{template.Id}_{index + 1}",
-                    MonthlyPackTemplateId = template.Id,
-                    RequiredDocumentTemplateId = template.RequiredDocumentTemplateIds[index],
-                    SortOrder = index + 1,
-                    CreatedAtUtc = DateTime.UtcNow
-                });
+                _db.MonthlyPackTemplateItems.Add(MonthlyPackTemplateItem.Create(
+                    $"mpti_{template.Id}_{index + 1}",
+                    template.Id,
+                    template.RequiredDocumentTemplateIds[index],
+                    index + 1));
             }
         }
 
@@ -146,19 +135,15 @@ public sealed class FirmManagementService : IFirmManagementService
         _db.RequestTemplates.RemoveRange(_db.RequestTemplates);
         foreach (var template in templates)
         {
-            _db.RequestTemplates.Add(new RequestTemplate
-            {
-                Id = template.Id,
-                Name = template.Name,
-                RequestType = template.RequestType,
-                TitleTemplate = template.TitleTemplate,
-                DescriptionTemplate = template.DescriptionTemplate,
-                Priority = template.Priority,
-                DefaultDueInDays = template.DefaultDueInDays,
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-                UpdatedAtUtc = DateTime.UtcNow
-            });
+            _db.RequestTemplates.Add(RequestTemplate.Create(
+                template.Id,
+                template.Name,
+                template.RequestType,
+                template.TitleTemplate,
+                template.DescriptionTemplate,
+                template.Priority,
+                template.DefaultDueInDays,
+                true));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -170,18 +155,14 @@ public sealed class FirmManagementService : IFirmManagementService
         _db.ReminderRules.RemoveRange(_db.ReminderRules);
         foreach (var rule in rules)
         {
-            _db.ReminderRules.Add(new ReminderRule
-            {
-                Id = rule.Id,
-                Name = rule.Name,
-                TriggerType = rule.TriggerType,
-                DaysBeforeDue = rule.DaysBeforeDue,
-                AudienceRole = rule.AudienceRole,
-                MessageTemplate = rule.MessageTemplate,
-                IsEnabled = rule.IsEnabled,
-                CreatedAtUtc = DateTime.UtcNow,
-                UpdatedAtUtc = DateTime.UtcNow
-            });
+            _db.ReminderRules.Add(ReminderRule.Create(
+                rule.Id,
+                rule.Name,
+                rule.TriggerType,
+                rule.DaysBeforeDue,
+                rule.AudienceRole,
+                rule.MessageTemplate,
+                rule.IsEnabled));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -193,18 +174,14 @@ public sealed class FirmManagementService : IFirmManagementService
         _db.DeadlineRules.RemoveRange(_db.DeadlineRules);
         foreach (var rule in rules)
         {
-            _db.DeadlineRules.Add(new DeadlineRule
-            {
-                Id = rule.Id,
-                Name = rule.Name,
-                Scope = rule.Scope,
-                DueDayOfMonth = rule.DueDayOfMonth,
-                GraceDays = rule.GraceDays,
-                Priority = rule.Priority,
-                IsEnabled = rule.IsEnabled,
-                CreatedAtUtc = DateTime.UtcNow,
-                UpdatedAtUtc = DateTime.UtcNow
-            });
+            _db.DeadlineRules.Add(DeadlineRule.Create(
+                rule.Id,
+                rule.Name,
+                rule.Scope,
+                rule.DueDayOfMonth,
+                rule.GraceDays,
+                rule.Priority,
+                rule.IsEnabled));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -216,12 +193,14 @@ public sealed class FirmManagementService : IFirmManagementService
         var item = await _db.SystemSettings.FindAsync([EscalationRulesKey], ct);
         if (item is null)
         {
-            item = new SystemSetting { Key = EscalationRulesKey };
+            item = SystemSetting.Create(EscalationRulesKey, JsonSerializer.Serialize(rules));
             _db.SystemSettings.Add(item);
         }
+        else
+        {
+            item.UpdateValue(JsonSerializer.Serialize(rules));
+        }
 
-        item.ValueJson = JsonSerializer.Serialize(rules);
-        item.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         await WriteAuditAsync(actor, "firm.escalation_rules_updated", EscalationRulesKey, ct);
     }
@@ -265,12 +244,9 @@ public sealed class FirmManagementService : IFirmManagementService
             return;
         }
 
-        _db.SystemSettings.Add(new SystemSetting
-        {
-            Key = EscalationRulesKey,
-            ValueJson = JsonSerializer.Serialize(DefaultEscalationRules()),
-            UpdatedAtUtc = DateTime.UtcNow
-        });
+        _db.SystemSettings.Add(SystemSetting.Create(
+            EscalationRulesKey,
+            JsonSerializer.Serialize(DefaultEscalationRules())));
         await _db.SaveChangesAsync(ct);
     }
 
@@ -328,5 +304,4 @@ public sealed class FirmManagementService : IFirmManagementService
         new("er_accountant_overdue", "Accountant overdue escalation", "overdue_accountant_action", 5, "admin", "notify_admin", true)
     ];
 }
-
 

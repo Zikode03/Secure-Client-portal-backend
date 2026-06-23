@@ -17,18 +17,15 @@ public static class AuditLoggingExtensions
         string? metadataJson = null,
         CancellationToken ct = default)
     {
-        db.AuditLogs.Add(new AuditLog
-        {
-            Id = $"al_{Guid.NewGuid():N}",
-            ActorUserId = actorUserId,
-            ActorRole = actorRole,
-            Action = action,
-            EntityType = entityType,
-            EntityId = entityId,
-            ClientId = clientId,
-            MetadataJson = metadataJson,
-            CreatedAtUtc = DateTime.UtcNow
-        });
+        db.AuditLogs.Add(AuditLog.Create(
+            $"al_{Guid.NewGuid():N}",
+            actorUserId,
+            actorRole,
+            action,
+            entityType,
+            entityId,
+            clientId,
+            metadataJson));
 
         await db.SaveChangesAsync(ct);
     }
@@ -57,19 +54,16 @@ public static class AuditLoggingExtensions
         CancellationToken ct = default)
     {
         var actorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : user.IsClient() ? "client" : "unknown";
-        db.DocumentAccessLogs.Add(new DocumentAccessLog
-        {
-            Id = $"dal_{Guid.NewGuid():N}",
-            DocumentId = document.Id,
-            ClientId = document.ClientId,
-            AccessedByUserId = user.GetUserId(),
-            AccessedByRole = actorRole,
-            Action = action,
-            IpAddress = httpContext.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = httpContext.Request.Headers.UserAgent.ToString(),
-            MetadataJson = metadataJson,
-            AccessedAtUtc = DateTime.UtcNow
-        });
+        db.DocumentAccessLogs.Add(DocumentAccessLog.Create(
+            $"dal_{Guid.NewGuid():N}",
+            document.Id,
+            document.ClientId,
+            user.GetUserId(),
+            actorRole,
+            action,
+            httpContext.Connection.RemoteIpAddress?.ToString(),
+            httpContext.Request.Headers.UserAgent.ToString(),
+            metadataJson));
 
         await db.SaveChangesAsync(ct);
     }

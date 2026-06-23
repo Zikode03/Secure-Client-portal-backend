@@ -93,20 +93,16 @@ public sealed class AssignmentService : IAssignmentService
             x.AccountantUserId == request.AccountantUserId && x.ClientId == request.ClientId, ct);
         if (assignment is null)
         {
-            assignment = new ClientAssignment
-            {
-                Id = $"ca_{Guid.NewGuid():N}",
-                AccountantUserId = request.AccountantUserId,
-                ClientId = request.ClientId,
-                CreatedAtUtc = DateTime.UtcNow
-            };
+            assignment = ClientAssignment.Create(
+                $"ca_{Guid.NewGuid():N}",
+                request.AccountantUserId,
+                request.ClientId);
             _db.ClientAssignments.Add(assignment);
         }
 
         if (request.IsPrimary || string.IsNullOrWhiteSpace(client.AssignedAccountantId))
         {
-            client.AssignedAccountantId = request.AccountantUserId;
-            client.UpdatedAtUtc = DateTime.UtcNow;
+            client.AssignAccountant(request.AccountantUserId);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -157,8 +153,7 @@ public sealed class AssignmentService : IAssignmentService
                 throw new InvalidOperationException("Cannot remove the only primary accountant assignment for a client.");
             }
 
-            client.AssignedAccountantId = replacement.AccountantUserId;
-            client.UpdatedAtUtc = DateTime.UtcNow;
+            client.AssignAccountant(replacement.AccountantUserId);
         }
 
         _db.ClientAssignments.Remove(assignment);
@@ -202,13 +197,10 @@ public sealed class AssignmentService : IAssignmentService
             x.ClientId == request.ClientId && x.AccountantUserId == request.ToAccountantUserId, ct);
         if (existingTarget is null)
         {
-            existingTarget = new ClientAssignment
-            {
-                Id = $"ca_{Guid.NewGuid():N}",
-                ClientId = request.ClientId,
-                AccountantUserId = request.ToAccountantUserId,
-                CreatedAtUtc = DateTime.UtcNow
-            };
+            existingTarget = ClientAssignment.Create(
+                $"ca_{Guid.NewGuid():N}",
+                request.ToAccountantUserId,
+                request.ClientId);
             _db.ClientAssignments.Add(existingTarget);
         }
 
@@ -221,8 +213,7 @@ public sealed class AssignmentService : IAssignmentService
 
         if (request.MakePrimary || string.Equals(client.AssignedAccountantId, request.FromAccountantUserId, StringComparison.OrdinalIgnoreCase))
         {
-            client.AssignedAccountantId = request.ToAccountantUserId;
-            client.UpdatedAtUtc = DateTime.UtcNow;
+            client.AssignAccountant(request.ToAccountantUserId);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -265,8 +256,7 @@ public sealed class AssignmentService : IAssignmentService
             throw new ArgumentException("Client does not exist.");
         }
 
-        client.AssignedAccountantId = assignment.AccountantUserId;
-        client.UpdatedAtUtc = DateTime.UtcNow;
+        client.AssignAccountant(assignment.AccountantUserId);
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor.UserId,
@@ -287,5 +277,4 @@ public sealed class AssignmentService : IAssignmentService
         };
     }
 }
-
 

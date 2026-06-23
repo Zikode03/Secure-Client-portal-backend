@@ -69,7 +69,7 @@ public sealed class RequestService : IRequestService
             return (true, null!);
         }
 
-        var requestType = NormalizeRequestType(request.RequestType);
+        var requestType = RequestDomainValues.NormalizeRequestType(request.RequestType);
         if (!AllowedRequestTypes.Contains(requestType))
         {
             throw new ArgumentException("Unsupported request type.");
@@ -91,23 +91,19 @@ public sealed class RequestService : IRequestService
 
         var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
-        var status = authorRole == "client" ? "waiting_on_accountant" : "waiting_on_client";
+        var status = authorRole == "client" ? RequestStatus.WaitingOnAccountant : RequestStatus.WaitingOnClient;
 
-        var item = new RequestItem
-        {
-            Id = $"req_{Guid.NewGuid():N}",
-            ClientId = request.ClientId,
-            RequestType = requestType,
-            RelatedDocumentId = request.RelatedDocumentId,
-            Title = request.Title.Trim(),
-            Description = request.Description.Trim(),
-            Priority = request.Priority.Trim().ToLowerInvariant(),
-            Status = status,
-            DueDateUtc = request.DueDateUtc,
-            RequestedByUserId = authorId,
-            RequestedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var item = RequestItem.Create(
+            $"req_{Guid.NewGuid():N}",
+            request.ClientId,
+            requestType,
+            request.RelatedDocumentId,
+            request.Title,
+            request.Description,
+            RequestDomainValues.ToRequestPriority(request.Priority),
+            authorId,
+            status,
+            request.DueDateUtc);
 
         _db.Requests.Add(item);
         await _db.SaveChangesAsync(ct);
@@ -156,20 +152,29 @@ public sealed class RequestService : IRequestService
             throw new ArgumentException("Unsupported request status.");
         }
 
-        var normalizedType = NormalizeRequestType(request.RequestType);
+        var normalizedType = RequestDomainValues.NormalizeRequestType(request.RequestType);
         if (!AllowedRequestTypes.Contains(normalizedType))
         {
             throw new ArgumentException("Unsupported request type.");
         }
 
-        item.Title = request.Title.Trim();
-        item.Description = request.Description.Trim();
-        item.Priority = request.Priority.Trim().ToLowerInvariant();
-        item.Status = normalizedStatus;
-        item.DueDateUtc = request.DueDateUtc;
-        item.RequestType = normalizedType;
-        item.RelatedDocumentId = request.RelatedDocumentId;
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        item.UpdateDetails(
+            normalizedType,
+            request.RelatedDocumentId,
+            request.Title,
+            request.Description,
+            RequestDomainValues.ToRequestPriority(request.Priority),
+            request.DueDateUtc);
+
+        var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
+        if (status == RequestStatus.Resolved)
+        {
+            item.Resolve(user.GetUserId() ?? "unknown");
+        }
+        else
+        {
+            item.SetStatus(status);
+        }
 
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -204,18 +209,14 @@ public sealed class RequestService : IRequestService
             throw new ArgumentException("Unsupported request status.");
         }
 
-        item.Status = normalizedStatus;
-        item.UpdatedAtUtc = DateTime.UtcNow;
-
-        if (normalizedStatus == "resolved")
+        var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
+        if (status == RequestStatus.Resolved)
         {
-            item.ResolvedByUserId = user.GetUserId();
-            item.ResolvedAtUtc = item.UpdatedAtUtc;
+            item.Resolve(user.GetUserId() ?? "unknown");
         }
         else
         {
-            item.ResolvedByUserId = null;
-            item.ResolvedAtUtc = null;
+            item.SetStatus(status);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -273,20 +274,23 @@ public sealed class RequestService : IRequestService
 
         var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
-        var comment = new RequestComment
-        {
-            Id = $"rc_{Guid.NewGuid():N}",
-            RequestId = item.Id,
-            ClientId = item.ClientId,
-            AuthorUserId = authorId,
-            AuthorRole = authorRole,
-            Message = request.Message.Trim(),
-            CreatedAtUtc = DateTime.UtcNow
-        };
+        var comment = RequestComment.Create(
+            $"rc_{Guid.NewGuid():N}",
+            item.Id,
+            item.ClientId,
+            authorId,
+            authorRole,
+            request.Message);
         _db.RequestComments.Add(comment);
 
-        item.Status = authorRole == "client" ? "waiting_on_accountant" : "waiting_on_client";
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        if (authorRole == "client")
+        {
+            item.MarkWaitingOnAccountant();
+        }
+        else
+        {
+            item.MarkWaitingOnClient();
+        }
 
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -328,10 +332,7 @@ public sealed class RequestService : IRequestService
             return (true, null);
         }
 
-        item.Status = "resolved";
-        item.ResolvedByUserId = user.GetUserId();
-        item.ResolvedAtUtc = DateTime.UtcNow;
-        item.UpdatedAtUtc = item.ResolvedAtUtc.Value;
+        item.Resolve(user.GetUserId() ?? "unknown");
         await _db.SaveChangesAsync(ct);
 
         await _db.WriteAuditLogAsync(
@@ -378,20 +379,6 @@ public sealed class RequestService : IRequestService
         return (false, true);
     }
 
-    private static string NormalizeRequestType(string value)
-    {
-        var normalized = value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
-        return normalized switch
-        {
-            "reupload" => "reupload_required",
-            "re_upload" => "reupload_required",
-            "clarification" => "clarification_needed",
-            "signature" => "signature_required",
-            "renewal" => "compliance_renewal",
-            _ => normalized
-        };
-    }
-
     private static string NormalizeStatus(string value)
     {
         var normalized = value.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
@@ -414,10 +401,10 @@ public sealed class RequestService : IRequestService
         var now = DateTime.UtcNow;
         var overdueRequests = await _db.Requests
             .Where(x =>
-                x.Status != "resolved" &&
+                x.Status != RequestStatus.Resolved.ToStorageValue() &&
                 x.DueDateUtc != null &&
                 x.DueDateUtc < now &&
-                x.Status != "overdue")
+                x.Status != RequestStatus.Overdue.ToStorageValue())
             .ToListAsync(ct);
 
         if (overdueRequests.Count == 0)
@@ -427,10 +414,10 @@ public sealed class RequestService : IRequestService
 
         foreach (var item in overdueRequests)
         {
-            item.Status = "overdue";
-            item.UpdatedAtUtc = now;
+            item.MarkOverdue();
         }
 
         await _db.SaveChangesAsync(ct);
     }
 }
+

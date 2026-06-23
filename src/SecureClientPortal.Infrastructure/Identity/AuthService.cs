@@ -63,7 +63,7 @@ public sealed class AuthService : IAuthService
             return AuthFailure("ACCOUNT_DISABLED", "This account is disabled.");
         }
 
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.RecordActivity();
         var authSession = await IssueAuthResponseAsync(user, null, httpContext, ct);
         await _db.WriteAuditLogAsync(
             user.Id,
@@ -114,12 +114,9 @@ public sealed class AuthService : IAuthService
             return ServiceResult<object>.ErrorResult("A full name is required to finish account setup.", "INVALID_INVITE_PAYLOAD");
         }
 
-        user.FullName = resolvedFullName;
-        user.PasswordHash = PasswordHasher.Hash(request.Password.Trim());
-        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, "active");
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.CompleteSetup(resolvedFullName, PasswordHasher.Hash(request.Password.Trim()));
 
-        accessToken.ConsumedAtUtc = DateTime.UtcNow;
+        accessToken.Consume();
         await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "superseded", ct, exceptTokenId: accessToken.Id);
         await RevokeSessionsAsync(user.Id, "setup_completed", ct);
 
@@ -164,20 +161,16 @@ public sealed class AuthService : IAuthService
 
         var resetToken = AccessTokenCodec.GenerateToken();
         var resetExpiresAtUtc = DateTime.UtcNow.AddHours(4);
-        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, "password_reset_required", "self_service_reset");
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.SetSecurityStatus(SecurityStatus.PasswordResetRequired, "self_service_reset");
         await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "superseded", ct);
         await RevokeSessionsAsync(user.Id, "password_reset_requested", ct);
 
-        var accessToken = new UserAccessToken
-        {
-            Id = $"uat_{Guid.NewGuid():N}",
-            UserId = user.Id,
-            Purpose = "password_reset",
-            TokenHash = AccessTokenCodec.HashToken(resetToken),
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = resetExpiresAtUtc
-        };
+        var accessToken = UserAccessToken.Create(
+            $"uat_{Guid.NewGuid():N}",
+            user.Id,
+            "password_reset",
+            AccessTokenCodec.HashToken(resetToken),
+            resetExpiresAtUtc);
         var setupUrl = _accessLinkBuilder.BuildPasswordResetUrl(user.Email, resetToken);
         _db.UserAccessTokens.Add(accessToken);
         await _db.SaveChangesAsync(ct);
@@ -224,7 +217,7 @@ public sealed class AuthService : IAuthService
             return AuthFailure("SESSION_INACTIVE", "The account is no longer active.");
         }
 
-        refreshToken.ConsumedAtUtc = DateTime.UtcNow;
+        refreshToken.Consume();
         var authSession = await IssueAuthResponseAsync(user, session, httpContext, ct);
         await _db.WriteAuditLogAsync(
             user.Id,
@@ -274,8 +267,7 @@ public sealed class AuthService : IAuthService
             return AuthFailure("SESSION_EXPIRED", "Your session has expired.");
         }
 
-        user.PasswordHash = PasswordHasher.Hash(request.NextPassword.Trim());
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.SetPasswordHash(PasswordHasher.Hash(request.NextPassword.Trim()));
 
         await RevokeOtherSessionsAsync(user.Id, currentSession.Id, "password_changed", ct);
         await InvalidateRefreshTokensForSessionAsync(currentSession.Id, "rotated", ct);
@@ -308,8 +300,7 @@ public sealed class AuthService : IAuthService
             return;
         }
 
-        session.RevokedAtUtc = DateTime.UtcNow;
-        session.RevokedReason = "logout";
+        session.Revoke("logout");
         await InvalidateRefreshTokensForSessionAsync(session.Id, "logout", ct);
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -426,38 +417,39 @@ public sealed class AuthService : IAuthService
             expires: expires,
             signingCredentials: creds);
 
-        var session = existingSession ?? new UserSession
-        {
-            Id = $"sess_{Guid.NewGuid():N}",
-            UserId = user.Id
-        };
-
-        session.JwtId = jwtId;
-        session.IssuedAtUtc = DateTime.UtcNow;
-        session.ExpiresAtUtc = expires;
-        session.ClientIp = httpContext.Connection.RemoteIpAddress?.ToString();
-        session.UserAgent = httpContext.Request.Headers.UserAgent.ToString();
-        session.RevokedAtUtc = null;
-        session.RevokedReason = null;
+        var session = existingSession is null
+            ? UserSession.Start(
+                $"sess_{Guid.NewGuid():N}",
+                user.Id,
+                jwtId,
+                expires,
+                httpContext.Connection.RemoteIpAddress?.ToString(),
+                httpContext.Request.Headers.UserAgent.ToString())
+            : existingSession;
 
         if (existingSession is null)
         {
             _db.UserSessions.Add(session);
         }
+        else
+        {
+            session.Refresh(
+                jwtId,
+                expires,
+                httpContext.Connection.RemoteIpAddress?.ToString(),
+                httpContext.Request.Headers.UserAgent.ToString());
+        }
 
         await InvalidateRefreshTokensForSessionAsync(session.Id, "rotated", ct);
         var refreshTokenValue = AccessTokenCodec.GenerateToken();
-        var refreshToken = new UserAccessToken
-        {
-            Id = $"uat_{Guid.NewGuid():N}",
-            UserId = user.Id,
-            Purpose = "refresh",
-            TokenHash = AccessTokenCodec.HashToken(refreshTokenValue),
-            SessionId = session.Id,
-            CreatedByUserId = user.Id,
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = DateTime.UtcNow.AddDays(14)
-        };
+        var refreshToken = UserAccessToken.Create(
+            $"uat_{Guid.NewGuid():N}",
+            user.Id,
+            "refresh",
+            AccessTokenCodec.HashToken(refreshTokenValue),
+            DateTime.UtcNow.AddDays(14),
+            session.Id,
+            user.Id);
         _db.UserAccessTokens.Add(refreshToken);
         await _db.SaveChangesAsync(ct);
 
@@ -497,8 +489,7 @@ public sealed class AuthService : IAuthService
             .ToListAsync(ct);
         foreach (var token in tokens)
         {
-            token.InvalidatedAtUtc = DateTime.UtcNow;
-            token.InvalidatedReason = reason;
+            token.Invalidate(reason);
         }
     }
 
@@ -512,8 +503,7 @@ public sealed class AuthService : IAuthService
             .ToListAsync(ct);
         foreach (var token in tokens)
         {
-            token.InvalidatedAtUtc = DateTime.UtcNow;
-            token.InvalidatedReason = reason;
+            token.Invalidate(reason);
         }
     }
 
@@ -524,8 +514,7 @@ public sealed class AuthService : IAuthService
             .ToListAsync(ct);
         foreach (var session in activeSessions)
         {
-            session.RevokedAtUtc = DateTime.UtcNow;
-            session.RevokedReason = reason;
+            session.Revoke(reason);
             await InvalidateRefreshTokensForSessionAsync(session.Id, reason, ct);
         }
     }
@@ -541,8 +530,7 @@ public sealed class AuthService : IAuthService
             .ToListAsync(ct);
         foreach (var session in activeSessions)
         {
-            session.RevokedAtUtc = DateTime.UtcNow;
-            session.RevokedReason = reason;
+            session.Revoke(reason);
             await InvalidateRefreshTokensForSessionAsync(session.Id, reason, ct);
         }
     }
@@ -552,3 +540,4 @@ public sealed class AuthService : IAuthService
         return ServiceResult<object>.UnauthorizedResult(message, code);
     }
 }
+

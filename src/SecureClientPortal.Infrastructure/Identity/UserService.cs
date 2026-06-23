@@ -100,31 +100,25 @@ public sealed class UserService : IUserService
 
         var inviteToken = AccessTokenCodec.GenerateToken();
         var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
-        var user = new User
-        {
-            Id = $"u_{Guid.NewGuid():N}",
-            FullName = request.FullName.Trim(),
-            Email = email,
-            Role = normalizedRole,
-            PasswordHash = PasswordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "ChangeMe123!" : request.Password),
-            ClientIdsJson = JsonSerializer.Serialize(clientIds),
-            ProfileJson = string.IsNullOrWhiteSpace(request.Company)
+        var user = User.CreateInvited(
+            $"u_{Guid.NewGuid():N}",
+            request.FullName,
+            email,
+            IdentityDomainValues.ToUserRole(normalizedRole),
+            PasswordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "ChangeMe123!" : request.Password),
+            JsonSerializer.Serialize(clientIds),
+            string.IsNullOrWhiteSpace(request.Company)
                 ? null
-                : JsonSerializer.Serialize(new { company = request.Company.Trim() }),
-            SecurityJson = UserSecurityProfile.SetStatus(null, "invited"),
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
-        var invite = new UserAccessToken
-        {
-            Id = $"uat_{Guid.NewGuid():N}",
-            UserId = user.Id,
-            Purpose = "invite",
-            TokenHash = AccessTokenCodec.HashToken(inviteToken),
-            CreatedByUserId = actor.GetUserId(),
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = inviteExpiresAtUtc
-        };
+                : JsonSerializer.Serialize(new { company = request.Company.Trim() }));
+
+        var invite = UserAccessToken.Create(
+            $"uat_{Guid.NewGuid():N}",
+            user.Id,
+            "invite",
+            AccessTokenCodec.HashToken(inviteToken),
+            inviteExpiresAtUtc,
+            null,
+            actor.GetUserId());
         var setupUrl = _accessLinkBuilder.BuildSetupUrl(user.Email, inviteToken);
 
         _db.Users.Add(user);
@@ -169,8 +163,7 @@ public sealed class UserService : IUserService
             return ServiceResult<object>.NotFoundResult();
         }
 
-        user.SecurityJson = UserSecurityProfile.SetStatus(user.SecurityJson, request.IsActive ? "active" : "disabled", request.Reason);
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        user.SetSecurityStatus(request.IsActive ? SecurityStatus.Active : SecurityStatus.Disabled, request.Reason);
 
         if (!request.IsActive)
         {
@@ -179,8 +172,7 @@ public sealed class UserService : IUserService
                 .ToListAsync(ct);
             foreach (var session in activeSessions)
             {
-                session.RevokedAtUtc = DateTime.UtcNow;
-                session.RevokedReason = "user_deactivated";
+                session.Revoke("user_deactivated");
             }
         }
 

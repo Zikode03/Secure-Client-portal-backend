@@ -41,16 +41,12 @@ public sealed class ComplianceService : IComplianceService
             return ServiceResult<ComplianceCategory>.ErrorResult("Compliance category code already exists.", statusCode: StatusCodes.Status409Conflict);
         }
 
-        var item = new ComplianceCategory
-        {
-            Id = $"cc_{Guid.NewGuid():N}",
-            Name = request.Name.Trim(),
-            Description = request.Description.Trim(),
-            Code = normalizedCode,
-            IsActive = request.IsActive,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var item = ComplianceCategory.Create(
+            $"cc_{Guid.NewGuid():N}",
+            request.Name,
+            request.Description,
+            normalizedCode,
+            request.IsActive);
 
         _db.ComplianceCategories.Add(item);
         await _db.SaveChangesAsync(ct);
@@ -62,10 +58,10 @@ public sealed class ComplianceService : IComplianceService
     {
         var defaults = new[]
         {
-            new ComplianceCategory { Id = "cc_tax_compliance", Name = "Tax Compliance", Code = "TAX", Description = "Income tax, VAT, and tax authority filing obligations.", IsActive = true },
-            new ComplianceCategory { Id = "cc_cipc_compliance", Name = "CIPC Compliance", Code = "CIPC", Description = "Company registration, annual returns, and beneficial ownership obligations.", IsActive = true },
-            new ComplianceCategory { Id = "cc_payroll_compliance", Name = "Payroll Compliance", Code = "PAYROLL", Description = "Payroll submissions, UIF, PAYE, and employee records.", IsActive = true },
-            new ComplianceCategory { Id = "cc_popia_compliance", Name = "POPIA Compliance", Code = "POPIA", Description = "Privacy controls, information processing, and consent evidence.", IsActive = true }
+            ComplianceCategory.Create("cc_tax_compliance", "Tax Compliance", "Income tax, VAT, and tax authority filing obligations.", "TAX", true),
+            ComplianceCategory.Create("cc_cipc_compliance", "CIPC Compliance", "Company registration, annual returns, and beneficial ownership obligations.", "CIPC", true),
+            ComplianceCategory.Create("cc_payroll_compliance", "Payroll Compliance", "Payroll submissions, UIF, PAYE, and employee records.", "PAYROLL", true),
+            ComplianceCategory.Create("cc_popia_compliance", "POPIA Compliance", "Privacy controls, information processing, and consent evidence.", "POPIA", true)
         };
 
         foreach (var category in defaults)
@@ -73,17 +69,11 @@ public sealed class ComplianceService : IComplianceService
             var existing = await _db.ComplianceCategories.FirstOrDefaultAsync(x => x.Id == category.Id || x.Code == category.Code, ct);
             if (existing is null)
             {
-                category.CreatedAtUtc = DateTime.UtcNow;
-                category.UpdatedAtUtc = DateTime.UtcNow;
                 _db.ComplianceCategories.Add(category);
             }
             else
             {
-                existing.Name = category.Name;
-                existing.Code = category.Code;
-                existing.Description = category.Description;
-                existing.IsActive = true;
-                existing.UpdatedAtUtc = DateTime.UtcNow;
+                existing.UpdateDetails(category.Name, category.Description, category.Code, true);
             }
         }
 
@@ -152,21 +142,17 @@ public sealed class ComplianceService : IComplianceService
             }
         }
 
-        var item = new ComplianceItem
-        {
-            Id = $"ci_{Guid.NewGuid():N}",
-            ClientId = request.ClientId,
-            CategoryId = request.CategoryId,
-            Name = request.Name.Trim(),
-            Status = status,
-            OwnerUserId = string.IsNullOrWhiteSpace(request.OwnerUserId) ? null : request.OwnerUserId.Trim(),
-            RiskLevel = riskLevel,
-            RequiredDocumentCategory = string.IsNullOrWhiteSpace(request.RequiredDocumentCategory) ? null : NormalizeDocumentCategory(request.RequiredDocumentCategory),
-            DueDateUtc = request.DueDateUtc,
-            ExpiryDateUtc = request.ExpiryDateUtc,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var item = ComplianceItem.Create(
+            $"ci_{Guid.NewGuid():N}",
+            request.ClientId,
+            request.CategoryId,
+            request.Name,
+            ComplianceDomainValues.ToComplianceItemStatus(status),
+            request.OwnerUserId,
+            ComplianceDomainValues.ToComplianceRiskLevel(riskLevel),
+            request.RequiredDocumentCategory,
+            request.DueDateUtc,
+            request.ExpiryDateUtc);
 
         _db.ComplianceItems.Add(item);
         await _db.SaveChangesAsync(ct);
@@ -214,15 +200,15 @@ public sealed class ComplianceService : IComplianceService
             }
         }
 
-        item.Name = request.Name.Trim();
-        item.Status = status;
-        item.OwnerUserId = string.IsNullOrWhiteSpace(request.OwnerUserId) ? null : request.OwnerUserId.Trim();
-        item.RiskLevel = riskLevel;
-        item.RequiredDocumentCategory = string.IsNullOrWhiteSpace(request.RequiredDocumentCategory) ? null : NormalizeDocumentCategory(request.RequiredDocumentCategory);
-        item.LinkedDocumentId = string.IsNullOrWhiteSpace(request.LinkedDocumentId) ? null : request.LinkedDocumentId.Trim();
-        item.DueDateUtc = request.DueDateUtc;
-        item.ExpiryDateUtc = request.ExpiryDateUtc;
-        item.UpdatedAtUtc = DateTime.UtcNow;
+        item.Update(
+            request.Name,
+            ComplianceDomainValues.ToComplianceItemStatus(status),
+            request.OwnerUserId,
+            ComplianceDomainValues.ToComplianceRiskLevel(riskLevel),
+            request.RequiredDocumentCategory,
+            request.LinkedDocumentId,
+            request.DueDateUtc,
+            request.ExpiryDateUtc);
 
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(user, "compliance.item_updated", "compliance_item", item.Id, item.ClientId, JsonSerializer.Serialize(new { item.Status, item.LinkedDocumentId, item.OwnerUserId, item.RiskLevel }), ct);
@@ -303,17 +289,13 @@ public sealed class ComplianceService : IComplianceService
             return ServiceResult<ComplianceReminder>.ErrorResult("Reminder recipient user was not found.");
         }
 
-        var reminder = new ComplianceReminder
-        {
-            Id = $"cr_{Guid.NewGuid():N}",
-            ComplianceItemId = request.ComplianceItemId,
-            ClientId = complianceItem.ClientId,
-            RecipientUserId = request.RecipientUserId,
-            Type = request.Type.Trim().ToLowerInvariant(),
-            Status = "pending",
-            ScheduledForUtc = request.ScheduledForUtc,
-            CreatedAtUtc = DateTime.UtcNow
-        };
+        var reminder = ComplianceReminder.Create(
+            $"cr_{Guid.NewGuid():N}",
+            request.ComplianceItemId,
+            complianceItem.ClientId,
+            request.RecipientUserId,
+            request.Type,
+            request.ScheduledForUtc);
 
         _db.ComplianceReminders.Add(reminder);
         await _db.SaveChangesAsync(ct);
@@ -355,8 +337,7 @@ public sealed class ComplianceService : IComplianceService
             return ServiceResult<ComplianceReminder>.ErrorResult("Invalid reminder status.");
         }
 
-        item.Status = normalized;
-        item.SentAtUtc = normalized == "sent" ? DateTime.UtcNow : item.SentAtUtc;
+        item.SetStatus(ComplianceDomainValues.ToComplianceReminderStatus(normalized));
 
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(user, "compliance.reminder_status_updated", "compliance_reminder", item.Id, item.ClientId, JsonSerializer.Serialize(new { item.Status }), ct);
@@ -432,9 +413,8 @@ public sealed class ComplianceService : IComplianceService
         });
     }
 
-    private static string NormalizeStatus(string raw) => raw.Trim().ToLowerInvariant();
-    private static string NormalizeRiskLevel(string raw) => raw.Trim().ToLowerInvariant();
-    private static string NormalizeDocumentCategory(string raw) => raw.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
+    private static string NormalizeStatus(string raw) => ComplianceDomainValues.ToComplianceItemStatus(raw).ToStorageValue();
+    private static string NormalizeRiskLevel(string raw) => ComplianceDomainValues.ToComplianceRiskLevel(raw).ToStorageValue();
 
     private static string GenerateCategoryCode(string name)
     {
@@ -562,3 +542,4 @@ public sealed class ComplianceService : IComplianceService
         return $"{item.Name} is {alertLevel} risk and needs follow-up.";
     }
 }
+

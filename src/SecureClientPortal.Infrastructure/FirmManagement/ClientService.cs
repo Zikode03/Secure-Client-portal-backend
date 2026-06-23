@@ -60,24 +60,26 @@ public sealed class ClientService : IClientService
             throw new ArgumentException("Assigned accountant user does not exist or is not an accountant.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Id)) request.Id = $"c_{Guid.NewGuid():N}";
-        request.AssignedAccountantId = normalizedAssignedAccountantId;
-        request.Status = NormalizeStatus(request.Status);
-        request.CreatedAtUtc = DateTime.UtcNow;
-        request.UpdatedAtUtc = request.CreatedAtUtc;
+        var created = Client.Create(
+            string.IsNullOrWhiteSpace(request.Id) ? $"c_{Guid.NewGuid():N}" : request.Id,
+            request.Name,
+            request.EntityType,
+            request.PrimaryContact,
+            request.Email,
+            FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
+        created.AssignAccountant(normalizedAssignedAccountantId);
+        created.UpdateComplianceHealth(request.ComplianceHealth);
 
-        _db.Clients.Add(request);
-        _db.ClientAssignments.Add(new ClientAssignment
-        {
-            Id = $"ca_{Guid.NewGuid():N}",
-            AccountantUserId = request.AssignedAccountantId,
-            ClientId = request.Id,
-            CreatedAtUtc = request.CreatedAtUtc
-        });
+        _db.Clients.Add(created);
+        _db.ClientAssignments.Add(ClientAssignment.Create(
+            $"ca_{Guid.NewGuid():N}",
+            created.AssignedAccountantId,
+            created.Id,
+            created.CreatedAtUtc));
         await _db.SaveChangesAsync(ct);
-        await _db.WriteAuditLogAsync(user, "clients.created", "client", request.Id, request.Id, JsonSerializer.Serialize(new { request.Name, request.AssignedAccountantId }), ct);
+        await _db.WriteAuditLogAsync(user, "clients.created", "client", created.Id, created.Id, JsonSerializer.Serialize(new { created.Name, created.AssignedAccountantId }), ct);
 
-        return (false, request);
+        return (false, created);
     }
 
     public async Task<(bool forbidden, Client? updated)> UpdateAsync(string id, Client request, ClaimsPrincipal user, CancellationToken ct = default)
@@ -88,14 +90,10 @@ public sealed class ClientService : IClientService
         var existing = await _db.Clients.FindAsync([id], ct);
         if (existing is null) return (false, null);
 
-        existing.Name = request.Name;
-        existing.EntityType = request.EntityType;
-        existing.Status = NormalizeStatus(request.Status);
-        existing.ComplianceHealth = request.ComplianceHealth;
-        existing.AssignedAccountantId = request.AssignedAccountantId;
-        existing.PrimaryContact = request.PrimaryContact;
-        existing.Email = request.Email;
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.UpdateDetails(request.Name, request.EntityType, request.PrimaryContact, request.Email);
+        existing.ChangeStatus(FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
+        existing.UpdateComplianceHealth(request.ComplianceHealth);
+        existing.AssignAccountant(request.AssignedAccountantId);
 
         await _db.SaveChangesAsync(ct);
         return (false, existing);
@@ -109,8 +107,7 @@ public sealed class ClientService : IClientService
         var existing = await _db.Clients.FindAsync([id], ct);
         if (existing is null) return (false, null);
 
-        existing.Status = NormalizeStatus(request.Status);
-        existing.UpdatedAtUtc = DateTime.UtcNow;
+        existing.ChangeStatus(FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(user, "clients.status_updated", "client", existing.Id, existing.Id, JsonSerializer.Serialize(new { existing.Status }), ct);
 
@@ -140,9 +137,11 @@ public sealed class ClientService : IClientService
             "active" => "active",
             "inactive" => "inactive",
             "pending" => "inactive",
-            "archived" => "inactive",
+            "archived" => "archived",
+            "prospect" => "prospect",
             "at_risk" => "inactive",
             _ => "active"
         };
     }
 }
+
