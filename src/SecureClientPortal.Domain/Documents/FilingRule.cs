@@ -5,7 +5,7 @@ namespace SecureClientPortal.Backend.Models;
 /// </summary>
 public class FilingRule
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Category { get; private set; } = string.Empty;
     public bool IsEnabled { get; private set; } = true;
     public string Description { get; private set; } = string.Empty;
@@ -13,7 +13,7 @@ public class FilingRule
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static FilingRule Create(
-        string id,
+        Guid id,
         string category,
         string description,
         bool isEnabled,
@@ -37,3 +37,9 @@ public class FilingRule
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

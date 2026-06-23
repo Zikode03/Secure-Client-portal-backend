@@ -166,7 +166,7 @@ public sealed class AuthService : IAuthService
         await RevokeSessionsAsync(user.Id, "password_reset_requested", ct);
 
         var accessToken = UserAccessToken.Create(
-            $"uat_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             user.Id,
             "password_reset",
             AccessTokenCodec.HashToken(resetToken),
@@ -194,7 +194,7 @@ public sealed class AuthService : IAuthService
         IdentityValidators.ValidateRefresh(request);
 
         var refreshToken = await FindActiveAccessTokenAsync(request.RefreshToken, ["refresh"], ct);
-        if (refreshToken is null || string.IsNullOrWhiteSpace(refreshToken.SessionId))
+        if (refreshToken is null || !refreshToken.SessionId.HasValue)
         {
             return AuthFailure("REFRESH_TOKEN_INVALID", "The refresh token is invalid or expired.");
         }
@@ -236,10 +236,10 @@ public sealed class AuthService : IAuthService
     {
         IdentityValidators.ValidateChangePassword(request);
 
-        var userId = actor.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+        var userIdValue = actor.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
             ?? actor.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var jwtId = actor.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
-        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(jwtId))
+        var jwtIdValue = actor.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        if (!Guid.TryParse(userIdValue, out var userId) || !Guid.TryParse(jwtIdValue, out var jwtId))
         {
             return AuthFailure("SESSION_EXPIRED", "Your session has expired.");
         }
@@ -288,8 +288,8 @@ public sealed class AuthService : IAuthService
 
     public async Task LogoutAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
-        var jwtId = actor.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
-        if (string.IsNullOrWhiteSpace(jwtId))
+        var jwtIdValue = actor.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        if (!Guid.TryParse(jwtIdValue, out var jwtId))
         {
             return;
         }
@@ -315,9 +315,9 @@ public sealed class AuthService : IAuthService
 
     public async Task<ServiceResult<object>> MeAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
-        var userId = actor.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+        var userIdValue = actor.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
             ?? actor.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrWhiteSpace(userId))
+        if (!Guid.TryParse(userIdValue, out var userId))
         {
             return ServiceResult<object>.UnauthorizedResult();
         }
@@ -359,16 +359,16 @@ public sealed class AuthService : IAuthService
 
         var permissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, user.Role, ct);
         var scope = RolePermissions.NormalizeScope(role.Scope);
-        var jwtId = Guid.NewGuid().ToString("N");
+        var jwtId = Guid.NewGuid();
         var expires = DateTime.UtcNow.AddMinutes(_jwtOptions.ExpiresMinutes);
 
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id),
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
-            new(JwtRegisteredClaimNames.Jti, jwtId),
+            new(JwtRegisteredClaimNames.Jti, jwtId.ToString()),
             new(ClaimTypes.Name, user.FullName),
-            new(ClaimTypes.NameIdentifier, user.Id),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Role, user.Role),
             new("role_scope", scope),
         };
@@ -382,13 +382,13 @@ public sealed class AuthService : IAuthService
         {
             try
             {
-                var clientIds = JsonSerializer.Deserialize<string[]>(user.ClientIdsJson)
-                    ?.Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                var clientIds = JsonSerializer.Deserialize<Guid[]>(user.ClientIdsJson)
+                    ?.Where(x => x != Guid.Empty)
+                    .Distinct()
                     .ToArray() ?? [];
                 foreach (var clientId in clientIds)
                 {
-                    claims.Add(new Claim("client_id", clientId));
+                    claims.Add(new Claim("client_id", clientId.ToString()));
                 }
             }
             catch
@@ -404,7 +404,7 @@ public sealed class AuthService : IAuthService
                 .ToListAsync(ct);
             foreach (var clientId in assignedClientIds)
             {
-                claims.Add(new Claim("assigned_client_id", clientId));
+                claims.Add(new Claim("assigned_client_id", clientId.ToString()));
             }
         }
 
@@ -419,7 +419,7 @@ public sealed class AuthService : IAuthService
 
         var session = existingSession is null
             ? UserSession.Start(
-                $"sess_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 user.Id,
                 jwtId,
                 expires,
@@ -443,7 +443,7 @@ public sealed class AuthService : IAuthService
         await InvalidateRefreshTokensForSessionAsync(session.Id, "rotated", ct);
         var refreshTokenValue = AccessTokenCodec.GenerateToken();
         var refreshToken = UserAccessToken.Create(
-            $"uat_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             user.Id,
             "refresh",
             AccessTokenCodec.HashToken(refreshTokenValue),
@@ -478,7 +478,7 @@ public sealed class AuthService : IAuthService
             x.InvalidatedAtUtc == null, ct);
     }
 
-    private async Task InvalidateAccessTokensAsync(string userId, IReadOnlyCollection<string> purposes, string reason, CancellationToken ct, string? exceptTokenId = null)
+    private async Task InvalidateAccessTokensAsync(Guid userId, IReadOnlyCollection<string> purposes, string reason, CancellationToken ct, Guid? exceptTokenId = null)
     {
         var tokens = await _db.UserAccessTokens
             .Where(x => x.UserId == userId &&
@@ -493,7 +493,7 @@ public sealed class AuthService : IAuthService
         }
     }
 
-    private async Task InvalidateRefreshTokensForSessionAsync(string sessionId, string reason, CancellationToken ct)
+    private async Task InvalidateRefreshTokensForSessionAsync(Guid sessionId, string reason, CancellationToken ct)
     {
         var tokens = await _db.UserAccessTokens
             .Where(x => x.SessionId == sessionId &&
@@ -507,7 +507,7 @@ public sealed class AuthService : IAuthService
         }
     }
 
-    private async Task RevokeSessionsAsync(string userId, string reason, CancellationToken ct)
+    private async Task RevokeSessionsAsync(Guid userId, string reason, CancellationToken ct)
     {
         var activeSessions = await _db.UserSessions
             .Where(x => x.UserId == userId && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
@@ -519,7 +519,7 @@ public sealed class AuthService : IAuthService
         }
     }
 
-    private async Task RevokeOtherSessionsAsync(string userId, string currentSessionId, string reason, CancellationToken ct)
+    private async Task RevokeOtherSessionsAsync(Guid userId, Guid currentSessionId, string reason, CancellationToken ct)
     {
         var activeSessions = await _db.UserSessions
             .Where(x =>

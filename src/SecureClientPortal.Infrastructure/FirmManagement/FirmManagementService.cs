@@ -4,7 +4,10 @@ using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Application.FirmManagement;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+
 
 namespace SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
 
@@ -119,7 +122,7 @@ public sealed class FirmManagementService : IFirmManagementService
             for (var index = 0; index < template.RequiredDocumentTemplateIds.Length; index++)
             {
                 _db.MonthlyPackTemplateItems.Add(MonthlyPackTemplateItem.Create(
-                    $"mpti_{template.Id}_{index + 1}",
+                    DeterministicGuid($"mpti:{template.Id}:{index + 1}"),
                     template.Id,
                     template.RequiredDocumentTemplateIds[index],
                     index + 1));
@@ -233,7 +236,7 @@ public sealed class FirmManagementService : IFirmManagementService
         }
 
         await EnsureEscalationSettingAsync(ct);
-        await _db.WriteAuditLogAsync(actor.UserId, actor.RoleScope, "firm.management_defaults_seeded", "firm_management", "defaults", null, null, ct);
+        await _db.WriteAuditLogAsync(actor.UserId, actor.RoleScope, "firm.management_defaults_seeded", "firm_management", DeterministicGuid("firm.management_defaults_seeded"), null, null, ct);
     }
 
     private async Task EnsureEscalationSettingAsync(CancellationToken ct)
@@ -250,9 +253,9 @@ public sealed class FirmManagementService : IFirmManagementService
         await _db.SaveChangesAsync(ct);
     }
 
-    private async Task WriteAuditAsync(CurrentUserContext actor, string action, string entityId, CancellationToken ct)
+    private async Task WriteAuditAsync(CurrentUserContext actor, string action, string entityKey, CancellationToken ct)
     {
-        await _db.WriteAuditLogAsync(actor.UserId, actor.RoleScope, action, "firm_management", entityId, null, null, ct);
+        await _db.WriteAuditLogAsync(actor.UserId, actor.RoleScope, action, "firm_management", DeterministicGuid(entityKey), null, null, ct);
     }
 
     private static RequiredDocumentTemplateDto MapRequiredDocumentTemplateDto(RequiredDocumentTemplate item)
@@ -269,39 +272,48 @@ public sealed class FirmManagementService : IFirmManagementService
 
     private static RequiredDocumentTemplateDto[] DefaultRequiredDocumentTemplates() =>
     [
-        new("rdt_bank_statement", "Bank Statement", "Default monthly bank statement requirement.", "bank_statement", true, 5),
-        new("rdt_invoices", "Invoices", "Default monthly invoice support requirement.", "invoices", true, 5),
-        new("rdt_signed_docs", "Signed Documents", "Approvals and signatures where needed.", "signed_documents", false, null)
+        new(DeterministicGuid("rdt_bank_statement"), "Bank Statement", "Default monthly bank statement requirement.", "bank_statement", true, 5),
+        new(DeterministicGuid("rdt_invoices"), "Invoices", "Default monthly invoice support requirement.", "invoices", true, 5),
+        new(DeterministicGuid("rdt_signed_docs"), "Signed Documents", "Approvals and signatures where needed.", "signed_documents", false, null)
     ];
 
     private static MonthlyPackTemplateDto[] DefaultMonthlyPackTemplates() =>
     [
-        new("mpt_default", "Default Monthly Pack", "Standard monthly client collection pack.", ["rdt_bank_statement", "rdt_invoices"], 1)
+        new(DeterministicGuid("mpt_default"), "Default Monthly Pack", "Standard monthly client collection pack.", [DeterministicGuid("rdt_bank_statement"), DeterministicGuid("rdt_invoices")], 1)
     ];
 
     private static RequestTemplateDto[] DefaultRequestTemplates() =>
     [
-        new("rqt_reupload", "Re-upload Request", "reupload_required", "Re-upload required: {{documentName}}", "{{reason}}", "high", 2),
-        new("rqt_missing", "Missing Document Request", "missing_document", "Missing document: {{documentName}}", "Please upload the required document.", "medium", 3),
-        new("rqt_signature", "Signature Request", "signature_required", "Signature required: {{documentName}}", "Please review and sign the attached item.", "medium", 5)
+        new(DeterministicGuid("rqt_reupload"), "Re-upload Request", "reupload_required", "Re-upload required: {{documentName}}", "{{reason}}", "high", 2),
+        new(DeterministicGuid("rqt_missing"), "Missing Document Request", "missing_document", "Missing document: {{documentName}}", "Please upload the required document.", "medium", 3),
+        new(DeterministicGuid("rqt_signature"), "Signature Request", "signature_required", "Signature required: {{documentName}}", "Please review and sign the attached item.", "medium", 5)
     ];
 
     private static ReminderRuleDto[] DefaultReminderRules() =>
     [
-        new("rr_deadline_7", "7-day reminder", "deadline_approaching", 7, "client", "A compliance deadline is due in 7 days.", true),
-        new("rr_deadline_1", "1-day reminder", "deadline_approaching", 1, "client", "A compliance deadline is due tomorrow.", true)
+        new(DeterministicGuid("rr_deadline_7"), "7-day reminder", "deadline_approaching", 7, "client", "A compliance deadline is due in 7 days.", true),
+        new(DeterministicGuid("rr_deadline_1"), "1-day reminder", "deadline_approaching", 1, "client", "A compliance deadline is due tomorrow.", true)
     ];
 
     private static DeadlineRuleDto[] DefaultDeadlineRules() =>
     [
-        new("dr_monthly_pack", "Monthly pack due date", "monthly_pack", 5, 2, "high", true),
-        new("dr_compliance_item", "Compliance item due date", "compliance_item", 25, 0, "critical", true)
+        new(DeterministicGuid("dr_monthly_pack"), "Monthly pack due date", "monthly_pack", 5, 2, "high", true),
+        new(DeterministicGuid("dr_compliance_item"), "Compliance item due date", "compliance_item", 25, 0, "critical", true)
     ];
+
+    private static Guid DeterministicGuid(string value)
+    {
+        using var md5 = MD5.Create();
+        return new Guid(md5.ComputeHash(Encoding.UTF8.GetBytes($"secure-client-portal:{value}")));
+    }
 
     private static EscalationRuleDto[] DefaultEscalationRules() =>
     [
-        new("er_client_overdue", "Client overdue escalation", "overdue_client_action", 2, "accountant", "create_request", true),
-        new("er_accountant_overdue", "Accountant overdue escalation", "overdue_accountant_action", 5, "admin", "notify_admin", true)
+        new(DeterministicGuid("er_client_overdue"), "Client overdue escalation", "overdue_client_action", 2, "accountant", "create_request", true),
+        new(DeterministicGuid("er_accountant_overdue"), "Accountant overdue escalation", "overdue_accountant_action", 5, "admin", "notify_admin", true)
     ];
 }
+
+
+
 

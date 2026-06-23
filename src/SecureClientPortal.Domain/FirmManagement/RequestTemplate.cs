@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class RequestTemplate
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string RequestType { get; private set; } = string.Empty;
     public string TitleTemplate { get; private set; } = string.Empty;
@@ -14,7 +14,7 @@ public class RequestTemplate
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static RequestTemplate Create(
-        string id,
+        Guid id,
         string name,
         string requestType,
         string titleTemplate,
@@ -58,3 +58,9 @@ public class RequestTemplate
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

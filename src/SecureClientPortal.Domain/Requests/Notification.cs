@@ -2,9 +2,9 @@ namespace SecureClientPortal.Backend.Models;
 
 public class Notification
 {
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; private set; } = string.Empty;
-    public string? ClientId { get; private set; }
+    public Guid Id { get; set; }
+    public Guid UserId { get; private set; }
+    public Guid? ClientId { get; private set; }
     public string Type { get; private set; } = string.Empty;
     public string Title { get; private set; } = string.Empty;
     public string Message { get; private set; } = string.Empty;
@@ -13,7 +13,7 @@ public class Notification
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? ReadAtUtc { get; private set; }
 
-    public static Notification Create(string id, string userId, string? clientId, string type, string title, string message, string? linkUrl, DateTime? createdAtUtc = null)
+    public static Notification Create(Guid id, Guid userId, Guid? clientId, string type, string title, string message, string? linkUrl, DateTime? createdAtUtc = null)
     {
         var item = new Notification
         {
@@ -22,7 +22,7 @@ public class Notification
         };
 
         item.UserId = userId;
-        item.ClientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId.Trim();
+        item.ClientId = clientId == Guid.Empty ? null : clientId;
         item.Type = type.Trim();
         item.Title = title.Trim();
         item.Message = message.Trim();
@@ -44,3 +44,9 @@ public class Notification
         ReadAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

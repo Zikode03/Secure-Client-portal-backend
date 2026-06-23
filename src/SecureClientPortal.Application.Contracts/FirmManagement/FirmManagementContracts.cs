@@ -1,7 +1,7 @@
 namespace SecureClientPortal.Backend.Application.Contracts;
 
 public record RequiredDocumentTemplateDto(
-    string Id,
+    Guid Id,
     string Name,
     string Description,
     string DocumentCategory,
@@ -9,14 +9,14 @@ public record RequiredDocumentTemplateDto(
     int? DefaultDueDayOfMonth);
 
 public record MonthlyPackTemplateDto(
-    string Id,
+    Guid Id,
     string Name,
     string Description,
-    string[] RequiredDocumentTemplateIds,
+    Guid[] RequiredDocumentTemplateIds,
     int AutoCreateDayOfMonth);
 
 public record RequestTemplateDto(
-    string Id,
+    Guid Id,
     string Name,
     string RequestType,
     string TitleTemplate,
@@ -25,7 +25,7 @@ public record RequestTemplateDto(
     int? DefaultDueInDays);
 
 public record ReminderRuleDto(
-    string Id,
+    Guid Id,
     string Name,
     string TriggerType,
     int DaysBeforeDue,
@@ -34,7 +34,7 @@ public record ReminderRuleDto(
     bool IsEnabled);
 
 public record DeadlineRuleDto(
-    string Id,
+    Guid Id,
     string Name,
     string Scope,
     int DueDayOfMonth,
@@ -43,7 +43,7 @@ public record DeadlineRuleDto(
     bool IsEnabled);
 
 public record EscalationRuleDto(
-    string Id,
+    Guid Id,
     string Name,
     string TriggerType,
     int DaysAfterDue,

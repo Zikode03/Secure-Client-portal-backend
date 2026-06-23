@@ -2,32 +2,32 @@ namespace SecureClientPortal.Backend.Models;
 
 public class Document
 {
-    public string Id { get; set; } = string.Empty;
-    public string ClientId { get; set; } = string.Empty;
-    public string MonthlyPackId { get; private set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid ClientId { get; set; }
+    public Guid MonthlyPackId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Category { get; private set; } = "general";
-    public string? DocumentSlotId { get; private set; }
+    public Guid? DocumentSlotId { get; private set; }
     public string Status { get; private set; } = DocumentStatus.Uploaded.ToStorageValue();
     public string FileType { get; private set; } = "application/octet-stream";
     public long SizeBytes { get; private set; }
     public string? StorageKey { get; private set; }
-    public string UploadedByUserId { get; private set; } = string.Empty;
+    public Guid UploadedByUserId { get; private set; }
     public int CurrentVersionNumber { get; private set; } = 1;
     public bool IsFiled { get; private set; }
     public DateTime? FiledAtUtc { get; private set; }
-    public string? FiledByUserId { get; private set; }
+    public Guid? FiledByUserId { get; private set; }
     public DateTime UploadedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static Document CreateUploaded(string id, string clientId, string monthlyPackId, string name, string category, string? documentSlotId, string fileType, long sizeBytes, string? storageKey, string uploadedByUserId)
+    public static Document CreateUploaded(Guid id, Guid clientId, Guid monthlyPackId, string name, string category, Guid? documentSlotId, string fileType, long sizeBytes, string? storageKey, Guid uploadedByUserId)
     {
         var document = new Document { Id = id, ClientId = clientId };
         document.ApplyUpload(monthlyPackId, name, category, documentSlotId, fileType, sizeBytes, storageKey, uploadedByUserId, 1);
         return document;
     }
 
-    public void ReplaceUpload(string monthlyPackId, string name, string category, string? documentSlotId, string fileType, long sizeBytes, string? storageKey, string uploadedByUserId)
+    public void ReplaceUpload(Guid monthlyPackId, string name, string category, Guid? documentSlotId, string fileType, long sizeBytes, string? storageKey, Guid uploadedByUserId)
     {
         ApplyUpload(monthlyPackId, name, category, documentSlotId, fileType, sizeBytes, storageKey, uploadedByUserId, CurrentVersionNumber + 1);
     }
@@ -62,7 +62,7 @@ public class Document
         Touch();
     }
 
-    public void File(string filedByUserId)
+    public void File(Guid filedByUserId)
     {
         Status = DocumentStatus.Filed.ToStorageValue();
         IsFiled = true;
@@ -78,12 +78,12 @@ public class Document
         FiledByUserId = null;
     }
 
-    private void ApplyUpload(string monthlyPackId, string name, string category, string? documentSlotId, string fileType, long sizeBytes, string? storageKey, string uploadedByUserId, int versionNumber)
+    private void ApplyUpload(Guid monthlyPackId, string name, string category, Guid? documentSlotId, string fileType, long sizeBytes, string? storageKey, Guid uploadedByUserId, int versionNumber)
     {
         MonthlyPackId = monthlyPackId;
         Name = name;
         Category = DocumentDomainValues.NormalizeCategory(category);
-        DocumentSlotId = string.IsNullOrWhiteSpace(documentSlotId) ? null : documentSlotId;
+        DocumentSlotId = documentSlotId == Guid.Empty ? null : documentSlotId;
         Status = DocumentStatus.Uploaded.ToStorageValue();
         FileType = fileType;
         SizeBytes = sizeBytes;
@@ -100,3 +100,9 @@ public class Document
         UpdatedAtUtc = timestamp ?? DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

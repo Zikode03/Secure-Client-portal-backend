@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class RequiredDocumentTemplate
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
     public string DocumentCategory { get; private set; } = string.Empty;
@@ -13,7 +13,7 @@ public class RequiredDocumentTemplate
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static RequiredDocumentTemplate Create(
-        string id,
+        Guid id,
         string name,
         string description,
         string documentCategory,
@@ -54,3 +54,9 @@ public class RequiredDocumentTemplate
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

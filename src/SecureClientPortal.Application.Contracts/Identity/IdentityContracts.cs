@@ -5,7 +5,7 @@ public record CreateUserRequest(
     string Email,
     string Role,
     string? Password,
-    string[]? ClientIds,
+    Guid[]? ClientIds,
     string? Company);
 public record UpdateUserActivationRequest(bool IsActive, string? Reason);
 

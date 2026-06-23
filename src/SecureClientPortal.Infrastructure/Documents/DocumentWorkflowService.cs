@@ -36,14 +36,14 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
     {
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var query = _db.Documents.Where(x => x.IsFiled && allowedClientIds.Contains(x.ClientId));
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return ServiceResult<IReadOnlyList<Document>>.ForbiddenResult();
             }
 
-            query = query.Where(x => x.ClientId == clientId);
+            query = query.Where(x => x.ClientId == parsedClientId);
         }
 
         return ServiceResult<IReadOnlyList<Document>>.Success(
@@ -92,16 +92,16 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             return ServiceResult<object>.ErrorResult("A valid document slot is required for document upload.");
         }
 
-        var stored = await _fileStorage.SaveAsync(request.File, request.ClientId, ct);
-        var actorUserId = user.GetUserId() ?? "unknown";
+        var stored = await _fileStorage.SaveAsync(request.File, request.ClientId.ToString(), ct);
+        var actorUserId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var now = DateTime.UtcNow;
 
         Document document;
-        var isNewDocument = string.IsNullOrWhiteSpace(request.DocumentId);
+        var isNewDocument = !request.DocumentId.HasValue;
         if (isNewDocument)
         {
             document = Document.CreateUploaded(
-                $"doc_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 request.ClientId,
                 pack.Id,
                 stored.OriginalFileName,
@@ -115,14 +115,14 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         }
         else
         {
-            var existingDocument = await _db.Documents.FirstOrDefaultAsync(x => x.Id == request.DocumentId, ct);
+            var existingDocument = await _db.Documents.FirstOrDefaultAsync(x => x.Id == request.DocumentId!.Value, ct);
             if (existingDocument is null)
             {
                 return ServiceResult<object>.NotFoundResult("Requested document could not be found.");
             }
 
             document = existingDocument;
-            if (!string.Equals(document.ClientId, request.ClientId, StringComparison.OrdinalIgnoreCase))
+            if (document.ClientId != request.ClientId)
             {
                 return ServiceResult<object>.ForbiddenResult();
             }
@@ -147,7 +147,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         }
 
         _db.DocumentVersions.Add(DocumentVersion.Create(
-            $"dv_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             document.Id,
             document.CurrentVersionNumber,
             stored.OriginalFileName,
@@ -192,7 +192,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             user,
             "documents.version_created",
             "document_version",
-            $"{document.Id}:v{document.CurrentVersionNumber}",
+            Guid.NewGuid(),
             document.ClientId,
             JsonSerializer.Serialize(new
             {
@@ -216,7 +216,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         }
 
         var created = Document.CreateUploaded(
-            string.IsNullOrWhiteSpace(request.Id) ? $"doc_{Guid.NewGuid():N}" : request.Id,
+            request.Id == Guid.Empty ? Guid.NewGuid() : request.Id,
             request.ClientId,
             request.MonthlyPackId,
             request.Name,
@@ -245,7 +245,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
         _db.Documents.Add(created);
         _db.DocumentVersions.Add(DocumentVersion.Create(
-            $"dv_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             created.Id,
             1,
             created.Name,
@@ -264,7 +264,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<object>> GetByIdAsync(string id, System.Security.Claims.ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -297,7 +302,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<IReadOnlyList<object>>> GetVersionsAsync(string id, System.Security.Claims.ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<IReadOnlyList<object>>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<IReadOnlyList<object>>.NotFoundResult();
@@ -310,7 +320,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         }
 
         var versions = await _db.DocumentVersions
-            .Where(x => x.DocumentId == id)
+            .Where(x => x.DocumentId == documentId)
             .OrderByDescending(x => x.VersionNumber)
             .ThenByDescending(x => x.CreatedAtUtc)
             .ToListAsync(ct);
@@ -343,7 +353,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<(StoredFileContent Content, string FileName)>> DownloadAsync(string id, System.Security.Claims.ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<(StoredFileContent Content, string FileName)>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<(StoredFileContent Content, string FileName)>.NotFoundResult();
@@ -388,7 +403,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<Document>> UpdateAsync(string id, Document request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<Document>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<Document>.NotFoundResult();
@@ -433,7 +453,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
     {
         DocumentValidators.ValidateReview(request);
 
-        var document = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var reviewDocumentId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var document = await _db.Documents.FindAsync([reviewDocumentId], ct);
         if (document is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -462,7 +487,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
     {
         DocumentValidators.ValidateReupload(request);
 
-        var document = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var reuploadDocumentId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var document = await _db.Documents.FindAsync([reuploadDocumentId], ct);
         if (document is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -491,7 +521,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
     {
         DocumentValidators.ValidateComment(request);
 
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<DocumentComment>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<DocumentComment>.NotFoundResult();
@@ -503,11 +538,11 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
             return ServiceResult<DocumentComment>.ForbiddenResult();
         }
 
-        var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
+        var authorId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
 
         var comment = DocumentComment.Create(
-            $"dc_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             item.Id,
             authorId,
             authorRole,
@@ -542,7 +577,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<IReadOnlyList<DocumentComment>>> GetCommentsAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<IReadOnlyList<DocumentComment>>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<IReadOnlyList<DocumentComment>>.NotFoundResult();
@@ -564,7 +604,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     public async Task<ServiceResult<bool>> DeleteAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Documents.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var documentId))
+        {
+            return ServiceResult<bool>.NotFoundResult();
+        }
+
+        var item = await _db.Documents.FindAsync([documentId], ct);
         if (item is null)
         {
             return ServiceResult<bool>.NotFoundResult();
@@ -586,7 +631,7 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         DocumentSlot? slot = null;
         MonthlyPack? pack = null;
 
-        if (!string.IsNullOrWhiteSpace(item.DocumentSlotId))
+        if (item.DocumentSlotId.HasValue)
         {
             slot = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == item.DocumentSlotId, ct);
             if (slot is not null)
@@ -614,30 +659,30 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         };
     }
 
-    private async Task<MonthlyPack?> ResolveMonthlyPackAsync(string clientId, string? monthlyPackId, string? documentSlotId, CancellationToken ct)
+    private async Task<MonthlyPack?> ResolveMonthlyPackAsync(Guid clientId, Guid? monthlyPackId, Guid? documentSlotId, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(documentSlotId))
+        if (documentSlotId.HasValue)
         {
-            var slot = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId, ct);
+            var slot = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId.Value, ct);
             if (slot is not null)
             {
                 return await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == slot.MonthlyPackId && x.ClientId == clientId, ct);
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(monthlyPackId))
+        if (monthlyPackId.HasValue)
         {
-            return await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackId && x.ClientId == clientId, ct);
+            return await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackId.Value && x.ClientId == clientId, ct);
         }
 
         return null;
     }
 
-    private async Task<DocumentSlot?> ResolveSlotAsync(string clientId, string monthlyPackId, string? documentSlotId, string category, CancellationToken ct)
+    private async Task<DocumentSlot?> ResolveSlotAsync(Guid clientId, Guid monthlyPackId, Guid? documentSlotId, string category, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(documentSlotId))
+        if (documentSlotId.HasValue)
         {
-            return await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId && x.ClientId == clientId && x.MonthlyPackId == monthlyPackId, ct);
+            return await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId.Value && x.ClientId == clientId && x.MonthlyPackId == monthlyPackId, ct);
         }
 
         return await _db.DocumentSlots.FirstOrDefaultAsync(x => x.ClientId == clientId && x.MonthlyPackId == monthlyPackId && x.Category == category, ct);
@@ -645,12 +690,12 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
     private async Task<ReviewDecision> ApplyLifecycleDecisionAsync(Document document, string decision, string? reason, string? internalNote, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct)
     {
-        var reviewerUserId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
+        var reviewerUserId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var reviewerRole = user.IsAdmin() ? "admin" : "accountant";
         var now = DateTime.UtcNow;
 
         var reviewDecision = ReviewDecision.Create(
-            $"rd_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             document.Id,
             decision,
             reviewerUserId,
@@ -661,9 +706,9 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
 
         _db.ReviewDecisions.Add(reviewDecision);
 
-        var slot = string.IsNullOrWhiteSpace(document.DocumentSlotId)
+        var slot = !document.DocumentSlotId.HasValue
             ? null
-            : await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == document.DocumentSlotId, ct);
+            : await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == document.DocumentSlotId.Value, ct);
         var pack = slot is null
             ? null
             : await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == slot.MonthlyPackId, ct);
@@ -799,14 +844,14 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         }
 
         var requestItem = RequestItem.Create(
-            $"req_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             document.ClientId,
             "reupload_required",
             document.Id,
             $"Re-upload required: {document.Name}",
             reason.Trim(),
             RequestPriority.High,
-            user.GetUserId() ?? "unknown",
+            user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required."),
             RequestStatus.WaitingOnClient,
             null);
 
@@ -886,6 +931,9 @@ public sealed class DocumentWorkflowService : IDocumentWorkflowService
         };
     }
 }
+
+
+
 
 
 

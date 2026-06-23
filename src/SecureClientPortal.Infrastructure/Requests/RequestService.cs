@@ -4,7 +4,6 @@ using SecureClientPortal.Backend.Application.Requests;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -51,7 +50,12 @@ public sealed class RequestService : IRequestService
     public async Task<(bool forbidden, RequestItem? item)> GetByIdAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
         await RefreshOverdueRequestsAsync(ct);
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -80,21 +84,21 @@ public sealed class RequestService : IRequestService
             throw new ArgumentException("Priority must be low, medium, high, or urgent.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.RelatedDocumentId))
+        if (request.RelatedDocumentId.HasValue)
         {
-            var document = await _db.Documents.FirstOrDefaultAsync(x => x.Id == request.RelatedDocumentId, ct);
-            if (document is null || !string.Equals(document.ClientId, request.ClientId, StringComparison.OrdinalIgnoreCase))
+            var document = await _db.Documents.FirstOrDefaultAsync(x => x.Id == request.RelatedDocumentId.Value, ct);
+            if (document is null || document.ClientId != request.ClientId)
             {
                 throw new ArgumentException("Related document was not found for the selected client.");
             }
         }
 
-        var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
+        var authorId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
         var status = authorRole == "client" ? RequestStatus.WaitingOnAccountant : RequestStatus.WaitingOnClient;
 
         var item = RequestItem.Create(
-            $"req_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.ClientId,
             requestType,
             request.RelatedDocumentId,
@@ -134,7 +138,12 @@ public sealed class RequestService : IRequestService
 
     public async Task<(bool forbidden, RequestItem? updated)> UpdateAsync(string id, RequestItem request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -169,7 +178,7 @@ public sealed class RequestService : IRequestService
         var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
         if (status == RequestStatus.Resolved)
         {
-            item.Resolve(user.GetUserId() ?? "unknown");
+            item.Resolve(user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required."));
         }
         else
         {
@@ -191,7 +200,12 @@ public sealed class RequestService : IRequestService
 
     public async Task<(bool forbidden, RequestItem? updated)> UpdateStatusAsync(string id, UpdateRequestStatusRequest request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -212,7 +226,7 @@ public sealed class RequestService : IRequestService
         var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
         if (status == RequestStatus.Resolved)
         {
-            item.Resolve(user.GetUserId() ?? "unknown");
+            item.Resolve(user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required."));
         }
         else
         {
@@ -234,7 +248,12 @@ public sealed class RequestService : IRequestService
 
     public async Task<(bool forbidden, IReadOnlyList<RequestComment>? comments)> GetCommentsAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -260,7 +279,12 @@ public sealed class RequestService : IRequestService
             throw new ArgumentException("Comment message is required.");
         }
 
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -272,10 +296,10 @@ public sealed class RequestService : IRequestService
             return (true, null);
         }
 
-        var authorId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "unknown";
+        var authorId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var authorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client";
         var comment = RequestComment.Create(
-            $"rc_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             item.Id,
             item.ClientId,
             authorId,
@@ -320,7 +344,12 @@ public sealed class RequestService : IRequestService
 
     public async Task<(bool forbidden, RequestItem? resolved)> ResolveAsync(string id, ResolveRequestRequest request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, null);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, null);
@@ -332,7 +361,7 @@ public sealed class RequestService : IRequestService
             return (true, null);
         }
 
-        item.Resolve(user.GetUserId() ?? "unknown");
+        item.Resolve(user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required."));
         await _db.SaveChangesAsync(ct);
 
         await _db.WriteAuditLogAsync(
@@ -361,7 +390,12 @@ public sealed class RequestService : IRequestService
 
     public async Task<(bool forbidden, bool deleted)> DeleteAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var item = await _db.Requests.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return (false, false);
+        }
+
+        var item = await _db.Requests.FindAsync([requestId], ct);
         if (item is null)
         {
             return (false, false);
@@ -420,4 +454,3 @@ public sealed class RequestService : IRequestService
         await _db.SaveChangesAsync(ct);
     }
 }
-

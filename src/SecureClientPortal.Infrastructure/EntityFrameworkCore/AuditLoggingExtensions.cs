@@ -8,17 +8,17 @@ public static class AuditLoggingExtensions
 {
     public static async Task WriteAuditLogAsync(
         this PortalDbContext db,
-        string? actorUserId,
+        Guid? actorUserId,
         string actorRole,
         string action,
         string entityType,
-        string entityId,
-        string? clientId = null,
+        Guid entityId,
+        Guid? clientId = null,
         string? metadataJson = null,
         CancellationToken ct = default)
     {
         db.AuditLogs.Add(AuditLog.Create(
-            $"al_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             actorUserId,
             actorRole,
             action,
@@ -35,8 +35,8 @@ public static class AuditLoggingExtensions
         System.Security.Claims.ClaimsPrincipal user,
         string action,
         string entityType,
-        string entityId,
-        string? clientId = null,
+        Guid entityId,
+        Guid? clientId = null,
         string? metadataJson = null,
         CancellationToken ct = default)
     {
@@ -55,7 +55,7 @@ public static class AuditLoggingExtensions
     {
         var actorRole = user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : user.IsClient() ? "client" : "unknown";
         db.DocumentAccessLogs.Add(DocumentAccessLog.Create(
-            $"dal_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             document.Id,
             document.ClientId,
             user.GetUserId(),

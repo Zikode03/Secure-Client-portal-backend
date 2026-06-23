@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class DeadlineRule
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Scope { get; private set; } = string.Empty;
     public int DueDayOfMonth { get; private set; }
@@ -13,7 +13,7 @@ public class DeadlineRule
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static DeadlineRule Create(
-        string id,
+        Guid id,
         string name,
         string scope,
         int dueDayOfMonth,
@@ -59,3 +59,9 @@ public class DeadlineRule
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

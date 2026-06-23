@@ -6,7 +6,10 @@ using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+
 
 namespace SecureClientPortal.Backend.Infrastructure.Compliance.Application;
 
@@ -42,7 +45,7 @@ public sealed class ComplianceService : IComplianceService
         }
 
         var item = ComplianceCategory.Create(
-            $"cc_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.Name,
             request.Description,
             normalizedCode,
@@ -58,10 +61,10 @@ public sealed class ComplianceService : IComplianceService
     {
         var defaults = new[]
         {
-            ComplianceCategory.Create("cc_tax_compliance", "Tax Compliance", "Income tax, VAT, and tax authority filing obligations.", "TAX", true),
-            ComplianceCategory.Create("cc_cipc_compliance", "CIPC Compliance", "Company registration, annual returns, and beneficial ownership obligations.", "CIPC", true),
-            ComplianceCategory.Create("cc_payroll_compliance", "Payroll Compliance", "Payroll submissions, UIF, PAYE, and employee records.", "PAYROLL", true),
-            ComplianceCategory.Create("cc_popia_compliance", "POPIA Compliance", "Privacy controls, information processing, and consent evidence.", "POPIA", true)
+            ComplianceCategory.Create(DeterministicGuid("cc_tax_compliance"), "Tax Compliance", "Income tax, VAT, and tax authority filing obligations.", "TAX", true),
+            ComplianceCategory.Create(DeterministicGuid("cc_cipc_compliance"), "CIPC Compliance", "Company registration, annual returns, and beneficial ownership obligations.", "CIPC", true),
+            ComplianceCategory.Create(DeterministicGuid("cc_payroll_compliance"), "Payroll Compliance", "Payroll submissions, UIF, PAYE, and employee records.", "PAYROLL", true),
+            ComplianceCategory.Create(DeterministicGuid("cc_popia_compliance"), "POPIA Compliance", "Privacy controls, information processing, and consent evidence.", "POPIA", true)
         };
 
         foreach (var category in defaults)
@@ -78,7 +81,7 @@ public sealed class ComplianceService : IComplianceService
         }
 
         await _db.SaveChangesAsync(ct);
-        await _db.WriteAuditLogAsync(user, "compliance.categories_seeded", "compliance_category", "defaults", null, null, ct);
+        await _db.WriteAuditLogAsync(user, "compliance.categories_seeded", "compliance_category", DeterministicGuid("compliance.categories_seeded"), null, null, ct);
         return new { seeded = defaults.Length };
     }
 
@@ -87,14 +90,14 @@ public sealed class ComplianceService : IComplianceService
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var query = _db.ComplianceItems.Where(x => allowedClientIds.Contains(x.ClientId));
 
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return ServiceResult<IReadOnlyList<object>>.ForbiddenResult();
             }
 
-            query = query.Where(x => x.ClientId == clientId);
+            query = query.Where(x => x.ClientId == parsedClientId);
         }
 
         var categories = await _db.ComplianceCategories.ToDictionaryAsync(x => x.Id, ct);
@@ -133,7 +136,7 @@ public sealed class ComplianceService : IComplianceService
             return ServiceResult<object>.ErrorResult("Compliance category not found or inactive.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.OwnerUserId))
+        if (request.OwnerUserId.HasValue)
         {
             var ownerExists = await _db.Users.AnyAsync(x => x.Id == request.OwnerUserId, ct);
             if (!ownerExists)
@@ -143,7 +146,7 @@ public sealed class ComplianceService : IComplianceService
         }
 
         var item = ComplianceItem.Create(
-            $"ci_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.ClientId,
             request.CategoryId,
             request.Name,
@@ -167,7 +170,12 @@ public sealed class ComplianceService : IComplianceService
     {
         ComplianceValidators.ValidateUpdateItem(request);
 
-        var item = await _db.ComplianceItems.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var complianceItemId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var item = await _db.ComplianceItems.FindAsync([complianceItemId], ct);
         if (item is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -191,7 +199,7 @@ public sealed class ComplianceService : IComplianceService
             return ServiceResult<object>.ErrorResult("Risk level must be low, medium, high, or critical.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.OwnerUserId))
+        if (request.OwnerUserId.HasValue)
         {
             var ownerExists = await _db.Users.AnyAsync(x => x.Id == request.OwnerUserId, ct);
             if (!ownerExists)
@@ -223,14 +231,14 @@ public sealed class ComplianceService : IComplianceService
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var scopedClientIds = allowedClientIds;
 
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return ServiceResult<IReadOnlyList<object>>.ForbiddenResult();
             }
 
-            scopedClientIds = [clientId];
+            scopedClientIds = new HashSet<Guid> { parsedClientId };
         }
 
         var categories = await _db.ComplianceCategories.ToDictionaryAsync(x => x.Id, ct);
@@ -253,14 +261,14 @@ public sealed class ComplianceService : IComplianceService
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var query = _db.ComplianceReminders.Where(x => allowedClientIds.Contains(x.ClientId));
 
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return ServiceResult<IReadOnlyList<ComplianceReminder>>.ForbiddenResult();
             }
 
-            query = query.Where(x => x.ClientId == clientId);
+            query = query.Where(x => x.ClientId == parsedClientId);
         }
 
         var results = await query.OrderByDescending(x => x.ScheduledForUtc).ToListAsync(ct);
@@ -290,7 +298,7 @@ public sealed class ComplianceService : IComplianceService
         }
 
         var reminder = ComplianceReminder.Create(
-            $"cr_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.ComplianceItemId,
             complianceItem.ClientId,
             request.RecipientUserId,
@@ -319,7 +327,12 @@ public sealed class ComplianceService : IComplianceService
     {
         ComplianceValidators.ValidateReminderStatus(request);
 
-        var item = await _db.ComplianceReminders.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var reminderId))
+        {
+            return ServiceResult<ComplianceReminder>.NotFoundResult();
+        }
+
+        var item = await _db.ComplianceReminders.FindAsync([reminderId], ct);
         if (item is null)
         {
             return ServiceResult<ComplianceReminder>.NotFoundResult();
@@ -349,14 +362,14 @@ public sealed class ComplianceService : IComplianceService
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var scopedClientIds = allowedClientIds;
 
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return ServiceResult<object>.ForbiddenResult();
             }
 
-            scopedClientIds = [clientId];
+            scopedClientIds = new HashSet<Guid> { parsedClientId };
         }
 
         var items = await _db.ComplianceItems.Where(x => scopedClientIds.Contains(x.ClientId)).ToListAsync(ct);
@@ -427,10 +440,10 @@ public sealed class ComplianceService : IComplianceService
         };
     }
 
-    private static object BuildComplianceItemPayload(ComplianceItem item, IReadOnlyDictionary<string, ComplianceCategory> categories, IReadOnlyDictionary<string, User> users)
+    private static object BuildComplianceItemPayload(ComplianceItem item, IReadOnlyDictionary<Guid, ComplianceCategory> categories, IReadOnlyDictionary<Guid, User> users)
     {
         var category = categories.GetValueOrDefault(item.CategoryId);
-        var owner = string.IsNullOrWhiteSpace(item.OwnerUserId) ? null : users.GetValueOrDefault(item.OwnerUserId);
+        var owner = item.OwnerUserId.HasValue ? users.GetValueOrDefault(item.OwnerUserId.Value) : null;
 
         return new
         {
@@ -454,7 +467,7 @@ public sealed class ComplianceService : IComplianceService
         };
     }
 
-    private static object? BuildAlert(ComplianceItem item, IReadOnlyDictionary<string, ComplianceCategory> categories, IReadOnlyDictionary<string, User> users)
+    private static object? BuildAlert(ComplianceItem item, IReadOnlyDictionary<Guid, ComplianceCategory> categories, IReadOnlyDictionary<Guid, User> users)
     {
         var alertLevel = ComputeAlertLevel(item);
         if (alertLevel is null)
@@ -463,7 +476,7 @@ public sealed class ComplianceService : IComplianceService
         }
 
         var category = categories.GetValueOrDefault(item.CategoryId);
-        var owner = string.IsNullOrWhiteSpace(item.OwnerUserId) ? null : users.GetValueOrDefault(item.OwnerUserId);
+        var owner = item.OwnerUserId.HasValue ? users.GetValueOrDefault(item.OwnerUserId.Value) : null;
 
         return new
         {
@@ -522,6 +535,13 @@ public sealed class ComplianceService : IComplianceService
         return null;
     }
 
+    private static Guid DeterministicGuid(string value)
+    {
+        using var md5 = MD5.Create();
+        var bytes = md5.ComputeHash(Encoding.UTF8.GetBytes($"secure-client-portal:{value}"));
+        return new Guid(bytes);
+    }
+
     private static string BuildAlertMessage(ComplianceItem item, string alertLevel)
     {
         if (item.Status == "expired")
@@ -542,4 +562,8 @@ public sealed class ComplianceService : IComplianceService
         return $"{item.Name} is {alertLevel} risk and needs follow-up.";
     }
 }
+
+
+
+
 

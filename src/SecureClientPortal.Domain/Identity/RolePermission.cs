@@ -2,13 +2,13 @@ namespace SecureClientPortal.Backend.Models;
 
 public class RolePermission
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string RoleName { get; private set; } = string.Empty;
     public string PermissionKey { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static RolePermission Create(
-        string id,
+        Guid id,
         string roleName,
         string permissionKey,
         DateTime? createdAtUtc = null)
@@ -22,3 +22,9 @@ public class RolePermission
         };
     }
 }
+
+
+
+
+
+

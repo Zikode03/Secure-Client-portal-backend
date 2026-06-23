@@ -45,7 +45,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppUsers");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
             entity.HasIndex(x => x.Email).IsUnique();
             entity.Property(x => x.FullName).HasMaxLength(200).IsRequired();
@@ -66,11 +66,11 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppClients");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(250).IsRequired();
             entity.Property(x => x.EntityType).HasMaxLength(50).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
-            entity.Property(x => x.AssignedAccountantId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.AssignedAccountantId).IsRequired();
             entity.Property(x => x.PrimaryContact).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -88,17 +88,17 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDocuments");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.MonthlyPackId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.MonthlyPackId).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(260).IsRequired();
             entity.Property(x => x.Category).HasMaxLength(80).IsRequired();
-            entity.Property(x => x.DocumentSlotId).HasMaxLength(100);
+            entity.Property(x => x.DocumentSlotId);
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.FileType).HasMaxLength(200).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(500);
-            entity.Property(x => x.UploadedByUserId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.FiledByUserId).HasMaxLength(100);
+            entity.Property(x => x.UploadedByUserId).IsRequired();
+            entity.Property(x => x.FiledByUserId);
             entity.Property(x => x.CurrentVersionNumber).HasDefaultValue(1);
             entity.Property(x => x.UploadedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -116,9 +116,9 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDocumentComments");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.DocumentId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.AuthorUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.DocumentId).IsRequired();
+            entity.Property(x => x.AuthorUserId).IsRequired();
             entity.Property(x => x.AuthorRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Message).HasMaxLength(2000).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -133,7 +133,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppFilingRules");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Category).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(280).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -145,12 +145,12 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppTasks");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Priority).HasMaxLength(20).IsRequired();
-            entity.Property(x => x.CreatedByUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.CreatedByUserId).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.Status });
@@ -166,16 +166,16 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppRequests");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.RequestType).HasMaxLength(50).IsRequired();
-            entity.Property(x => x.RelatedDocumentId).HasMaxLength(100);
+            entity.Property(x => x.RelatedDocumentId);
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasColumnType("nvarchar(max)").IsRequired();
             entity.Property(x => x.Priority).HasMaxLength(20).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
-            entity.Property(x => x.RequestedByUserId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ResolvedByUserId).HasMaxLength(100);
+            entity.Property(x => x.RequestedByUserId).IsRequired();
+            entity.Property(x => x.ResolvedByUserId);
             entity.Property(x => x.RequestedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.Status });
@@ -202,9 +202,9 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppClientAssignments");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.AccountantUserId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.AccountantUserId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.AccountantUserId);
             entity.HasIndex(x => x.ClientId);
@@ -215,8 +215,8 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppMonthlyPacks");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.SubmittedAtUtc);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -233,14 +233,14 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDocumentSlots");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.MonthlyPackId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.MonthlyPackId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.Category).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Label).HasMaxLength(200).IsRequired();
             entity.Property(x => x.IsRequired).HasDefaultValue(true);
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
-            entity.Property(x => x.CurrentDocumentId).HasMaxLength(100);
+            entity.Property(x => x.CurrentDocumentId);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.MonthlyPackId);
@@ -255,14 +255,14 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDocumentVersions");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.DocumentId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.DocumentId).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(260).IsRequired();
             entity.Property(x => x.OriginalFileName).HasMaxLength(260).IsRequired();
             entity.Property(x => x.StoredFileName).HasMaxLength(260).IsRequired();
             entity.Property(x => x.FileType).HasMaxLength(200).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(500);
-            entity.Property(x => x.UploadedByUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.UploadedByUserId).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.DocumentId);
             entity.HasIndex(x => new { x.DocumentId, x.VersionNumber }).IsUnique();
@@ -273,10 +273,10 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppReviewDecisions");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.DocumentId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.DocumentId).IsRequired();
             entity.Property(x => x.Decision).HasMaxLength(20).IsRequired();
-            entity.Property(x => x.ReviewerUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.ReviewerUserId).IsRequired();
             entity.Property(x => x.ReviewerRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(1000);
             entity.Property(x => x.InternalNote).HasMaxLength(2000);
@@ -294,10 +294,10 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppRequestComments");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.RequestId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.AuthorUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.RequestId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.AuthorUserId).IsRequired();
             entity.Property(x => x.AuthorRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Message).HasMaxLength(2000).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -312,9 +312,9 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppNotifications");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.UserId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100);
+            entity.Property(x => x.Id);
+            entity.Property(x => x.UserId).IsRequired();
+            entity.Property(x => x.ClientId);
             entity.Property(x => x.Type).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Title).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Message).HasMaxLength(1000).IsRequired();
@@ -328,13 +328,13 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppAuditLogs");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ActorUserId).HasMaxLength(100);
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ActorUserId);
             entity.Property(x => x.ActorRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Action).HasMaxLength(100).IsRequired();
             entity.Property(x => x.EntityType).HasMaxLength(80).IsRequired();
-            entity.Property(x => x.EntityId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100);
+            entity.Property(x => x.EntityId).IsRequired();
+            entity.Property(x => x.ClientId);
             entity.Property(x => x.MetadataJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.CreatedAtUtc);
@@ -378,7 +378,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppRolePermissions");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.RoleName).HasMaxLength(80).IsRequired();
             entity.Property(x => x.PermissionKey).HasMaxLength(120).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -391,9 +391,9 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppUserSessions");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.UserId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.JwtId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.UserId).IsRequired();
+            entity.Property(x => x.JwtId).IsRequired();
             entity.Property(x => x.RevokedReason).HasMaxLength(200);
             entity.Property(x => x.ClientIp).HasMaxLength(120);
             entity.Property(x => x.UserAgent).HasMaxLength(500);
@@ -405,12 +405,12 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppUserAccessTokens");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.UserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.UserId).IsRequired();
             entity.Property(x => x.Purpose).HasMaxLength(40).IsRequired();
             entity.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();
-            entity.Property(x => x.SessionId).HasMaxLength(100);
-            entity.Property(x => x.CreatedByUserId).HasMaxLength(100);
+            entity.Property(x => x.SessionId);
+            entity.Property(x => x.CreatedByUserId);
             entity.Property(x => x.InvalidatedReason).HasMaxLength(200);
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.HasIndex(x => new { x.UserId, x.Purpose, x.ExpiresAtUtc });
@@ -427,7 +427,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppComplianceCategories");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.Code).HasMaxLength(60);
@@ -441,15 +441,15 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppComplianceItems");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.CategoryId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.CategoryId).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(220).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
-            entity.Property(x => x.OwnerUserId).HasMaxLength(100);
+            entity.Property(x => x.OwnerUserId);
             entity.Property(x => x.RiskLevel).HasMaxLength(20).IsRequired();
             entity.Property(x => x.RequiredDocumentCategory).HasMaxLength(80);
-            entity.Property(x => x.LinkedDocumentId).HasMaxLength(100);
+            entity.Property(x => x.LinkedDocumentId);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.CategoryId });
@@ -469,10 +469,10 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppComplianceReminders");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.ComplianceItemId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.RecipientUserId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ComplianceItemId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.RecipientUserId).IsRequired();
             entity.Property(x => x.Type).HasMaxLength(50).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -490,7 +490,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppRequiredDocumentTemplates");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.DocumentCategory).HasMaxLength(80).IsRequired();
@@ -504,7 +504,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppMonthlyPackTemplates");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -520,9 +520,9 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppMonthlyPackTemplateItems");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.MonthlyPackTemplateId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.RequiredDocumentTemplateId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Id);
+            entity.Property(x => x.MonthlyPackTemplateId).IsRequired();
+            entity.Property(x => x.RequiredDocumentTemplateId).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.MonthlyPackTemplateId);
             entity.HasIndex(x => x.RequiredDocumentTemplateId);
@@ -533,7 +533,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppRequestTemplates");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.RequestType).HasMaxLength(50).IsRequired();
             entity.Property(x => x.TitleTemplate).HasMaxLength(300).IsRequired();
@@ -552,7 +552,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppReminderRules");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.TriggerType).HasMaxLength(80).IsRequired();
             entity.Property(x => x.AudienceRole).HasMaxLength(30).IsRequired();
@@ -570,7 +570,7 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDeadlineRules");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
+            entity.Property(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Scope).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Priority).HasMaxLength(20).IsRequired();
@@ -589,10 +589,10 @@ public class PortalDbContext : DbContext
         {
             entity.ToTable("AppDocumentAccessLogs");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).HasMaxLength(100);
-            entity.Property(x => x.DocumentId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.ClientId).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.AccessedByUserId).HasMaxLength(100);
+            entity.Property(x => x.Id);
+            entity.Property(x => x.DocumentId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.AccessedByUserId);
             entity.Property(x => x.AccessedByRole).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Action).HasMaxLength(50).IsRequired();
             entity.Property(x => x.IpAddress).HasMaxLength(120);
@@ -608,6 +608,7 @@ public class PortalDbContext : DbContext
         });
     }
 }
+
 
 
 

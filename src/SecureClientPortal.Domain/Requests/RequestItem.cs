@@ -2,22 +2,22 @@ namespace SecureClientPortal.Backend.Models;
 
 public class RequestItem
 {
-    public string Id { get; set; } = string.Empty;
-    public string ClientId { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid ClientId { get; set; }
     public string RequestType { get; private set; } = "clarification_needed";
-    public string? RelatedDocumentId { get; private set; }
+    public Guid? RelatedDocumentId { get; private set; }
     public string Title { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
     public string Priority { get; private set; } = RequestPriority.Medium.ToStorageValue();
     public string Status { get; private set; } = RequestStatus.Open.ToStorageValue();
     public DateTime? DueDateUtc { get; private set; }
-    public string RequestedByUserId { get; private set; } = string.Empty;
-    public string? ResolvedByUserId { get; private set; }
+    public Guid RequestedByUserId { get; private set; }
+    public Guid? ResolvedByUserId { get; private set; }
     public DateTime RequestedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime? ResolvedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static RequestItem Create(string id, string clientId, string requestType, string? relatedDocumentId, string title, string description, RequestPriority priority, string requestedByUserId, RequestStatus initialStatus, DateTime? dueDateUtc)
+    public static RequestItem Create(Guid id, Guid clientId, string requestType, Guid? relatedDocumentId, string title, string description, RequestPriority priority, Guid requestedByUserId, RequestStatus initialStatus, DateTime? dueDateUtc)
     {
         var item = new RequestItem
         {
@@ -32,10 +32,10 @@ public class RequestItem
         return item;
     }
 
-    public void UpdateDetails(string requestType, string? relatedDocumentId, string title, string description, RequestPriority priority, DateTime? dueDateUtc)
+    public void UpdateDetails(string requestType, Guid? relatedDocumentId, string title, string description, RequestPriority priority, DateTime? dueDateUtc)
     {
         RequestType = RequestDomainValues.NormalizeRequestType(requestType);
-        RelatedDocumentId = string.IsNullOrWhiteSpace(relatedDocumentId) ? null : relatedDocumentId.Trim();
+        RelatedDocumentId = relatedDocumentId == Guid.Empty ? null : relatedDocumentId;
         Title = title.Trim();
         Description = description.Trim();
         Priority = priority.ToStorageValue();
@@ -58,7 +58,7 @@ public class RequestItem
     public void MarkWaitingOnAccountant() => SetStatus(RequestStatus.WaitingOnAccountant);
     public void MarkOverdue() => SetStatus(RequestStatus.Overdue);
 
-    public void Resolve(string resolvedByUserId)
+    public void Resolve(Guid resolvedByUserId)
     {
         Status = RequestStatus.Resolved.ToStorageValue();
         ResolvedByUserId = resolvedByUserId;
@@ -71,3 +71,9 @@ public class RequestItem
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

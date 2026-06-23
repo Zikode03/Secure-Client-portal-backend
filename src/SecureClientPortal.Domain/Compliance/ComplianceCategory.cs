@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class ComplianceCategory
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
     public string? Code { get; private set; }
@@ -11,7 +11,7 @@ public class ComplianceCategory
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static ComplianceCategory Create(
-        string id,
+        Guid id,
         string name,
         string description,
         string? code,
@@ -37,3 +37,9 @@ public class ComplianceCategory
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

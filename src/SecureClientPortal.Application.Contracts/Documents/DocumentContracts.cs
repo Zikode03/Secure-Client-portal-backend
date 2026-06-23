@@ -9,10 +9,10 @@ public record AddReviewDecisionRequest(string Decision, string? Reason, string? 
 public record RequestReuploadRequest(string Reason, string? InternalNote);
 public class UploadDocumentRequest
 {
-    public string ClientId { get; set; } = string.Empty;
-    public string? MonthlyPackId { get; set; }
-    public string? DocumentSlotId { get; set; }
+    public Guid ClientId { get; set; }
+    public Guid? MonthlyPackId { get; set; }
+    public Guid? DocumentSlotId { get; set; }
     public string DocumentType { get; set; } = string.Empty;
-    public string? DocumentId { get; set; }
+    public Guid? DocumentId { get; set; }
     public IFormFile File { get; set; } = default!;
 }

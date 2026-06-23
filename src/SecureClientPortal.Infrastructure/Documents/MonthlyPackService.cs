@@ -22,14 +22,14 @@ public sealed class MonthlyPackService : IMonthlyPackService
     {
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var query = _db.MonthlyPacks.Where(x => allowedClientIds.Contains(x.ClientId));
-        if (!string.IsNullOrWhiteSpace(clientId))
+        if (Guid.TryParse(clientId, out var parsedClientId))
         {
-            if (!allowedClientIds.Contains(clientId))
+            if (!allowedClientIds.Contains(parsedClientId))
             {
                 return (true, []);
             }
 
-            query = query.Where(x => x.ClientId == clientId);
+            query = query.Where(x => x.ClientId == parsedClientId);
         }
 
         var items = await query.OrderByDescending(x => x.Year).ThenByDescending(x => x.Month).ToListAsync(ct);
@@ -38,13 +38,18 @@ public sealed class MonthlyPackService : IMonthlyPackService
 
     public async Task<(bool forbidden, MonthlyPack? pack)> GetByClientAndPeriodAsync(string clientId, int year, int month, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!Guid.TryParse(clientId, out var parsedClientId))
+        {
+            return (false, null);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        if (!allowedClientIds.Contains(clientId))
+        if (!allowedClientIds.Contains(parsedClientId))
         {
             return (true, null);
         }
 
-        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Year == year && x.Month == month, ct);
+        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.ClientId == parsedClientId && x.Year == year && x.Month == month, ct);
         return (false, pack);
     }
 
@@ -64,7 +69,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
 
         var pack = new MonthlyPack
         {
-            Id = $"mp_{Guid.NewGuid():N}",
+            Id = Guid.NewGuid(),
             ClientId = request.ClientId,
             Year = request.Year,
             Month = request.Month,
@@ -87,7 +92,12 @@ public sealed class MonthlyPackService : IMonthlyPackService
 
     public async Task<(bool forbidden, bool invalid, string? error, MonthlyPack? pack)> SubmitAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (!Guid.TryParse(id, out var monthlyPackId))
+        {
+            return (false, false, null, null);
+        }
+
+        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackId, ct);
         if (pack is null)
         {
             return (false, false, null, null);

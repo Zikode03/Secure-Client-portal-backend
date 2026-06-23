@@ -168,16 +168,16 @@ builder.Services
             {
                 var principal = context.Principal;
                 var userId = principal?.GetUserId();
-                var jwtId = principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                var jwtIdValue = principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
 
-                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(jwtId))
+                if (!userId.HasValue || !Guid.TryParse(jwtIdValue, out var jwtId))
                 {
                     context.Fail("Session is invalid.");
                     return;
                 }
 
                 var db = context.HttpContext.RequestServices.GetRequiredService<PortalDbContext>();
-                var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, context.HttpContext.RequestAborted);
+                var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId.Value, context.HttpContext.RequestAborted);
                 if (user is null)
                 {
                     context.Fail("User does not exist.");

@@ -2,9 +2,9 @@ namespace SecureClientPortal.Backend.Models;
 
 public class UserSession
 {
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; private set; } = string.Empty;
-    public string JwtId { get; private set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid UserId { get; private set; }
+    public Guid JwtId { get; private set; }
     public DateTime IssuedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime ExpiresAtUtc { get; private set; }
     public DateTime? RevokedAtUtc { get; private set; }
@@ -12,7 +12,7 @@ public class UserSession
     public string? ClientIp { get; private set; }
     public string? UserAgent { get; private set; }
 
-    public static UserSession Start(string id, string userId, string jwtId, DateTime expiresAtUtc, string? clientIp, string? userAgent)
+    public static UserSession Start(Guid id, Guid userId, Guid jwtId, DateTime expiresAtUtc, string? clientIp, string? userAgent)
     {
         var issuedAtUtc = DateTime.UtcNow;
         return new UserSession
@@ -29,7 +29,7 @@ public class UserSession
         };
     }
 
-    public void Refresh(string jwtId, DateTime expiresAtUtc, string? clientIp, string? userAgent)
+    public void Refresh(Guid jwtId, DateTime expiresAtUtc, string? clientIp, string? userAgent)
     {
         JwtId = jwtId;
         IssuedAtUtc = DateTime.UtcNow;
@@ -51,3 +51,8 @@ public class UserSession
         RevokedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
     }
 }
+
+
+
+
+

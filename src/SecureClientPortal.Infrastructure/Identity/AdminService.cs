@@ -61,7 +61,7 @@ public sealed class AdminService : IAdminService
         var inviteToken = AccessTokenCodec.GenerateToken();
         var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
         var user = User.CreateInvited(
-            $"u_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.FullName,
             email,
             IdentityDomainValues.ToUserRole(roleName),
@@ -70,7 +70,7 @@ public sealed class AdminService : IAdminService
             string.IsNullOrWhiteSpace(request.Company) ? null : JsonSerializer.Serialize(new { company = request.Company.Trim() }));
 
         var invite = UserAccessToken.Create(
-            $"uat_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             user.Id,
             "invite",
             AccessTokenCodec.HashToken(inviteToken),
@@ -124,7 +124,12 @@ public sealed class AdminService : IAdminService
     {
         IdentityValidators.ValidateAdminUpdateRole(request);
 
-        var user = await _db.Users.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var userId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var user = await _db.Users.FindAsync([userId], ct);
         if (user is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -155,7 +160,12 @@ public sealed class AdminService : IAdminService
     {
         IdentityValidators.ValidateAdminUpdateStatus(request);
 
-        var user = await _db.Users.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var userId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var user = await _db.Users.FindAsync([userId], ct);
         if (user is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -192,7 +202,12 @@ public sealed class AdminService : IAdminService
     {
         IdentityValidators.ValidateAdminResetAccess(request);
 
-        var user = await _db.Users.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var userId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var user = await _db.Users.FindAsync([userId], ct);
         if (user is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -219,7 +234,7 @@ public sealed class AdminService : IAdminService
         }
 
         var resetAccessToken = UserAccessToken.Create(
-            $"uat_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             user.Id,
             "password_reset",
             AccessTokenCodec.HashToken(resetToken),
@@ -269,7 +284,12 @@ public sealed class AdminService : IAdminService
     {
         IdentityValidators.ValidateAdminResetPassword(request);
 
-        var user = await _db.Users.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var userId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var user = await _db.Users.FindAsync([userId], ct);
         if (user is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -332,6 +352,3 @@ public sealed class AdminService : IAdminService
         return new { key = item.Key, valueJson = item.ValueJson };
     }
 }
-
-
-

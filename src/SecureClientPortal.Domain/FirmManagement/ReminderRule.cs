@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class ReminderRule
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string TriggerType { get; private set; } = string.Empty;
     public int DaysBeforeDue { get; private set; }
@@ -13,7 +13,7 @@ public class ReminderRule
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static ReminderRule Create(
-        string id,
+        Guid id,
         string name,
         string triggerType,
         int daysBeforeDue,
@@ -54,3 +54,9 @@ public class ReminderRule
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

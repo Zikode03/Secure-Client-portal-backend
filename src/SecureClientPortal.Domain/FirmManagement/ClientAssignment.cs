@@ -2,23 +2,28 @@ namespace SecureClientPortal.Backend.Models;
 
 public class ClientAssignment
 {
-    public string Id { get; private set; } = string.Empty;
-    public string AccountantUserId { get; private set; } = string.Empty;
-    public string ClientId { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
+    public Guid AccountantUserId { get; private set; }
+    public Guid ClientId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static ClientAssignment Create(
-        string id,
-        string accountantUserId,
-        string clientId,
+        Guid id,
+        Guid accountantUserId,
+        Guid clientId,
         DateTime? createdAtUtc = null)
     {
         return new ClientAssignment
         {
             Id = id,
-            AccountantUserId = string.IsNullOrWhiteSpace(accountantUserId) ? throw new ArgumentException("Accountant user id is required.", nameof(accountantUserId)) : accountantUserId.Trim(),
-            ClientId = string.IsNullOrWhiteSpace(clientId) ? throw new ArgumentException("Client id is required.", nameof(clientId)) : clientId.Trim(),
+            AccountantUserId = accountantUserId == Guid.Empty ? throw new ArgumentException("Accountant user id is required.", nameof(accountantUserId)) : accountantUserId,
+            ClientId = clientId == Guid.Empty ? throw new ArgumentException("Client id is required.", nameof(clientId)) : clientId,
             CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow
         };
     }
 }
+
+
+
+
+

@@ -1,31 +1,43 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Contracts;
+using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Infrastructure.Requests.Application;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Tests;
 
 public class Phase3RequestsCommentsTests
 {
+    private static readonly Guid AccountantUserId = Guid.Parse("82222222-2222-2222-2222-222222222221");
+    private static readonly Guid AccountantTwoId = Guid.Parse("82222222-2222-2222-2222-222222222222");
+    private static readonly Guid ClientUserId = Guid.Parse("83333333-3333-3333-3333-333333333331");
+    private static readonly Guid ClientAlphaId = Guid.Parse("8aaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1");
+    private static readonly Guid ClientBetaId = Guid.Parse("8aaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2");
+    private static readonly Guid RequestAlphaId = Guid.Parse("85555555-5555-5555-5555-555555555551");
+    private static readonly Guid RequestBetaId = Guid.Parse("85555555-5555-5555-5555-555555555552");
+
     [Fact]
     public async Task GetComments_RespectsScope()
     {
         await using var db = BuildDb();
         Seed(db);
 
-        var accountant = BuildUser("u_acc_001", "accountant");
-        var okController = new RequestsController(db) { ControllerContext = BuildControllerContext(accountant) };
-        var okResult = await okController.GetComments("req_001");
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var okController = new RequestsController(new RequestService(db)) { ControllerContext = BuildControllerContext(accountant) };
+        var okResult = await okController.GetComments(RequestAlphaId.ToString(), TestContext.Current.CancellationToken);
         var ok = Assert.IsType<OkObjectResult>(okResult.Result);
         var comments = Assert.IsAssignableFrom<IEnumerable<RequestComment>>(ok.Value);
         Assert.Single(comments);
 
-        var blockedController = new RequestsController(db) { ControllerContext = BuildControllerContext(accountant) };
-        var blocked = await blockedController.GetComments("req_002");
+        var blockedController = new RequestsController(new RequestService(db)) { ControllerContext = BuildControllerContext(accountant) };
+        var blocked = await blockedController.GetComments(RequestBetaId.ToString(), TestContext.Current.CancellationToken);
         Assert.IsType<ForbidResult>(blocked.Result);
     }
 
@@ -35,17 +47,20 @@ public class Phase3RequestsCommentsTests
         await using var db = BuildDb();
         Seed(db);
 
-        var client = BuildUser("u_client_001", "client", ["c_001"]);
-        var controller = new RequestsController(db)
+        var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+        var controller = new RequestsController(new RequestService(db))
         {
             ControllerContext = BuildControllerContext(client)
         };
 
-        var result = await controller.AddComment("req_001", new AddRequestCommentRequest("Need an update"));
+        var result = await controller.AddComment(
+            RequestAlphaId.ToString(),
+            new AddRequestCommentRequest("Need an update"),
+            TestContext.Current.CancellationToken);
         Assert.IsType<OkObjectResult>(result.Result);
 
-        var notifications = await db.Notifications.Where(x => x.ClientId == "c_001").ToListAsync();
-        Assert.Contains(notifications, x => x.UserId == "u_acc_001" && x.Type == "request.comment");
+        var notifications = await db.Notifications.Where(x => x.ClientId == ClientAlphaId).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(notifications, x => x.UserId == AccountantUserId && x.Type == "request.comment");
     }
 
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)
@@ -59,18 +74,18 @@ public class Phase3RequestsCommentsTests
         };
     }
 
-    private static ClaimsPrincipal BuildUser(string userId, string role, IEnumerable<string>? clientIds = null)
+    private static ClaimsPrincipal BuildUser(Guid userId, string role, IEnumerable<Guid>? clientIds = null)
     {
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, userId),
-            new(ClaimTypes.NameIdentifier, userId),
+            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
             new(ClaimTypes.Role, role)
         };
 
         if (clientIds is not null)
         {
-            claims.AddRange(clientIds.Select(x => new Claim("client_id", x)));
+            claims.AddRange(clientIds.Select(x => new Claim("client_id", x.ToString())));
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
@@ -87,88 +102,49 @@ public class Phase3RequestsCommentsTests
     private static void Seed(PortalDbContext db)
     {
         db.Users.AddRange(
-            new User
-            {
-                Id = "u_acc_001",
-                Email = "acc@test.com",
-                FullName = "Accountant",
-                Role = "accountant",
-                PasswordHash = "x",
-                ClientIdsJson = "[]"
-            },
-            new User
-            {
-                Id = "u_client_001",
-                Email = "client@test.com",
-                FullName = "Client",
-                Role = "client",
-                PasswordHash = "x",
-                ClientIdsJson = "[\"c_001\"]"
-            });
+            BuildActiveUser(AccountantUserId, "Accountant", "acc@test.com", UserRole.Accountant),
+            BuildActiveUser(AccountantTwoId, "Accountant Two", "acc2@test.com", UserRole.Accountant),
+            BuildActiveUser(ClientUserId, "Client", "client@test.com", UserRole.Client, [ClientAlphaId]));
 
-        db.Clients.AddRange(
-            new Client
-            {
-                Id = "c_001",
-                Name = "Alpha",
-                EntityType = "Pty Ltd",
-                Status = "active",
-                ComplianceHealth = 90,
-                AssignedAccountantId = "u_acc_001",
-                PrimaryContact = "A",
-                Email = "a@test.com"
-            },
-            new Client
-            {
-                Id = "c_002",
-                Name = "Beta",
-                EntityType = "Pty Ltd",
-                Status = "active",
-                ComplianceHealth = 80,
-                AssignedAccountantId = "u_acc_002",
-                PrimaryContact = "B",
-                Email = "b@test.com"
-            });
+        var alpha = Client.Create(ClientAlphaId, "Alpha", "Pty Ltd", "A", "a@test.com", ClientStatus.Active);
+        alpha.AssignAccountant(AccountantUserId);
+        alpha.UpdateComplianceHealth(90);
 
-        db.ClientAssignments.Add(new ClientAssignment
-        {
-            Id = "ca_001",
-            AccountantUserId = "u_acc_001",
-            ClientId = "c_001"
-        });
+        var beta = Client.Create(ClientBetaId, "Beta", "Pty Ltd", "B", "b@test.com", ClientStatus.Active);
+        beta.AssignAccountant(AccountantTwoId);
+        beta.UpdateComplianceHealth(80);
+
+        db.Clients.AddRange(alpha, beta);
+        db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientAlphaId));
 
         db.Requests.AddRange(
-            new RequestItem
-            {
-                Id = "req_001",
-                ClientId = "c_001",
-                Title = "R1",
-                Description = "d1",
-                Priority = "medium",
-                Status = "open",
-                RequestedByUserId = "u_acc_001"
-            },
-            new RequestItem
-            {
-                Id = "req_002",
-                ClientId = "c_002",
-                Title = "R2",
-                Description = "d2",
-                Priority = "medium",
-                Status = "open",
-                RequestedByUserId = "u_acc_002"
-            });
+            RequestItem.Create(RequestAlphaId, ClientAlphaId, "clarification_needed", null, "R1", "d1", RequestPriority.Medium, AccountantUserId, RequestStatus.Open, null),
+            RequestItem.Create(RequestBetaId, ClientBetaId, "clarification_needed", null, "R2", "d2", RequestPriority.Medium, AccountantTwoId, RequestStatus.Open, null));
 
-        db.RequestComments.Add(new RequestComment
-        {
-            Id = "rc_001",
-            RequestId = "req_001",
-            ClientId = "c_001",
-            AuthorUserId = "u_client_001",
-            AuthorRole = "client",
-            Message = "Please review"
-        });
+        db.RequestComments.Add(RequestComment.Create(
+            Guid.Parse("89999999-9999-9999-9999-999999999991"),
+            RequestAlphaId,
+            ClientAlphaId,
+            ClientUserId,
+            "client",
+            "Please review"));
 
         db.SaveChanges();
     }
+
+    private static User BuildActiveUser(Guid id, string fullName, string email, UserRole role, IEnumerable<Guid>? clientIds = null)
+    {
+        var user = User.CreateInvited(
+            id,
+            fullName,
+            email,
+            role,
+            "x",
+            JsonSerializer.Serialize(clientIds?.Select(x => x.ToString()).ToArray() ?? Array.Empty<string>()),
+            null);
+        user.CompleteSetup(fullName, "x");
+        return user;
+    }
 }
+
+

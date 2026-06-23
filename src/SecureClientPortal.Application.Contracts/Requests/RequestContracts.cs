@@ -1,13 +1,13 @@
 namespace SecureClientPortal.Backend.Application.Contracts;
 
 public record CreateRequestRequest(
-    string ClientId,
+    Guid ClientId,
     string RequestType,
     string Title,
     string Description,
     string Priority,
     DateTime? DueDateUtc,
-    string? RelatedDocumentId);
+    Guid? RelatedDocumentId);
 
 public record AddRequestCommentRequest(string Message);
 public record UpdateRequestStatusRequest(string Status);

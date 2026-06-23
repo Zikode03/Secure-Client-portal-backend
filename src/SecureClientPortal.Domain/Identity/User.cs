@@ -4,7 +4,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class User
 {
-    public string Id { get; set; } = string.Empty;
+    public Guid Id { get; set; }
     public string FullName { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
     public string PasswordHash { get; private set; } = string.Empty;
@@ -15,7 +15,7 @@ public class User
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static User CreateInvited(string id, string fullName, string email, UserRole role, string passwordHash, string clientIdsJson, string? profileJson)
+    public static User CreateInvited(Guid id, string fullName, string email, UserRole role, string passwordHash, string clientIdsJson, string? profileJson)
     {
         var user = new User { Id = id, CreatedAtUtc = DateTime.UtcNow };
         user.SetFullName(fullName);
@@ -90,3 +90,9 @@ public class User
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

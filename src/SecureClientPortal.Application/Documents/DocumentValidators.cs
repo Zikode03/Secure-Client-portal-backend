@@ -8,10 +8,10 @@ public static class DocumentValidators
     public static void ValidateUpload(UploadDocumentRequest request)
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(request.ClientId)) errors.Add("Client id is required.");
+        if (request.ClientId == Guid.Empty) errors.Add("Client id is required.");
         if (string.IsNullOrWhiteSpace(request.DocumentType)) errors.Add("Document type is required.");
         if (request.File is null || request.File.Length == 0) errors.Add("A file is required.");
-        if (string.IsNullOrWhiteSpace(request.MonthlyPackId) && string.IsNullOrWhiteSpace(request.DocumentSlotId))
+        if (!request.MonthlyPackId.HasValue && !request.DocumentSlotId.HasValue)
         {
             errors.Add("A monthly pack or document slot is required.");
         }

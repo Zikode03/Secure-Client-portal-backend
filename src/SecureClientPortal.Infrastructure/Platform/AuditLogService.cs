@@ -20,26 +20,27 @@ public sealed class AuditLogService : IAuditLogService
     {
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var cappedLimit = Math.Clamp(limit, 1, 500);
+        var hasClientFilter = Guid.TryParse(clientId, out var parsedClientId);
 
         var query = _db.AuditLogs.AsQueryable();
 
         if (user.IsAdmin())
         {
-            if (!string.IsNullOrWhiteSpace(clientId))
+            if (hasClientFilter)
             {
-                query = query.Where(x => x.ClientId == clientId);
+                query = query.Where(x => x.ClientId == parsedClientId);
             }
         }
         else
         {
-            query = query.Where(x => x.ClientId != null && allowedClientIds.Contains(x.ClientId));
+            query = query.Where(x => x.ClientId.HasValue && allowedClientIds.Contains(x.ClientId.Value));
             if (!string.IsNullOrWhiteSpace(clientId))
             {
-                if (!allowedClientIds.Contains(clientId))
+                if (!hasClientFilter || !allowedClientIds.Contains(parsedClientId))
                 {
                     return (true, []);
                 }
-                query = query.Where(x => x.ClientId == clientId);
+                query = query.Where(x => x.ClientId == parsedClientId);
             }
         }
 

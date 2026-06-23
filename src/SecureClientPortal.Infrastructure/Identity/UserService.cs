@@ -78,7 +78,7 @@ public sealed class UserService : IUserService
 
         var roleScope = RolePermissions.NormalizeScope(role.Scope);
         var clientIds = roleScope == "client"
-            ? (request.ClientIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            ? (request.ClientIds ?? []).Where(x => x != Guid.Empty).Distinct().ToArray()
             : [];
 
         if (roleScope == "client" && clientIds.Length == 0)
@@ -101,7 +101,7 @@ public sealed class UserService : IUserService
         var inviteToken = AccessTokenCodec.GenerateToken();
         var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
         var user = User.CreateInvited(
-            $"u_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             request.FullName,
             email,
             IdentityDomainValues.ToUserRole(normalizedRole),
@@ -112,7 +112,7 @@ public sealed class UserService : IUserService
                 : JsonSerializer.Serialize(new { company = request.Company.Trim() }));
 
         var invite = UserAccessToken.Create(
-            $"uat_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             user.Id,
             "invite",
             AccessTokenCodec.HashToken(inviteToken),
@@ -131,7 +131,7 @@ public sealed class UserService : IUserService
             "users.created",
             "user",
             user.Id,
-            clientIds.FirstOrDefault(),
+            clientIds.FirstOrDefault() == Guid.Empty ? null : clientIds.First(),
             JsonSerializer.Serialize(new { user.Email, user.Role, clientIds, inviteExpiresAtUtc, dispatch.DeliveryMode }),
             ct);
 
@@ -157,7 +157,12 @@ public sealed class UserService : IUserService
     {
         IdentityValidators.ValidateUpdateUserActivation(request);
 
-        var user = await _db.Users.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var userId))
+        {
+            return ServiceResult<object>.NotFoundResult();
+        }
+
+        var user = await _db.Users.FindAsync([userId], ct);
         if (user is null)
         {
             return ServiceResult<object>.NotFoundResult();
@@ -189,13 +194,13 @@ public sealed class UserService : IUserService
         return ServiceResult<object>.Success(new { user.Id, isActive = request.IsActive, securityStatus = UserSecurityProfile.GetStatus(user.SecurityJson) });
     }
 
-    private static string[] ParseClientIds(string rawJson)
+    private static Guid[] ParseClientIds(string rawJson)
     {
         try
         {
-            return JsonSerializer.Deserialize<string[]>(rawJson)?
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+            return JsonSerializer.Deserialize<Guid[]>(rawJson)?
+                .Where(x => x != Guid.Empty)
+                .Distinct()
                 .ToArray() ?? [];
         }
         catch
@@ -204,4 +209,3 @@ public sealed class UserService : IUserService
         }
     }
 }
-

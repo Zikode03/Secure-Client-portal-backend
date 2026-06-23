@@ -2,7 +2,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class MonthlyPackTemplate
 {
-    public string Id { get; private set; } = string.Empty;
+    public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
     public int AutoCreateDayOfMonth { get; private set; } = 1;
@@ -11,7 +11,7 @@ public class MonthlyPackTemplate
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static MonthlyPackTemplate Create(
-        string id,
+        Guid id,
         string name,
         string description,
         int autoCreateDayOfMonth,
@@ -42,3 +42,9 @@ public class MonthlyPackTemplate
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

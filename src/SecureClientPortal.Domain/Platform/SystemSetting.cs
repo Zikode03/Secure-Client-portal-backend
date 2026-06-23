@@ -22,3 +22,6 @@ public class SystemSetting
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+

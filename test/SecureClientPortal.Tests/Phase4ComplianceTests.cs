@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Infrastructure.Compliance.Application;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -12,25 +14,34 @@ namespace SecureClientPortal.Backend.Tests;
 
 public class Phase4ComplianceTests
 {
+    private static readonly Guid AdminUserId = Guid.Parse("91111111-1111-1111-1111-111111111111");
+    private static readonly Guid AccountantUserId = Guid.Parse("92222222-2222-2222-2222-222222222221");
+    private static readonly Guid AccountantTwoId = Guid.Parse("92222222-2222-2222-2222-222222222222");
+    private static readonly Guid ClientUserId = Guid.Parse("93333333-3333-3333-3333-333333333331");
+    private static readonly Guid ClientAlphaId = Guid.Parse("9aaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1");
+    private static readonly Guid ClientBetaId = Guid.Parse("9aaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2");
+    private static readonly Guid TaxCategoryId = Guid.Parse("9ccccccc-cccc-cccc-cccc-ccccccccccc1");
+    private static readonly Guid PopiaCategoryId = Guid.Parse("9ccccccc-cccc-cccc-cccc-ccccccccccc2");
+
     [Fact]
     public async Task ComplianceItems_AreScopedByAssignedClient()
     {
         await using var db = BuildDb();
         Seed(db);
 
-        var accountant = BuildUser("u_acc_001", "accountant");
-        var controller = new ComplianceController(db)
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var controller = new ComplianceController(new ComplianceService(db))
         {
             ControllerContext = BuildControllerContext(accountant)
         };
 
-        var result = await controller.GetItems();
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var result = await controller.GetItems(ct: TestContext.Current.CancellationToken);
+        var ok = Assert.IsType<OkObjectResult>(result);
         var json = JsonSerializer.Serialize(ok.Value);
 
-        Assert.Contains("\"ClientId\":\"c_001\"", json);
-        Assert.DoesNotContain("\"ClientId\":\"c_002\"", json);
-        Assert.Contains("\"ownerName\":\"Accountant\"", json);
+        Assert.Contains(ClientAlphaId.ToString(), json);
+        Assert.DoesNotContain(ClientBetaId.ToString(), json);
+        Assert.Contains("Accountant", json);
         Assert.Contains("\"RiskLevel\":\"high\"", json);
     }
 
@@ -40,19 +51,19 @@ public class Phase4ComplianceTests
         await using var db = BuildDb();
         Seed(db);
 
-        var admin = BuildUser("u_admin_001", "admin");
-        var controller = new ComplianceController(db)
+        var admin = BuildUser(AdminUserId, "admin");
+        var controller = new ComplianceController(new ComplianceService(db))
         {
             ControllerContext = BuildControllerContext(admin)
         };
 
-        var alertsResult = await controller.GetAlerts();
-        var alertsOk = Assert.IsType<OkObjectResult>(alertsResult.Result);
+        var alertsResult = await controller.GetAlerts(ct: TestContext.Current.CancellationToken);
+        var alertsOk = Assert.IsType<OkObjectResult>(alertsResult);
         var alertsJson = JsonSerializer.Serialize(alertsOk.Value);
         Assert.Contains("\"alertLevel\":\"high\"", alertsJson);
         Assert.Contains("\"alertLevel\":\"critical\"", alertsJson);
 
-        var summaryResult = await controller.GetSummaryReport();
+        var summaryResult = await controller.GetSummaryReport(ct: TestContext.Current.CancellationToken);
         var summaryOk = Assert.IsType<OkObjectResult>(summaryResult);
         var summaryJson = JsonSerializer.Serialize(summaryOk.Value);
         Assert.Contains("\"totalItems\":2", summaryJson);
@@ -68,38 +79,42 @@ public class Phase4ComplianceTests
         await using var db = BuildDb();
         Seed(db);
 
-        var accountant = BuildUser("u_acc_001", "accountant");
-        var controller = new ComplianceController(db)
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var controller = new ComplianceController(new ComplianceService(db))
         {
             ControllerContext = BuildControllerContext(accountant)
         };
 
-        var createItem = await controller.CreateItem(new CreateComplianceItemRequest(
-            "c_001",
-            "cc_popia",
-            "POPIA Processing Register",
-            "pending",
-            "u_acc_001",
-            "critical",
-            "signed_documents",
-            DateTime.UtcNow.AddDays(5),
-            DateTime.UtcNow.AddDays(20)));
-        var createItemOk = Assert.IsType<OkObjectResult>(createItem.Result);
+        var createItem = await controller.CreateItem(
+            new CreateComplianceItemRequest(
+                ClientAlphaId,
+                PopiaCategoryId,
+                "POPIA Processing Register",
+                "pending",
+                AccountantUserId,
+                "critical",
+                "signed_documents",
+                DateTime.UtcNow.AddDays(5),
+                DateTime.UtcNow.AddDays(20)),
+            TestContext.Current.CancellationToken);
+        var createItemOk = Assert.IsType<OkObjectResult>(createItem);
         var createItemJson = JsonSerializer.Serialize(createItemOk.Value);
-        Assert.Contains("\"ownerName\":\"Accountant\"", createItemJson);
+        Assert.Contains("Accountant", createItemJson);
         Assert.Contains("\"RequiredDocumentCategory\":\"signed_documents\"", createItemJson);
         Assert.Contains("\"RiskLevel\":\"critical\"", createItemJson);
 
-        var createdItem = await db.ComplianceItems.FirstAsync(x => x.Name == "POPIA Processing Register");
+        var createdItem = await db.ComplianceItems.FirstAsync(x => x.Name == "POPIA Processing Register", TestContext.Current.CancellationToken);
 
-        var reminderResult = await controller.CreateReminder(new CreateComplianceReminderRequest(
-            createdItem.Id,
-            "u_client_001",
-            "deadline_approaching",
-            DateTime.UtcNow.AddDays(3)));
-        Assert.IsType<OkObjectResult>(reminderResult.Result);
+        var reminderResult = await controller.CreateReminder(
+            new CreateComplianceReminderRequest(
+                createdItem.Id,
+                ClientUserId,
+                "deadline_approaching",
+                DateTime.UtcNow.AddDays(3)),
+            TestContext.Current.CancellationToken);
+        Assert.IsType<OkObjectResult>(reminderResult);
 
-        var notifications = await db.Notifications.Where(x => x.UserId == "u_client_001").ToListAsync();
+        var notifications = await db.Notifications.Where(x => x.UserId == ClientUserId).ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains(notifications, x => x.Type == "compliance.reminder");
     }
 
@@ -109,16 +124,16 @@ public class Phase4ComplianceTests
         await using var db = BuildDb();
         Seed(db, includeCategories: false);
 
-        var admin = BuildUser("u_admin_001", "admin");
-        var controller = new ComplianceController(db)
+        var admin = BuildUser(AdminUserId, "admin");
+        var controller = new ComplianceController(new ComplianceService(db))
         {
             ControllerContext = BuildControllerContext(admin)
         };
 
-        var result = await controller.SeedDefaultCategories();
+        var result = await controller.SeedDefaultCategories(TestContext.Current.CancellationToken);
         Assert.IsType<OkObjectResult>(result);
 
-        var names = await db.ComplianceCategories.Select(x => x.Name).OrderBy(x => x).ToListAsync();
+        var names = await db.ComplianceCategories.Select(x => x.Name).OrderBy(x => x).ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Tax Compliance", names);
         Assert.Contains("CIPC Compliance", names);
         Assert.Contains("Payroll Compliance", names);
@@ -133,18 +148,18 @@ public class Phase4ComplianceTests
         };
     }
 
-    private static ClaimsPrincipal BuildUser(string userId, string role, IEnumerable<string>? clientIds = null)
+    private static ClaimsPrincipal BuildUser(Guid userId, string role, IEnumerable<Guid>? clientIds = null)
     {
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, userId),
-            new(ClaimTypes.NameIdentifier, userId),
+            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
             new(ClaimTypes.Role, role)
         };
 
         if (clientIds is not null)
         {
-            claims.AddRange(clientIds.Select(x => new Claim("client_id", x)));
+            claims.AddRange(clientIds.Select(x => new Claim("client_id", x.ToString())));
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
@@ -161,64 +176,69 @@ public class Phase4ComplianceTests
     private static void Seed(PortalDbContext db, bool includeCategories = true)
     {
         db.Users.AddRange(
-            new User { Id = "u_admin_001", Email = "admin@test.com", FullName = "Admin", Role = "admin", PasswordHash = "x", ClientIdsJson = "[]" },
-            new User { Id = "u_acc_001", Email = "acc@test.com", FullName = "Accountant", Role = "accountant", PasswordHash = "x", ClientIdsJson = "[]" },
-            new User { Id = "u_client_001", Email = "client@test.com", FullName = "Client", Role = "client", PasswordHash = "x", ClientIdsJson = "[\"c_001\"]" });
+            BuildActiveUser(AdminUserId, "Admin", "admin@test.com", UserRole.Admin),
+            BuildActiveUser(AccountantUserId, "Accountant", "acc@test.com", UserRole.Accountant),
+            BuildActiveUser(AccountantTwoId, "Accountant Two", "acc2@test.com", UserRole.Accountant),
+            BuildActiveUser(ClientUserId, "Client", "client@test.com", UserRole.Client, [ClientAlphaId]));
 
-        db.Clients.AddRange(
-            new Client { Id = "c_001", Name = "Alpha", EntityType = "Pty Ltd", Status = "active", ComplianceHealth = 90, AssignedAccountantId = "u_acc_001", PrimaryContact = "A", Email = "a@test.com" },
-            new Client { Id = "c_002", Name = "Beta", EntityType = "Pty Ltd", Status = "active", ComplianceHealth = 80, AssignedAccountantId = "u_acc_002", PrimaryContact = "B", Email = "b@test.com" });
+        var alpha = Client.Create(ClientAlphaId, "Alpha", "Pty Ltd", "A", "a@test.com", ClientStatus.Active);
+        alpha.AssignAccountant(AccountantUserId);
+        alpha.UpdateComplianceHealth(90);
 
-        db.ClientAssignments.Add(new ClientAssignment { Id = "ca_001", AccountantUserId = "u_acc_001", ClientId = "c_001" });
+        var beta = Client.Create(ClientBetaId, "Beta", "Pty Ltd", "B", "b@test.com", ClientStatus.Active);
+        beta.AssignAccountant(AccountantTwoId);
+        beta.UpdateComplianceHealth(80);
+
+        db.Clients.AddRange(alpha, beta);
+        db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientAlphaId));
 
         if (includeCategories)
         {
             db.ComplianceCategories.AddRange(
-                new ComplianceCategory
-                {
-                    Id = "cc_tax",
-                    Name = "Tax Compliance",
-                    Code = "TAX",
-                    Description = "Tax filings and proofs",
-                    IsActive = true
-                },
-                new ComplianceCategory
-                {
-                    Id = "cc_popia",
-                    Name = "POPIA Compliance",
-                    Code = "POPIA",
-                    Description = "Privacy controls and evidence",
-                    IsActive = true
-                });
+                ComplianceCategory.Create(TaxCategoryId, "Tax Compliance", "Tax filings and proofs", "TAX"),
+                ComplianceCategory.Create(PopiaCategoryId, "POPIA Compliance", "Privacy controls and evidence", "POPIA"));
         }
 
         db.ComplianceItems.AddRange(
-            new ComplianceItem
-            {
-                Id = "ci_001",
-                ClientId = "c_001",
-                CategoryId = "cc_tax",
-                Name = "Tax PIN",
-                Status = "valid",
-                OwnerUserId = "u_acc_001",
-                RiskLevel = "high",
-                RequiredDocumentCategory = "tax_working_papers",
-                DueDateUtc = DateTime.UtcNow.AddDays(14),
-                ExpiryDateUtc = DateTime.UtcNow.AddDays(7)
-            },
-            new ComplianceItem
-            {
-                Id = "ci_002",
-                ClientId = "c_002",
-                CategoryId = "cc_tax",
-                Name = "VAT Return",
-                Status = "expired",
-                OwnerUserId = "u_acc_002",
-                RiskLevel = "critical",
-                RequiredDocumentCategory = "compliance_record",
-                ExpiryDateUtc = DateTime.UtcNow.AddDays(-1)
-            });
+            ComplianceItem.Create(
+                Guid.Parse("9ddddddd-dddd-dddd-dddd-ddddddddddd1"),
+                ClientAlphaId,
+                TaxCategoryId,
+                "Tax PIN",
+                ComplianceItemStatus.Valid,
+                AccountantUserId,
+                ComplianceRiskLevel.High,
+                "tax_working_papers",
+                DateTime.UtcNow.AddDays(14),
+                DateTime.UtcNow.AddDays(7)),
+            ComplianceItem.Create(
+                Guid.Parse("9ddddddd-dddd-dddd-dddd-ddddddddddd2"),
+                ClientBetaId,
+                TaxCategoryId,
+                "VAT Return",
+                ComplianceItemStatus.Expired,
+                AccountantTwoId,
+                ComplianceRiskLevel.Critical,
+                "compliance_record",
+                null,
+                DateTime.UtcNow.AddDays(-1)));
 
         db.SaveChanges();
     }
+
+    private static User BuildActiveUser(Guid id, string fullName, string email, UserRole role, IEnumerable<Guid>? clientIds = null)
+    {
+        var user = User.CreateInvited(
+            id,
+            fullName,
+            email,
+            role,
+            "x",
+            JsonSerializer.Serialize(clientIds?.Select(x => x.ToString()).ToArray() ?? Array.Empty<string>()),
+            null);
+        user.CompleteSetup(fullName, "x");
+        return user;
+    }
 }
+
+

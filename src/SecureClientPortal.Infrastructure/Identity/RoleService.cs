@@ -5,6 +5,8 @@ using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Infrastructure.Identity.Application;
@@ -95,7 +97,7 @@ public sealed class RoleService : IRoleService
             actor.RoleScope,
             "roles.created",
             "role",
-            role.Name,
+            DeterministicGuid($"role:{role.Name}"),
             null,
             JsonSerializer.Serialize(new { role.Name, role.Scope }),
             ct);
@@ -136,7 +138,7 @@ public sealed class RoleService : IRoleService
             actor.RoleScope,
             "roles.updated",
             "role",
-            role.Name,
+            DeterministicGuid($"role:{role.Name}"),
             null,
             JsonSerializer.Serialize(new { role.Name, role.Scope }),
             ct);
@@ -166,7 +168,7 @@ public sealed class RoleService : IRoleService
             actor.RoleScope,
             isActive ? "roles.activated" : "roles.deactivated",
             "role",
-            role.Name,
+            DeterministicGuid($"role:{role.Name}"),
             null,
             JsonSerializer.Serialize(new { role.Name, isActive }),
             ct);
@@ -220,10 +222,17 @@ public sealed class RoleService : IRoleService
         foreach (var permissionKey in permissions)
         {
             _db.RolePermissions.Add(RolePermission.Create(
-                $"rp_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 roleName,
                 permissionKey));
         }
+    }
+
+    private static Guid DeterministicGuid(string value)
+    {
+        using var md5 = MD5.Create();
+        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(value));
+        return new Guid(hash);
     }
 
     private static string NormalizeRoleName(string value)

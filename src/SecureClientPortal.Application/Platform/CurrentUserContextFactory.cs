@@ -24,8 +24,11 @@ public sealed class CurrentUserContextFactory : ICurrentUserContextFactory
             ? explicitPermissions
             : RolePermissions.ForRole(roleScope).ToArray();
 
+        var userIdValue = user.FindFirst("sub")?.Value ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        Guid? userId = Guid.TryParse(userIdValue, out var parsedUserId) ? parsedUserId : null;
+
         return new CurrentUserContext(
-            user.FindFirst("sub")?.Value ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+            userId,
             role,
             roleScope,
             effectivePermissions,

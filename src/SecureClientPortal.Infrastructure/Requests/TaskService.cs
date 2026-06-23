@@ -3,7 +3,6 @@ using SecureClientPortal.Backend.Application.Requests;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 
 namespace SecureClientPortal.Backend.Infrastructure.Requests.Application;
@@ -28,8 +27,13 @@ public sealed class TaskService : ITaskService
 
     public async Task<(bool forbidden, TaskItem? item)> GetByIdAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, null);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        var item = await _db.Tasks.FindAsync([id], ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
         if (item is null)
         {
             return (false, null);
@@ -52,11 +56,9 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("Client does not exist.");
         }
 
-        var createdByUserId = user.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? request.CreatedByUserId;
+        var createdByUserId = user.GetUserId() ?? request.CreatedByUserId;
         var created = TaskItem.Create(
-            string.IsNullOrWhiteSpace(request.Id) ? $"task_{Guid.NewGuid():N}" : request.Id,
+            request.Id == Guid.Empty ? Guid.NewGuid() : request.Id,
             request.ClientId,
             request.Title,
             request.Status,
@@ -71,8 +73,13 @@ public sealed class TaskService : ITaskService
 
     public async Task<(bool forbidden, TaskItem? updated)> UpdateAsync(string id, TaskItem request, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, null);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        var item = await _db.Tasks.FindAsync([id], ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
         if (item is null)
         {
             return (false, null);
@@ -91,8 +98,13 @@ public sealed class TaskService : ITaskService
 
     public async Task<(bool forbidden, bool deleted)> DeleteAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, false);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        var item = await _db.Tasks.FindAsync([id], ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
         if (item is null)
         {
             return (false, false);
@@ -108,4 +120,3 @@ public sealed class TaskService : ITaskService
         return (false, true);
     }
 }
-

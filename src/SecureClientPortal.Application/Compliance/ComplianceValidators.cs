@@ -22,8 +22,8 @@ public static class ComplianceValidators
         var status = request.Status.Trim().ToLowerInvariant();
         var riskLevel = request.RiskLevel.Trim().ToLowerInvariant();
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(request.ClientId)) errors.Add("Client id is required.");
-        if (string.IsNullOrWhiteSpace(request.CategoryId)) errors.Add("Category id is required.");
+        if (request.ClientId == Guid.Empty) errors.Add("Client id is required.");
+        if (request.CategoryId == Guid.Empty) errors.Add("Category id is required.");
         if (string.IsNullOrWhiteSpace(request.Name)) errors.Add("Compliance item name is required.");
         if (!AllowedItemStatuses.Contains(status)) errors.Add("Invalid compliance status.");
         if (!AllowedRiskLevels.Contains(riskLevel)) errors.Add("Risk level must be low, medium, high, or critical.");
@@ -44,8 +44,8 @@ public static class ComplianceValidators
     public static void ValidateCreateReminder(CreateComplianceReminderRequest request)
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(request.ComplianceItemId)) errors.Add("Compliance item id is required.");
-        if (string.IsNullOrWhiteSpace(request.RecipientUserId)) errors.Add("Recipient user id is required.");
+        if (request.ComplianceItemId == Guid.Empty) errors.Add("Compliance item id is required.");
+        if (request.RecipientUserId == Guid.Empty) errors.Add("Recipient user id is required.");
         if (string.IsNullOrWhiteSpace(request.Type)) errors.Add("Reminder type is required.");
         ThrowIfAny(errors);
     }

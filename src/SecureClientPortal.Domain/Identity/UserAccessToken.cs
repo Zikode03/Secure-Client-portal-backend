@@ -2,19 +2,19 @@ namespace SecureClientPortal.Backend.Models;
 
 public class UserAccessToken
 {
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; private set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid UserId { get; private set; }
     public string Purpose { get; private set; } = string.Empty;
     public string TokenHash { get; private set; } = string.Empty;
-    public string? SessionId { get; private set; }
-    public string? CreatedByUserId { get; private set; }
+    public Guid? SessionId { get; private set; }
+    public Guid? CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAtUtc { get; private set; }
     public DateTime? ConsumedAtUtc { get; private set; }
     public DateTime? InvalidatedAtUtc { get; private set; }
     public string? InvalidatedReason { get; private set; }
 
-    public static UserAccessToken Create(string id, string userId, string purpose, string tokenHash, DateTime expiresAtUtc, string? sessionId = null, string? createdByUserId = null)
+    public static UserAccessToken Create(Guid id, Guid userId, string purpose, string tokenHash, DateTime expiresAtUtc, Guid? sessionId = null, Guid? createdByUserId = null)
     {
         return new UserAccessToken
         {
@@ -22,8 +22,8 @@ public class UserAccessToken
             UserId = userId,
             Purpose = purpose.Trim(),
             TokenHash = tokenHash,
-            SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim(),
-            CreatedByUserId = string.IsNullOrWhiteSpace(createdByUserId) ? null : createdByUserId.Trim(),
+            SessionId = sessionId == Guid.Empty ? null : sessionId,
+            CreatedByUserId = createdByUserId == Guid.Empty ? null : createdByUserId,
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = expiresAtUtc
         };
@@ -50,3 +50,9 @@ public class UserAccessToken
         InvalidatedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
     }
 }
+
+
+
+
+
+

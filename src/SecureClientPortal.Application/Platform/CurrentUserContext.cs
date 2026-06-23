@@ -1,7 +1,7 @@
 namespace SecureClientPortal.Backend.Application;
 
 public sealed record CurrentUserContext(
-    string? UserId,
+    Guid? UserId,
     string Role,
     string RoleScope,
     IReadOnlyList<string> Permissions,

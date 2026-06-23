@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Application.Assignments;
-using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Application.Contracts;
+using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
 using System.Security.Claims;
@@ -23,12 +23,13 @@ public sealed class AssignmentService : IAssignmentService
     {
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         var query = _db.ClientAssignments.AsQueryable();
+        var hasClientFilter = Guid.TryParse(clientId, out var parsedClientId);
 
         if (user.IsAdmin())
         {
-            if (!string.IsNullOrWhiteSpace(clientId))
+            if (hasClientFilter)
             {
-                query = query.Where(x => x.ClientId == clientId);
+                query = query.Where(x => x.ClientId == parsedClientId);
             }
         }
         else
@@ -36,12 +37,12 @@ public sealed class AssignmentService : IAssignmentService
             query = query.Where(x => allowedClientIds.Contains(x.ClientId));
             if (!string.IsNullOrWhiteSpace(clientId))
             {
-                if (!allowedClientIds.Contains(clientId))
+                if (!hasClientFilter || !allowedClientIds.Contains(parsedClientId))
                 {
                     return (true, []);
                 }
 
-                query = query.Where(x => x.ClientId == clientId);
+                query = query.Where(x => x.ClientId == parsedClientId);
             }
         }
 
@@ -59,10 +60,7 @@ public sealed class AssignmentService : IAssignmentService
             clientName = clients.GetValueOrDefault(assignment.ClientId)?.Name,
             accountantUserId = assignment.AccountantUserId,
             accountantName = users.GetValueOrDefault(assignment.AccountantUserId)?.FullName,
-            isPrimary = string.Equals(
-                clients.GetValueOrDefault(assignment.ClientId)?.AssignedAccountantId,
-                assignment.AccountantUserId,
-                StringComparison.OrdinalIgnoreCase),
+            isPrimary = clients.GetValueOrDefault(assignment.ClientId)?.AssignedAccountantId == assignment.AccountantUserId,
             assignment.CreatedAtUtc
         }).ToArray());
     }
@@ -77,6 +75,7 @@ public sealed class AssignmentService : IAssignmentService
         {
             accountantRoleNames = ["accountant"];
         }
+
         var accountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.AccountantUserId && accountantRoleNames.Contains(x.Role), ct);
         if (accountant is null)
         {
@@ -94,13 +93,13 @@ public sealed class AssignmentService : IAssignmentService
         if (assignment is null)
         {
             assignment = ClientAssignment.Create(
-                $"ca_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 request.AccountantUserId,
                 request.ClientId);
             _db.ClientAssignments.Add(assignment);
         }
 
-        if (request.IsPrimary || string.IsNullOrWhiteSpace(client.AssignedAccountantId))
+        if (request.IsPrimary || client.AssignedAccountantId == Guid.Empty)
         {
             client.AssignAccountant(request.AccountantUserId);
         }
@@ -121,13 +120,18 @@ public sealed class AssignmentService : IAssignmentService
             assignment.Id,
             assignment.ClientId,
             assignment.AccountantUserId,
-            isPrimary = string.Equals(client.AssignedAccountantId, assignment.AccountantUserId, StringComparison.OrdinalIgnoreCase)
+            isPrimary = client.AssignedAccountantId == assignment.AccountantUserId
         };
     }
 
     public async Task<bool> DeleteAsync(string id, CurrentUserContext actor, CancellationToken ct = default)
     {
-        var assignment = await _db.ClientAssignments.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (!Guid.TryParse(id, out var assignmentId))
+        {
+            return false;
+        }
+
+        var assignment = await _db.ClientAssignments.FirstOrDefaultAsync(x => x.Id == assignmentId, ct);
         if (assignment is null)
         {
             return false;
@@ -141,7 +145,7 @@ public sealed class AssignmentService : IAssignmentService
             return true;
         }
 
-        var isPrimary = string.Equals(client.AssignedAccountantId, assignment.AccountantUserId, StringComparison.OrdinalIgnoreCase);
+        var isPrimary = client.AssignedAccountantId == assignment.AccountantUserId;
         if (isPrimary)
         {
             var replacement = await _db.ClientAssignments
@@ -187,6 +191,7 @@ public sealed class AssignmentService : IAssignmentService
         {
             accountantRoleNames = ["accountant"];
         }
+
         var targetAccountant = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.ToAccountantUserId && accountantRoleNames.Contains(x.Role), ct);
         if (targetAccountant is null)
         {
@@ -198,7 +203,7 @@ public sealed class AssignmentService : IAssignmentService
         if (existingTarget is null)
         {
             existingTarget = ClientAssignment.Create(
-                $"ca_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 request.ToAccountantUserId,
                 request.ClientId);
             _db.ClientAssignments.Add(existingTarget);
@@ -206,12 +211,12 @@ public sealed class AssignmentService : IAssignmentService
 
         var previous = await _db.ClientAssignments.FirstOrDefaultAsync(x =>
             x.ClientId == request.ClientId && x.AccountantUserId == request.FromAccountantUserId, ct);
-        if (previous is not null && !string.Equals(previous.AccountantUserId, existingTarget.AccountantUserId, StringComparison.OrdinalIgnoreCase))
+        if (previous is not null && previous.AccountantUserId != existingTarget.AccountantUserId)
         {
             _db.ClientAssignments.Remove(previous);
         }
 
-        if (request.MakePrimary || string.Equals(client.AssignedAccountantId, request.FromAccountantUserId, StringComparison.OrdinalIgnoreCase))
+        if (request.MakePrimary || client.AssignedAccountantId == request.FromAccountantUserId)
         {
             client.AssignAccountant(request.ToAccountantUserId);
         }
@@ -238,13 +243,18 @@ public sealed class AssignmentService : IAssignmentService
             client.Id,
             previousAccountantUserId = request.FromAccountantUserId,
             currentAccountantUserId = request.ToAccountantUserId,
-            isPrimary = string.Equals(client.AssignedAccountantId, request.ToAccountantUserId, StringComparison.OrdinalIgnoreCase)
+            isPrimary = client.AssignedAccountantId == request.ToAccountantUserId
         };
     }
 
     public async Task<object?> MakePrimaryAsync(string id, CurrentUserContext actor, CancellationToken ct = default)
     {
-        var assignment = await _db.ClientAssignments.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (!Guid.TryParse(id, out var assignmentId))
+        {
+            return null;
+        }
+
+        var assignment = await _db.ClientAssignments.FirstOrDefaultAsync(x => x.Id == assignmentId, ct);
         if (assignment is null)
         {
             return null;
@@ -277,4 +287,3 @@ public sealed class AssignmentService : IAssignmentService
         };
     }
 }
-

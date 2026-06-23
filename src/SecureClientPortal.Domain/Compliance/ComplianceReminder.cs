@@ -2,17 +2,17 @@ namespace SecureClientPortal.Backend.Models;
 
 public class ComplianceReminder
 {
-    public string Id { get; set; } = string.Empty;
-    public string ComplianceItemId { get; set; } = string.Empty;
-    public string ClientId { get; set; } = string.Empty;
-    public string RecipientUserId { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid ComplianceItemId { get; set; }
+    public Guid ClientId { get; set; }
+    public Guid RecipientUserId { get; set; }
     public string Type { get; private set; } = string.Empty;
     public string Status { get; private set; } = ComplianceReminderStatus.Pending.ToStorageValue();
     public DateTime ScheduledForUtc { get; private set; }
     public DateTime? SentAtUtc { get; private set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
-    public static ComplianceReminder Create(string id, string complianceItemId, string clientId, string recipientUserId, string type, DateTime scheduledForUtc)
+    public static ComplianceReminder Create(Guid id, Guid complianceItemId, Guid clientId, Guid recipientUserId, string type, DateTime scheduledForUtc)
     {
         return new ComplianceReminder
         {
@@ -36,3 +36,9 @@ public class ComplianceReminder
         }
     }
 }
+
+
+
+
+
+

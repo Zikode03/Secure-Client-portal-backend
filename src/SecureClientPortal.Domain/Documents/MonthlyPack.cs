@@ -2,8 +2,8 @@ namespace SecureClientPortal.Backend.Models;
 
 public class MonthlyPack
 {
-    public string Id { get; set; } = string.Empty;
-    public string ClientId { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid ClientId { get; set; }
     public int Year { get; set; }
     public int Month { get; set; }
     public string Status { get; private set; } = MonthlyPackStatus.Draft.ToStorageValue();
@@ -57,3 +57,8 @@ public class MonthlyPack
         UpdatedAtUtc = timestamp ?? DateTime.UtcNow;
     }
 }
+
+
+
+
+

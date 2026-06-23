@@ -1,7 +1,7 @@
 namespace SecureClientPortal.Backend.Application.Contracts;
 
 public record CreateDocumentSlotRequest(
-    string MonthlyPackId,
+    Guid MonthlyPackId,
     string Category,
     string Label,
     bool IsRequired,

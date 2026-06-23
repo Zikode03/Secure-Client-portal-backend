@@ -2,14 +2,14 @@ namespace SecureClientPortal.Backend.Models;
 
 public class DocumentSlot
 {
-    public string Id { get; set; } = string.Empty;
-    public string MonthlyPackId { get; set; } = string.Empty;
-    public string ClientId { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid MonthlyPackId { get; set; }
+    public Guid ClientId { get; set; }
     public string Category { get; private set; } = string.Empty;
     public string Label { get; private set; } = string.Empty;
     public bool IsRequired { get; set; } = true;
     public string Status { get; private set; } = DocumentSlotStatus.Missing.ToStorageValue();
-    public string? CurrentDocumentId { get; private set; }
+    public Guid? CurrentDocumentId { get; private set; }
     public DateTime? DueDateUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
@@ -22,7 +22,7 @@ public class DocumentSlot
         Touch();
     }
 
-    public void MarkUploaded(string documentId)
+    public void MarkUploaded(Guid documentId)
     {
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.Uploaded.ToStorageValue();
@@ -35,14 +35,14 @@ public class DocumentSlot
         Touch();
     }
 
-    public void Accept(string documentId)
+    public void Accept(Guid documentId)
     {
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.Accepted.ToStorageValue();
         Touch();
     }
 
-    public void Reject(string documentId)
+    public void Reject(Guid documentId)
     {
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.Rejected.ToStorageValue();
@@ -61,3 +61,9 @@ public class DocumentSlot
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

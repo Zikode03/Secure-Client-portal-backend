@@ -1,4 +1,4 @@
 namespace SecureClientPortal.Backend.Application.Contracts;
 
-public record CreateAssignmentRequest(string AccountantUserId, string ClientId, bool IsPrimary);
-public record ReassignAccountantRequest(string ClientId, string FromAccountantUserId, string ToAccountantUserId, bool MakePrimary);
+public record CreateAssignmentRequest(Guid AccountantUserId, Guid ClientId, bool IsPrimary);
+public record ReassignAccountantRequest(Guid ClientId, Guid FromAccountantUserId, Guid ToAccountantUserId, bool MakePrimary);

@@ -8,9 +8,9 @@ namespace SecureClientPortal.Backend.Data;
 
 public static class NotificationWorkflowExtensions
 {
-    public static async Task<List<string>> ResolveNotificationRecipientsAsync(
+    public static async Task<List<Guid>> ResolveNotificationRecipientsAsync(
         this PortalDbContext db,
-        string clientId,
+        Guid clientId,
         string audienceRole,
         CancellationToken ct = default)
     {
@@ -24,7 +24,6 @@ public static class NotificationWorkflowExtensions
             roleNames = [audienceRole];
         }
 
-        // Centralize role-scope recipient lookup so workflow handlers do not depend on hard-coded role names.
         if (audienceRole == "client")
         {
             var users = await db.Users
@@ -34,7 +33,7 @@ public static class NotificationWorkflowExtensions
             return users
                 .Where(x => ClientHasAccess(x.ClientIdsJson, clientId))
                 .Select(x => x.Id)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct()
                 .ToList();
         }
 
@@ -66,9 +65,9 @@ public static class NotificationWorkflowExtensions
 
     public static async Task<int> AddNotificationsAsync(
         this PortalDbContext db,
-        System.Security.Claims.ClaimsPrincipal actor,
-        IEnumerable<string> recipientUserIds,
-        string clientId,
+        ClaimsPrincipal actor,
+        IEnumerable<Guid> recipientUserIds,
+        Guid clientId,
         string type,
         string title,
         string message,
@@ -78,14 +77,16 @@ public static class NotificationWorkflowExtensions
     {
         var actorUserId = actor.GetUserId();
         var recipients = recipientUserIds
-            .Where(x => !string.IsNullOrWhiteSpace(x) && !string.Equals(x, actorUserId, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(x => x != Guid.Empty && x != actorUserId)
+            .Distinct()
             .ToList();
+
+        var batchId = Guid.NewGuid();
 
         foreach (var recipientUserId in recipients)
         {
             db.Notifications.Add(Notification.Create(
-                $"ntf_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 recipientUserId,
                 clientId,
                 type,
@@ -100,8 +101,8 @@ public static class NotificationWorkflowExtensions
             await db.WriteAuditLogAsync(
                 actor,
                 "notification.sent",
-                "notification",
-                $"{type}:{clientId}:{Guid.NewGuid():N}",
+                "notification_batch",
+                batchId,
                 clientId,
                 JsonSerializer.Serialize(new { type, title, recipientUserIds = recipients, metadata }),
                 ct);
@@ -113,8 +114,8 @@ public static class NotificationWorkflowExtensions
     public static async Task<int> AddDeadlineApproachingNotificationsAsync(
         this PortalDbContext db,
         ClaimsPrincipal actor,
-        string userId,
-        IReadOnlyCollection<string> allowedClientIds,
+        Guid userId,
+        IReadOnlyCollection<Guid> allowedClientIds,
         CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
@@ -130,6 +131,7 @@ public static class NotificationWorkflowExtensions
             .ToListAsync(ct);
 
         var createdCount = 0;
+        var batchId = Guid.NewGuid();
 
         foreach (var request in requests)
         {
@@ -146,7 +148,7 @@ public static class NotificationWorkflowExtensions
             }
 
             db.Notifications.Add(Notification.Create(
-                $"ntf_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 userId,
                 request.ClientId,
                 "deadline.approaching",
@@ -164,8 +166,8 @@ public static class NotificationWorkflowExtensions
             await db.WriteAuditLogAsync(
                 actor,
                 "notification.sent",
-                "notification",
-                $"deadline.approaching:{userId}:{Guid.NewGuid():N}",
+                "notification_batch",
+                batchId,
                 null,
                 JsonSerializer.Serialize(new { type = "deadline.approaching", userId, count = createdCount }),
                 ct);
@@ -174,7 +176,7 @@ public static class NotificationWorkflowExtensions
         return createdCount;
     }
 
-    private static bool ClientHasAccess(string clientIdsJson, string clientId)
+    private static bool ClientHasAccess(string clientIdsJson, Guid clientId)
     {
         if (string.IsNullOrWhiteSpace(clientIdsJson))
         {
@@ -184,7 +186,7 @@ public static class NotificationWorkflowExtensions
         try
         {
             var clientIds = JsonSerializer.Deserialize<string[]>(clientIdsJson) ?? [];
-            return clientIds.Contains(clientId, StringComparer.OrdinalIgnoreCase);
+            return clientIds.Any(x => Guid.TryParse(x, out var parsedId) && parsedId == clientId);
         }
         catch
         {

@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Models;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Data;
 
@@ -15,73 +18,73 @@ public static class SeedData
         await db.Database.MigrateAsync();
         await UpsertDefaultRoles(db);
 
-        await UpsertUser(db, CreateSeedUser("u_admin_001", "System Admin", "admin@secureportal.local", UserRole.Admin, "[]"));
-        await UpsertUser(db, CreateSeedUser("u_acc_001", "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, "[]"));
-        await UpsertUser(db, CreateSeedUser("u_client_001", "Default Client", "client@secureportal.local", UserRole.Client, "[\"c_001\"]"));
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_admin_001"), "System Admin", "admin@secureportal.local", UserRole.Admin, SerializeClientIds()));
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_acc_001"), "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, SerializeClientIds()));
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_client_001"), "Default Client", "client@secureportal.local", UserRole.Client, SerializeClientIds(SeedGuid("c_001"))));
 
-        var client = await db.Clients.FirstOrDefaultAsync(x => x.Id == "c_001");
+        var client = await db.Clients.FirstOrDefaultAsync(x => x.Id == SeedGuid("c_001"));
         if (client is null)
         {
             db.Clients.Add(CreateSeedClient());
         }
 
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_bank_statement",
+            SeedGuid("filing_bank_statement"),
             "bank_statement",
             "Business account bank statements eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_invoices",
+            SeedGuid("filing_invoices"),
             "invoices",
             "Sales and supplier invoice evidence eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_signed_documents",
+            SeedGuid("filing_signed_documents"),
             "signed_documents",
             "Signed approvals and authorisations eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_compliance_record",
+            SeedGuid("filing_compliance_record"),
             "compliance_record",
             "Compliance support records eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_payroll_summary",
+            SeedGuid("filing_payroll_summary"),
             "payroll_summary",
             "Payroll summaries and payroll support eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_tax_working_papers",
+            SeedGuid("filing_tax_working_papers"),
             "tax_working_papers",
             "Tax working papers and VAT support eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_proof_of_payment",
+            SeedGuid("filing_proof_of_payment"),
             "proof_of_payment",
             "Payment confirmations and remittance evidence eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_credit_notes",
+            SeedGuid("filing_credit_notes"),
             "credit_notes",
             "Credit note support eligible for auto-filing.",
             true));
         await UpsertFilingRule(db, FilingRule.Create(
-            "filing_debit_notes",
+            SeedGuid("filing_debit_notes"),
             "debit_notes",
             "Debit note support eligible for auto-filing.",
             true));
 
         await UpsertClientAssignment(db, ClientAssignment.Create(
-            "ca_u_acc_001_c_001",
-            "u_acc_001",
-            "c_001"));
+            SeedGuid("ca_u_acc_001_c_001"),
+            SeedGuid("u_acc_001"),
+            SeedGuid("c_001")));
 
         await UpsertMonthlyPack(db, CreateSeedMonthlyPack());
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot("slot_mp_c001_2026_06_bank_statement", "bank_statement", "Bank Statement"));
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot("slot_mp_c001_2026_06_invoices", "invoices", "Invoices"));
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_bank_statement"), "bank_statement", "Bank Statement"));
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_invoices"), "invoices", "Invoices"));
 
         await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
-            "rdt_bank_statement",
+            SeedGuid("rdt_bank_statement"),
             "Bank Statement",
             "Default monthly bank statement requirement.",
             "bank_statement",
@@ -89,7 +92,7 @@ public static class SeedData
             5,
             true));
         await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
-            "rdt_invoices",
+            SeedGuid("rdt_invoices"),
             "Invoices",
             "Default monthly invoice support requirement.",
             "invoices",
@@ -97,7 +100,7 @@ public static class SeedData
             5,
             true));
         await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
-            "rdt_signed_docs",
+            SeedGuid("rdt_signed_docs"),
             "Signed Documents",
             "Approvals and signatures where needed.",
             "signed_documents",
@@ -106,24 +109,24 @@ public static class SeedData
             true));
 
         await UpsertMonthlyPackTemplate(db, MonthlyPackTemplate.Create(
-            "mpt_default",
+            SeedGuid("mpt_default"),
             "Default Monthly Pack",
             "Standard monthly client collection pack.",
             1,
             true));
         await UpsertMonthlyPackTemplateItem(db, MonthlyPackTemplateItem.Create(
-            "mpti_default_bank_statement",
-            "mpt_default",
-            "rdt_bank_statement",
+            SeedGuid("mpti_default_bank_statement"),
+            SeedGuid("mpt_default"),
+            SeedGuid("rdt_bank_statement"),
             1));
         await UpsertMonthlyPackTemplateItem(db, MonthlyPackTemplateItem.Create(
-            "mpti_default_invoices",
-            "mpt_default",
-            "rdt_invoices",
+            SeedGuid("mpti_default_invoices"),
+            SeedGuid("mpt_default"),
+            SeedGuid("rdt_invoices"),
             2));
 
         await UpsertRequestTemplate(db, RequestTemplate.Create(
-            "rqt_reupload",
+            SeedGuid("rqt_reupload"),
             "Re-upload Request",
             "reupload_required",
             "Re-upload required: {{documentName}}",
@@ -132,7 +135,7 @@ public static class SeedData
             2,
             true));
         await UpsertRequestTemplate(db, RequestTemplate.Create(
-            "rqt_missing",
+            SeedGuid("rqt_missing"),
             "Missing Document Request",
             "missing_document",
             "Missing document: {{documentName}}",
@@ -141,7 +144,7 @@ public static class SeedData
             3,
             true));
         await UpsertRequestTemplate(db, RequestTemplate.Create(
-            "rqt_signature",
+            SeedGuid("rqt_signature"),
             "Signature Request",
             "signature_required",
             "Signature required: {{documentName}}",
@@ -151,7 +154,7 @@ public static class SeedData
             true));
 
         await UpsertReminderRule(db, ReminderRule.Create(
-            "rr_deadline_7",
+            SeedGuid("rr_deadline_7"),
             "7-day reminder",
             "deadline_approaching",
             7,
@@ -159,7 +162,7 @@ public static class SeedData
             "A compliance deadline is due in 7 days.",
             true));
         await UpsertReminderRule(db, ReminderRule.Create(
-            "rr_deadline_1",
+            SeedGuid("rr_deadline_1"),
             "1-day reminder",
             "deadline_approaching",
             1,
@@ -168,7 +171,7 @@ public static class SeedData
             true));
 
         await UpsertDeadlineRule(db, DeadlineRule.Create(
-            "dr_monthly_pack",
+            SeedGuid("dr_monthly_pack"),
             "Monthly pack due date",
             "monthly_pack",
             5,
@@ -176,7 +179,7 @@ public static class SeedData
             "high",
             true));
         await UpsertDeadlineRule(db, DeadlineRule.Create(
-            "dr_compliance_item",
+            SeedGuid("dr_compliance_item"),
             "Compliance item due date",
             "compliance_item",
             25,
@@ -187,35 +190,35 @@ public static class SeedData
         await db.SaveChangesAsync();
 
         await UpsertComplianceCategory(db, ComplianceCategory.Create(
-            "cc_tax_compliance",
+            SeedGuid("cc_tax_compliance"),
             "Tax Compliance",
             "Income tax, VAT, and tax authority filing obligations.",
             "TAX",
             true));
 
         await UpsertComplianceCategory(db, ComplianceCategory.Create(
-            "cc_cipc_compliance",
+            SeedGuid("cc_cipc_compliance"),
             "CIPC Compliance",
             "Company registration, annual returns, and beneficial ownership obligations.",
             "CIPC",
             true));
 
         await UpsertComplianceCategory(db, ComplianceCategory.Create(
-            "cc_payroll_compliance",
+            SeedGuid("cc_payroll_compliance"),
             "Payroll Compliance",
             "Payroll submissions, UIF, PAYE, and employee record obligations.",
             "PAYROLL",
             true));
 
         await UpsertComplianceCategory(db, ComplianceCategory.Create(
-            "cc_popia_compliance",
+            SeedGuid("cc_popia_compliance"),
             "POPIA Compliance",
             "Privacy controls, processing evidence, and consent obligations.",
             "POPIA",
             true));
     }
 
-    private static User CreateSeedUser(string id, string fullName, string email, UserRole role, string clientIdsJson)
+    private static User CreateSeedUser(Guid id, string fullName, string email, UserRole role, string clientIdsJson)
     {
         var user = User.CreateInvited(id, fullName, email, role, PasswordHasher.Hash("Password123!"), clientIdsJson, null);
         user.SetSecurityStatus(SecurityStatus.Active);
@@ -224,8 +227,8 @@ public static class SeedData
 
     private static Client CreateSeedClient()
     {
-        var client = Client.Create("c_001", "Acme Holdings", "Pty Ltd", "Jane Doe", "jane.doe@acme.test", ClientStatus.Active);
-        client.AssignAccountant("u_acc_001");
+        var client = Client.Create(SeedGuid("c_001"), "Acme Holdings", "Pty Ltd", "Jane Doe", "jane.doe@acme.test", ClientStatus.Active);
+        client.AssignAccountant(SeedGuid("u_acc_001"));
         client.UpdateComplianceHealth(92);
         return client;
     }
@@ -234,8 +237,8 @@ public static class SeedData
     {
         var pack = new MonthlyPack
         {
-            Id = "mp_c001_2026_06",
-            ClientId = "c_001",
+            Id = SeedGuid("mp_c001_2026_06"),
+            ClientId = SeedGuid("c_001"),
             Year = 2026,
             Month = 6
         };
@@ -243,13 +246,13 @@ public static class SeedData
         return pack;
     }
 
-    private static DocumentSlot CreateSeedDocumentSlot(string id, string category, string label)
+    private static DocumentSlot CreateSeedDocumentSlot(Guid id, string category, string label)
     {
         var slot = new DocumentSlot
         {
             Id = id,
-            MonthlyPackId = "mp_c001_2026_06",
-            ClientId = "c_001"
+            MonthlyPackId = SeedGuid("mp_c001_2026_06"),
+            ClientId = SeedGuid("c_001")
         };
         slot.UpdateDefinition(category, label, true);
         slot.MarkMissing();
@@ -403,16 +406,16 @@ public static class SeedData
         switch (status)
         {
             case "uploaded":
-                slot.MarkUploaded(slot.CurrentDocumentId ?? string.Empty);
+                if (slot.CurrentDocumentId.HasValue) slot.MarkUploaded(slot.CurrentDocumentId.Value); else slot.MarkMissing();
                 break;
             case "under_review":
                 slot.MarkUnderReview();
                 break;
             case "accepted":
-                slot.Accept(slot.CurrentDocumentId ?? string.Empty);
+                if (slot.CurrentDocumentId.HasValue) slot.Accept(slot.CurrentDocumentId.Value); else slot.MarkMissing();
                 break;
             case "rejected":
-                slot.Reject(slot.CurrentDocumentId ?? string.Empty);
+                if (slot.CurrentDocumentId.HasValue) slot.Reject(slot.CurrentDocumentId.Value); else slot.MarkMissing();
                 break;
             default:
                 slot.MarkMissing();
@@ -476,7 +479,7 @@ public static class SeedData
             }
 
             db.RolePermissions.Add(RolePermission.Create(
-                $"rp_{Guid.NewGuid():N}",
+                Guid.NewGuid(),
                 roleName,
                 permissionKey));
         }
@@ -584,7 +587,19 @@ public static class SeedData
             expected.Priority,
             expected.IsEnabled);
     }
+    private static string SerializeClientIds(params Guid[] clientIds)
+    {
+        return JsonSerializer.Serialize(clientIds.Select(x => x.ToString()));
+    }
+
+    private static Guid SeedGuid(string value)
+    {
+        using var md5 = MD5.Create();
+        var bytes = md5.ComputeHash(Encoding.UTF8.GetBytes($"secure-client-portal:{value}"));
+        return new Guid(bytes);
+    }
 }
+
 
 
 

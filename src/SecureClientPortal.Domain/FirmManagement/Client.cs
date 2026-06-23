@@ -2,18 +2,18 @@ namespace SecureClientPortal.Backend.Models;
 
 public class Client
 {
-    public string Id { get; set; } = string.Empty;
+    public Guid Id { get; set; }
     public string Name { get; private set; } = string.Empty;
     public string EntityType { get; private set; } = string.Empty;
     public string Status { get; private set; } = ClientStatus.Active.ToStorageValue();
     public int ComplianceHealth { get; private set; }
-    public string AssignedAccountantId { get; private set; } = string.Empty;
+    public Guid AssignedAccountantId { get; private set; }
     public string PrimaryContact { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static Client Create(string id, string name, string entityType, string primaryContact, string email, ClientStatus status)
+    public static Client Create(Guid id, string name, string entityType, string primaryContact, string email, ClientStatus status)
     {
         var client = new Client { Id = id, CreatedAtUtc = DateTime.UtcNow };
         client.UpdateDetails(name, entityType, primaryContact, email);
@@ -37,9 +37,9 @@ public class Client
         Touch();
     }
 
-    public void AssignAccountant(string accountantUserId)
+    public void AssignAccountant(Guid accountantUserId)
     {
-        AssignedAccountantId = accountantUserId?.Trim() ?? string.Empty;
+        AssignedAccountantId = accountantUserId;
         Touch();
     }
 
@@ -54,3 +54,9 @@ public class Client
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
+
+
+
+
+
+

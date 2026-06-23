@@ -19,7 +19,12 @@ public sealed class DocumentSlotService : IDocumentSlotService
 
     public async Task<(bool forbidden, IReadOnlyList<DocumentSlot>? items)> GetByMonthlyPackIdAsync(string monthlyPackId, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackId, ct);
+        if (!Guid.TryParse(monthlyPackId, out var monthlyPackGuid))
+        {
+            return (false, null);
+        }
+
+        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackGuid, ct);
         if (pack is null)
         {
             return (false, null);
@@ -32,7 +37,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         }
 
         var slots = await _db.DocumentSlots
-            .Where(x => x.MonthlyPackId == monthlyPackId)
+            .Where(x => x.MonthlyPackId == monthlyPackGuid)
             .OrderByDescending(x => x.IsRequired)
             .ThenBy(x => x.Label)
             .ToListAsync(ct);
@@ -66,7 +71,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
 
         var slot = new DocumentSlot
         {
-            Id = $"slot_{Guid.NewGuid():N}",
+            Id = Guid.NewGuid(),
             MonthlyPackId = request.MonthlyPackId,
             ClientId = pack.ClientId,
             DueDateUtc = request.DueDateUtc,

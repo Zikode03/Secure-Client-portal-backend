@@ -26,29 +26,35 @@ public sealed class ClientService : IClientService
 
     public async Task<(bool forbidden, Client? client)> GetByIdAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!Guid.TryParse(id, out var clientId))
+        {
+            return (false, null);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        if (!allowedClientIds.Contains(id)) return (true, null);
-        var client = await _db.Clients.FindAsync([id], ct);
+        if (!allowedClientIds.Contains(clientId)) return (true, null);
+        var client = await _db.Clients.FindAsync([clientId], ct);
         return (false, client);
     }
 
     public async Task<(bool forbidden, Client created)> CreateAsync(Client request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var actorId = user.FindFirst("sub")?.Value ?? string.Empty;
-        var normalizedAssignedAccountantId = request.AssignedAccountantId.Trim();
+        var actorId = user.GetUserId();
+        var normalizedAssignedAccountantId = request.AssignedAccountantId;
+
         if (user.IsAccountant() && !user.IsAdmin())
         {
-            if (string.IsNullOrWhiteSpace(normalizedAssignedAccountantId))
+            if (normalizedAssignedAccountantId == Guid.Empty)
             {
-                normalizedAssignedAccountantId = actorId;
+                normalizedAssignedAccountantId = actorId ?? Guid.Empty;
             }
-            else if (!string.Equals(normalizedAssignedAccountantId, actorId, StringComparison.OrdinalIgnoreCase))
+            else if (actorId.HasValue && normalizedAssignedAccountantId != actorId.Value)
             {
                 return (true, null!);
             }
         }
 
-        if (string.IsNullOrWhiteSpace(normalizedAssignedAccountantId))
+        if (normalizedAssignedAccountantId == Guid.Empty)
         {
             throw new ArgumentException("Assigned accountant is required.");
         }
@@ -61,7 +67,7 @@ public sealed class ClientService : IClientService
         }
 
         var created = Client.Create(
-            string.IsNullOrWhiteSpace(request.Id) ? $"c_{Guid.NewGuid():N}" : request.Id,
+            request.Id == Guid.Empty ? Guid.NewGuid() : request.Id,
             request.Name,
             request.EntityType,
             request.PrimaryContact,
@@ -72,7 +78,7 @@ public sealed class ClientService : IClientService
 
         _db.Clients.Add(created);
         _db.ClientAssignments.Add(ClientAssignment.Create(
-            $"ca_{Guid.NewGuid():N}",
+            Guid.NewGuid(),
             created.AssignedAccountantId,
             created.Id,
             created.CreatedAtUtc));
@@ -84,10 +90,15 @@ public sealed class ClientService : IClientService
 
     public async Task<(bool forbidden, Client? updated)> UpdateAsync(string id, Client request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        if (!allowedClientIds.Contains(id)) return (true, null);
+        if (!Guid.TryParse(id, out var clientId))
+        {
+            return (false, null);
+        }
 
-        var existing = await _db.Clients.FindAsync([id], ct);
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(clientId)) return (true, null);
+
+        var existing = await _db.Clients.FindAsync([clientId], ct);
         if (existing is null) return (false, null);
 
         existing.UpdateDetails(request.Name, request.EntityType, request.PrimaryContact, request.Email);
@@ -101,10 +112,15 @@ public sealed class ClientService : IClientService
 
     public async Task<(bool forbidden, Client? updated)> UpdateStatusAsync(string id, UpdateClientStatusRequest request, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        if (!allowedClientIds.Contains(id)) return (true, null);
+        if (!Guid.TryParse(id, out var clientId))
+        {
+            return (false, null);
+        }
 
-        var existing = await _db.Clients.FindAsync([id], ct);
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(clientId)) return (true, null);
+
+        var existing = await _db.Clients.FindAsync([clientId], ct);
         if (existing is null) return (false, null);
 
         existing.ChangeStatus(FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
@@ -116,10 +132,15 @@ public sealed class ClientService : IClientService
 
     public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
     {
-        var existing = await _db.Clients.FindAsync([id], ct);
+        if (!Guid.TryParse(id, out var clientId))
+        {
+            return false;
+        }
+
+        var existing = await _db.Clients.FindAsync([clientId], ct);
         if (existing is null) return false;
 
-        var assignments = await _db.ClientAssignments.Where(x => x.ClientId == id).ToListAsync(ct);
+        var assignments = await _db.ClientAssignments.Where(x => x.ClientId == clientId).ToListAsync(ct);
         if (assignments.Count > 0)
         {
             _db.ClientAssignments.RemoveRange(assignments);
@@ -144,4 +165,3 @@ public sealed class ClientService : IClientService
         };
     }
 }
-

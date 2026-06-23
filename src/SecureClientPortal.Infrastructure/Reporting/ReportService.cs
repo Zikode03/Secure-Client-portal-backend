@@ -118,7 +118,7 @@ public sealed class ReportService : IReportService
                     .Where(x => x.AccountantUserId == accountant.Id)
                     .Select(x => x.ClientId)
                     .Distinct()
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    .ToHashSet();
 
                 var assignedDocuments = documents.Where(x => assignedClientIds.Contains(x.ClientId)).ToList();
                 var assignedReviews = reviews.Where(x => x.ReviewerUserId == accountant.Id).ToList();
