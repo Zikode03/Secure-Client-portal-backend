@@ -12,6 +12,7 @@ using SecureClientPortal.Backend.Application.Documents;
 using SecureClientPortal.Backend.Application.Platform;
 using SecureClientPortal.Backend.Application.Reporting;
 using SecureClientPortal.Backend.Infrastructure.Compliance.Application;
+using SecureClientPortal.Backend.Infrastructure.DependencyInjection;
 using SecureClientPortal.Backend.Infrastructure.Documents;
 using SecureClientPortal.Backend.Infrastructure.FirmManagement;
 using SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
@@ -125,27 +126,16 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddDbContext<PortalDbContext>(options =>
     options.UseSqlServer(connectionString));
-builder.Services.AddScoped<SecureClientPortal.Backend.Storage.IFileStorage, LocalFileStorage>();
 builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender, AccessEmailSender>();
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
-builder.Services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
-builder.Services.AddScoped<IRoleService, RoleService>();
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<IAdminService, AdminService>();
-builder.Services.AddScoped<IComplianceService, ComplianceService>();
-builder.Services.AddScoped<IDocumentWorkflowService, DocumentWorkflowService>();
-builder.Services.AddScoped<IFirmManagementService, FirmManagementService>();
-builder.Services.AddScoped<IAssignmentService, AssignmentService>();
-builder.Services.AddScoped<IClientService, ClientService>();
-builder.Services.AddScoped<IRequestService, RequestService>();
-builder.Services.AddScoped<ITaskService, TaskService>();
-builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddScoped<IDocumentSlotService, DocumentSlotService>();
-builder.Services.AddScoped<IMonthlyPackService, MonthlyPackService>();
-builder.Services.AddScoped<IAuditLogService, AuditLogService>();
-builder.Services.AddScoped<IHealthService, HealthService>();
-builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services
+    .AddPlatformModule()
+    .AddIdentityModule()
+    .AddComplianceModule()
+    .AddDocumentModule()
+    .AddFirmManagementModule()
+    .AddRequestModule()
+    .AddReportingModule();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

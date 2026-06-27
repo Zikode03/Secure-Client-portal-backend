@@ -75,7 +75,33 @@ public static class NotificationWorkflowExtensions
         object? metadata = null,
         CancellationToken ct = default)
     {
-        var actorUserId = actor.GetUserId();
+        var actorRole = actor.IsAdmin() ? "admin" : actor.IsAccountant() ? "accountant" : actor.IsClient() ? "client" : "unknown";
+        return await db.AddNotificationsAsync(
+            actor.GetUserId(),
+            actorRole,
+            recipientUserIds,
+            clientId,
+            type,
+            title,
+            message,
+            linkUrl,
+            metadata,
+            ct);
+    }
+
+    public static async Task<int> AddNotificationsAsync(
+        this PortalDbContext db,
+        Guid? actorUserId,
+        string actorRole,
+        IEnumerable<Guid> recipientUserIds,
+        Guid clientId,
+        string type,
+        string title,
+        string message,
+        string? linkUrl = null,
+        object? metadata = null,
+        CancellationToken ct = default)
+    {
         var recipients = recipientUserIds
             .Where(x => x != Guid.Empty && x != actorUserId)
             .Distinct()
@@ -99,7 +125,8 @@ public static class NotificationWorkflowExtensions
         {
             await db.SaveChangesAsync(ct);
             await db.WriteAuditLogAsync(
-                actor,
+                actorUserId,
+                actorRole,
                 "notification.sent",
                 "notification_batch",
                 batchId,

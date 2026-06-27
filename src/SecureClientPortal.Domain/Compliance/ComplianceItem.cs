@@ -2,9 +2,9 @@ namespace SecureClientPortal.Backend.Models;
 
 public class ComplianceItem
 {
-    public Guid Id { get; set; }
-    public Guid ClientId { get; set; }
-    public Guid CategoryId { get; set; }
+    public Guid Id { get; private set; }
+    public Guid ClientId { get; private set; }
+    public Guid CategoryId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Status { get; private set; } = ComplianceItemStatus.Missing.ToStorageValue();
     public Guid? OwnerUserId { get; private set; }
@@ -13,24 +13,33 @@ public class ComplianceItem
     public Guid? LinkedDocumentId { get; private set; }
     public DateTime? DueDateUtc { get; private set; }
     public DateTime? ExpiryDateUtc { get; private set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static ComplianceItem Create(Guid id, Guid clientId, Guid categoryId, string name, ComplianceItemStatus status, Guid? ownerUserId, ComplianceRiskLevel riskLevel, string? requiredDocumentCategory, DateTime? dueDateUtc, DateTime? expiryDateUtc)
+    public static ComplianceItem Create(Guid id, Guid clientId, Guid categoryId, string name, ComplianceItemStatus status, Guid? ownerUserId, ComplianceRiskLevel riskLevel, string? requiredDocumentCategory, DateTime? dueDateUtc, DateTime? expiryDateUtc, DateTime? createdAtUtc = null)
     {
+        if (id == Guid.Empty) throw new DomainRuleException("Compliance item id is required.");
+        if (clientId == Guid.Empty) throw new DomainRuleException("Client id is required.");
+        if (categoryId == Guid.Empty) throw new DomainRuleException("Compliance category id is required.");
+
+        var created = createdAtUtc ?? DateTime.UtcNow;
         var item = new ComplianceItem
         {
             Id = id,
             ClientId = clientId,
             CategoryId = categoryId,
-            CreatedAtUtc = DateTime.UtcNow
+            CreatedAtUtc = created,
+            UpdatedAtUtc = created
         };
+
         item.Update(name, status, ownerUserId, riskLevel, requiredDocumentCategory, null, dueDateUtc, expiryDateUtc);
         return item;
     }
 
     public void Update(string name, ComplianceItemStatus status, Guid? ownerUserId, ComplianceRiskLevel riskLevel, string? requiredDocumentCategory, Guid? linkedDocumentId, DateTime? dueDateUtc, DateTime? expiryDateUtc)
     {
+        if (string.IsNullOrWhiteSpace(name)) throw new DomainRuleException("Compliance item name is required.");
+
         Name = name.Trim();
         Status = status.ToStorageValue();
         OwnerUserId = ownerUserId == Guid.Empty ? null : ownerUserId;
@@ -42,14 +51,10 @@ public class ComplianceItem
         Touch();
     }
 
+    public bool IsExpiredAt(DateTime now) => ExpiryDateUtc.HasValue && ExpiryDateUtc.Value.Date < now.Date;
+
     private void Touch()
     {
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
-
-
-
-
-
-

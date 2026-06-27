@@ -18,6 +18,29 @@ public static class DocumentValidators
         ThrowIfAny(errors);
     }
 
+    public static void ValidateCreate(CreateDocumentRequest request)
+    {
+        var errors = new List<string>();
+        if (request.ClientId == Guid.Empty) errors.Add("Client id is required.");
+        if (request.MonthlyPackId == Guid.Empty) errors.Add("Monthly pack id is required.");
+        if (string.IsNullOrWhiteSpace(request.Name)) errors.Add("Document name is required.");
+        if (string.IsNullOrWhiteSpace(request.Category)) errors.Add("Document category is required.");
+        if (string.IsNullOrWhiteSpace(request.FileType)) errors.Add("File type is required.");
+        if (request.SizeBytes < 0) errors.Add("Document size cannot be negative.");
+        if (request.UploadedByUserId == Guid.Empty) errors.Add("Uploaded by user id is required.");
+        ThrowIfAny(errors);
+    }
+
+    public static void ValidateUpdate(UpdateDocumentRequest request)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(request.Name)) errors.Add("Document name is required.");
+        if (string.IsNullOrWhiteSpace(request.Category)) errors.Add("Document category is required.");
+        if (string.IsNullOrWhiteSpace(request.Status)) errors.Add("Document status is required.");
+        if (request.SizeBytes < 0) errors.Add("Document size cannot be negative.");
+        ThrowIfAny(errors);
+    }
+
     public static void ValidateReview(AddReviewDecisionRequest request)
     {
         var decision = request.Decision?.Trim().ToLowerInvariant() ?? string.Empty;

@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Documents;
+using SecureClientPortal.Backend.Application.Requests;
 using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Data;
 
-public class PortalDbContext : DbContext
+public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModuleDbContext
 {
     public PortalDbContext(DbContextOptions<PortalDbContext> options) : base(options) { }
 

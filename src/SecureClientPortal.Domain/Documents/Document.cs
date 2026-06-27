@@ -1,9 +1,14 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace SecureClientPortal.Backend.Models;
 
-public class Document
+public class Document : IHasDomainEvents
 {
-    public Guid Id { get; set; }
-    public Guid ClientId { get; set; }
+    [NotMapped]
+    private readonly List<IDomainEvent> _domainEvents = [];
+
+    public Guid Id { get; private set; }
+    public Guid ClientId { get; private set; }
     public Guid MonthlyPackId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Category { get; private set; } = "general";
@@ -22,7 +27,15 @@ public class Document
 
     public static Document CreateUploaded(Guid id, Guid clientId, Guid monthlyPackId, string name, string category, Guid? documentSlotId, string fileType, long sizeBytes, string? storageKey, Guid uploadedByUserId)
     {
-        var document = new Document { Id = id, ClientId = clientId };
+        if (id == Guid.Empty) throw new DomainRuleException("Document id is required.");
+        if (clientId == Guid.Empty) throw new DomainRuleException("Client id is required.");
+
+        var document = new Document
+        {
+            Id = id,
+            ClientId = clientId
+        };
+
         document.ApplyUpload(monthlyPackId, name, category, documentSlotId, fileType, sizeBytes, storageKey, uploadedByUserId, 1);
         return document;
     }
@@ -34,11 +47,14 @@ public class Document
 
     public void UpdateMetadata(string name, string category, DocumentStatus status, long sizeBytes, string? storageKey)
     {
-        Name = name;
+        if (string.IsNullOrWhiteSpace(name)) throw new DomainRuleException("Document name is required.");
+        if (sizeBytes < 0) throw new DomainRuleException("Document size cannot be negative.");
+
+        Name = name.Trim();
         Category = DocumentDomainValues.NormalizeCategory(category);
         Status = status.ToStorageValue();
         SizeBytes = sizeBytes;
-        StorageKey = storageKey;
+        StorageKey = string.IsNullOrWhiteSpace(storageKey) ? null : storageKey.Trim();
         Touch();
     }
 
@@ -64,6 +80,8 @@ public class Document
 
     public void File(Guid filedByUserId)
     {
+        if (filedByUserId == Guid.Empty) throw new DomainRuleException("Filing user id is required.");
+
         Status = DocumentStatus.Filed.ToStorageValue();
         IsFiled = true;
         FiledAtUtc = DateTime.UtcNow;
@@ -78,16 +96,35 @@ public class Document
         FiledByUserId = null;
     }
 
+    public void RecordReviewDecision(string decision, string? reason, Guid reviewerUserId, string reviewerRole, DateTime occurredAtUtc)
+    {
+        _domainEvents.Add(new DocumentReviewedDomainEvent(
+            Id,
+            ClientId,
+            Name,
+            decision,
+            reason,
+            reviewerUserId,
+            reviewerRole,
+            occurredAtUtc));
+    }
+
     private void ApplyUpload(Guid monthlyPackId, string name, string category, Guid? documentSlotId, string fileType, long sizeBytes, string? storageKey, Guid uploadedByUserId, int versionNumber)
     {
+        if (monthlyPackId == Guid.Empty) throw new DomainRuleException("Monthly pack id is required.");
+        if (string.IsNullOrWhiteSpace(name)) throw new DomainRuleException("Document name is required.");
+        if (string.IsNullOrWhiteSpace(fileType)) throw new DomainRuleException("File type is required.");
+        if (sizeBytes < 0) throw new DomainRuleException("Document size cannot be negative.");
+        if (uploadedByUserId == Guid.Empty) throw new DomainRuleException("Uploading user id is required.");
+
         MonthlyPackId = monthlyPackId;
-        Name = name;
+        Name = name.Trim();
         Category = DocumentDomainValues.NormalizeCategory(category);
         DocumentSlotId = documentSlotId == Guid.Empty ? null : documentSlotId;
         Status = DocumentStatus.Uploaded.ToStorageValue();
-        FileType = fileType;
+        FileType = fileType.Trim();
         SizeBytes = sizeBytes;
-        StorageKey = storageKey;
+        StorageKey = string.IsNullOrWhiteSpace(storageKey) ? null : storageKey.Trim();
         UploadedByUserId = uploadedByUserId;
         CurrentVersionNumber = versionNumber;
         ClearFiling();
@@ -99,10 +136,11 @@ public class Document
     {
         UpdatedAtUtc = timestamp ?? DateTime.UtcNow;
     }
+
+    public IReadOnlyCollection<IDomainEvent> DequeueDomainEvents()
+    {
+        var events = _domainEvents.ToArray();
+        _domainEvents.Clear();
+        return events;
+    }
 }
-
-
-
-
-
-

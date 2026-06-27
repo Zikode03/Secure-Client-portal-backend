@@ -64,20 +64,20 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (existing is not null)
         {
             existing.UpdateDefinition(normalizedCategory, request.Label, request.IsRequired);
-            existing.DueDateUtc = request.DueDateUtc;
+            existing.UpdateSchedule(request.DueDateUtc);
             await _db.SaveChangesAsync(ct);
             return (false, existing);
         }
 
-        var slot = new DocumentSlot
-        {
-            Id = Guid.NewGuid(),
-            MonthlyPackId = request.MonthlyPackId,
-            ClientId = pack.ClientId,
-            DueDateUtc = request.DueDateUtc,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        slot.UpdateDefinition(normalizedCategory, request.Label, request.IsRequired);
+        var slot = DocumentSlot.Create(
+            Guid.NewGuid(),
+            request.MonthlyPackId,
+            pack.ClientId,
+            normalizedCategory,
+            request.Label,
+            request.IsRequired,
+            request.DueDateUtc,
+            DateTime.UtcNow);
         slot.MarkMissing();
 
         _db.DocumentSlots.Add(slot);
@@ -85,3 +85,5 @@ public sealed class DocumentSlotService : IDocumentSlotService
         return (false, slot);
     }
 }
+
+

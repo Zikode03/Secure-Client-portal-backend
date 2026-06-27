@@ -235,26 +235,25 @@ public static class SeedData
 
     private static MonthlyPack CreateSeedMonthlyPack()
     {
-        var pack = new MonthlyPack
-        {
-            Id = SeedGuid("mp_c001_2026_06"),
-            ClientId = SeedGuid("c_001"),
-            Year = 2026,
-            Month = 6
-        };
+        var pack = MonthlyPack.Create(
+            SeedGuid("mp_c001_2026_06"),
+            SeedGuid("c_001"),
+            2026,
+            6);
         pack.MarkDraft();
         return pack;
     }
 
     private static DocumentSlot CreateSeedDocumentSlot(Guid id, string category, string label)
     {
-        var slot = new DocumentSlot
-        {
-            Id = id,
-            MonthlyPackId = SeedGuid("mp_c001_2026_06"),
-            ClientId = SeedGuid("c_001")
-        };
-        slot.UpdateDefinition(category, label, true);
+        var slot = DocumentSlot.Create(
+            id,
+            SeedGuid("mp_c001_2026_06"),
+            SeedGuid("c_001"),
+            category,
+            label,
+            true,
+            null);
         slot.MarkMissing();
         return slot;
     }
@@ -397,7 +396,7 @@ public static class SeedData
         }
 
         existing.UpdateDefinition(expected.Category, expected.Label, expected.IsRequired);
-        existing.DueDateUtc = expected.DueDateUtc;
+        existing.UpdateSchedule(expected.DueDateUtc);
         ApplySlotStatus(existing, expected.Status);
     }
 
@@ -599,6 +598,9 @@ public static class SeedData
         return new Guid(bytes);
     }
 }
+
+
+
 
 
 

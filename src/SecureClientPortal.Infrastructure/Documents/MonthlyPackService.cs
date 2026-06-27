@@ -67,14 +67,12 @@ public sealed class MonthlyPackService : IMonthlyPackService
             return (false, existing);
         }
 
-        var pack = new MonthlyPack
-        {
-            Id = Guid.NewGuid(),
-            ClientId = request.ClientId,
-            Year = request.Year,
-            Month = request.Month,
-            CreatedAtUtc = DateTime.UtcNow
-        };
+        var pack = MonthlyPack.Create(
+            Guid.NewGuid(),
+            request.ClientId,
+            request.Year,
+            request.Month,
+            DateTime.UtcNow);
         ApplyStatus(pack, NormalizeStatus(request.Status));
 
         _db.MonthlyPacks.Add(pack);
@@ -181,3 +179,4 @@ public sealed class MonthlyPackService : IMonthlyPackService
         };
     }
 }
+

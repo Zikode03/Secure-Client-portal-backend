@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Application.Documents;
-using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Controllers;
 
@@ -63,7 +62,7 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Document request, CancellationToken ct)
+    public async Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>
         {
@@ -106,7 +105,7 @@ public class DocumentsController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "AccountantOnly")]
-    public async Task<IActionResult> Update(string id, [FromBody] Document request, CancellationToken ct)
+    public async Task<IActionResult> Update(string id, [FromBody] UpdateDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateAsync(id, request, User, ct)));
     }
@@ -208,4 +207,3 @@ public class DocumentsController : ControllerBase
         return true;
     }
 }
-

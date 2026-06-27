@@ -143,9 +143,9 @@ public class Phase6ReportingAnalyticsTests
             ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientAlphaId),
             ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientBetaId));
 
-        var packAlpha = new MonthlyPack { Id = Guid.NewGuid(), ClientId = ClientAlphaId, Year = 2026, Month = 6 };
+        var packAlpha = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 6);
         packAlpha.Complete();
-        var packBeta = new MonthlyPack { Id = Guid.NewGuid(), ClientId = ClientBetaId, Year = 2026, Month = 6 };
+        var packBeta = MonthlyPack.Create(Guid.NewGuid(), ClientBetaId, 2026, 6);
         db.MonthlyPacks.AddRange(packAlpha, packBeta);
 
         var docAlpha = Document.CreateUploaded(DocumentAlphaId, ClientAlphaId, packAlpha.Id, "Bank Statement", "bank_statement", null, "application/pdf", 123, "alpha.pdf", ClientUserId);
@@ -195,4 +195,5 @@ public class Phase6ReportingAnalyticsTests
         return user;
     }
 }
+
 

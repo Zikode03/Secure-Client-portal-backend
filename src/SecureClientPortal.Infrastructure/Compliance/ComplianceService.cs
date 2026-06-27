@@ -10,7 +10,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-
 namespace SecureClientPortal.Backend.Infrastructure.Compliance.Application;
 
 public sealed class ComplianceService : IComplianceService
@@ -36,7 +35,7 @@ public sealed class ComplianceService : IComplianceService
         ComplianceValidators.ValidateCategory(request);
 
         var normalizedCode = string.IsNullOrWhiteSpace(request.Code)
-            ? GenerateCategoryCode(request.Name)
+            ? ComplianceAlertPolicy.GenerateCategoryCode(request.Name)
             : request.Code.Trim().ToUpperInvariant();
 
         if (await _db.ComplianceCategories.AnyAsync(x => x.Code == normalizedCode, ct))
@@ -429,21 +428,11 @@ public sealed class ComplianceService : IComplianceService
     private static string NormalizeStatus(string raw) => ComplianceDomainValues.ToComplianceItemStatus(raw).ToStorageValue();
     private static string NormalizeRiskLevel(string raw) => ComplianceDomainValues.ToComplianceRiskLevel(raw).ToStorageValue();
 
-    private static string GenerateCategoryCode(string name)
-    {
-        var compact = new string(name.ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
-        return compact.Length switch
-        {
-            0 => "GEN",
-            <= 8 => compact,
-            _ => compact[..8]
-        };
-    }
-
     private static object BuildComplianceItemPayload(ComplianceItem item, IReadOnlyDictionary<Guid, ComplianceCategory> categories, IReadOnlyDictionary<Guid, User> users)
     {
         var category = categories.GetValueOrDefault(item.CategoryId);
         var owner = item.OwnerUserId.HasValue ? users.GetValueOrDefault(item.OwnerUserId.Value) : null;
+        var alertLevel = ComplianceAlertPolicy.ComputeAlertLevel(item, DateTime.UtcNow);
 
         return new
         {
@@ -461,7 +450,7 @@ public sealed class ComplianceService : IComplianceService
             item.RiskLevel,
             item.DueDateUtc,
             item.ExpiryDateUtc,
-            alertLevel = ComputeAlertLevel(item),
+            alertLevel,
             item.CreatedAtUtc,
             item.UpdatedAtUtc
         };
@@ -469,7 +458,7 @@ public sealed class ComplianceService : IComplianceService
 
     private static object? BuildAlert(ComplianceItem item, IReadOnlyDictionary<Guid, ComplianceCategory> categories, IReadOnlyDictionary<Guid, User> users)
     {
-        var alertLevel = ComputeAlertLevel(item);
+        var alertLevel = ComplianceAlertPolicy.ComputeAlertLevel(item, DateTime.UtcNow);
         if (alertLevel is null)
         {
             return null;
@@ -491,48 +480,8 @@ public sealed class ComplianceService : IComplianceService
             ownerUserId = item.OwnerUserId,
             ownerName = owner?.FullName,
             alertLevel,
-            message = BuildAlertMessage(item, alertLevel)
+            message = ComplianceAlertPolicy.BuildAlertMessage(item, alertLevel)
         };
-    }
-
-    private static string? ComputeAlertLevel(ComplianceItem item)
-    {
-        var now = DateTime.UtcNow;
-        if (item.Status == "expired")
-        {
-            return "critical";
-        }
-
-        if (item.Status == "rejected")
-        {
-            return "high";
-        }
-
-        if (item.ExpiryDateUtc is DateTime expiry)
-        {
-            var daysUntilExpiry = (expiry.Date - now.Date).TotalDays;
-            if (daysUntilExpiry < 0)
-            {
-                return "critical";
-            }
-
-            if (daysUntilExpiry <= 7)
-            {
-                return item.RiskLevel == "critical" ? "critical" : "high";
-            }
-
-            if (daysUntilExpiry <= 30)
-            {
-                return "medium";
-            }
-        }
-
-        if (item.Status is "missing" or "pending")
-        {
-            return item.RiskLevel is "critical" or "high" ? "high" : "medium";
-        }
-
-        return null;
     }
 
     private static Guid DeterministicGuid(string value)
@@ -541,29 +490,4 @@ public sealed class ComplianceService : IComplianceService
         var bytes = md5.ComputeHash(Encoding.UTF8.GetBytes($"secure-client-portal:{value}"));
         return new Guid(bytes);
     }
-
-    private static string BuildAlertMessage(ComplianceItem item, string alertLevel)
-    {
-        if (item.Status == "expired")
-        {
-            return $"{item.Name} is expired and requires immediate attention.";
-        }
-
-        if (item.Status == "rejected")
-        {
-            return $"{item.Name} was rejected and needs remediation.";
-        }
-
-        if (item.ExpiryDateUtc is DateTime expiry)
-        {
-            return $"{item.Name} is {alertLevel} risk and expires on {expiry:yyyy-MM-dd}.";
-        }
-
-        return $"{item.Name} is {alertLevel} risk and needs follow-up.";
-    }
 }
-
-
-
-
-

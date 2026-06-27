@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Application.Requests;
 using SecureClientPortal.Backend.Models;
@@ -28,15 +29,11 @@ public class RequestsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<RequestItem>> Create([FromBody] CreateRequestRequest request, CancellationToken ct)
     {
-        try
+        return await ExecuteAsync(async () =>
         {
             var result = await _requests.CreateAsync(request, User, ct);
             return result.forbidden ? Forbid() : CreatedAtAction(nameof(GetById), new { id = result.created.Id }, result.created);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        });
     }
 
     [HttpGet("{id}")]
@@ -53,9 +50,9 @@ public class RequestsController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "AccountantOnly")]
-    public async Task<ActionResult<RequestItem>> Update(string id, [FromBody] RequestItem request, CancellationToken ct)
+    public async Task<ActionResult<RequestItem>> Update(string id, [FromBody] UpdateRequestRequest request, CancellationToken ct)
     {
-        try
+        return await ExecuteAsync(async () =>
         {
             var result = await _requests.UpdateAsync(id, request, User, ct);
             if (result.forbidden)
@@ -64,17 +61,13 @@ public class RequestsController : ControllerBase
             }
 
             return result.updated is null ? NotFound() : Ok(result.updated);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        });
     }
 
     [HttpPatch("{id}/status")]
     public async Task<ActionResult<RequestItem>> UpdateStatus(string id, [FromBody] UpdateRequestStatusRequest request, CancellationToken ct)
     {
-        try
+        return await ExecuteAsync(async () =>
         {
             var result = await _requests.UpdateStatusAsync(id, request, User, ct);
             if (result.forbidden)
@@ -83,11 +76,7 @@ public class RequestsController : ControllerBase
             }
 
             return result.updated is null ? NotFound() : Ok(result.updated);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        });
     }
 
     [HttpGet("{id}/comments")]
@@ -105,7 +94,7 @@ public class RequestsController : ControllerBase
     [HttpPost("{id}/comments")]
     public async Task<ActionResult<RequestComment>> AddComment(string id, [FromBody] AddRequestCommentRequest request, CancellationToken ct)
     {
-        try
+        return await ExecuteAsync(async () =>
         {
             var result = await _requests.AddCommentAsync(id, request, User, ct);
             if (result.forbidden)
@@ -114,24 +103,23 @@ public class RequestsController : ControllerBase
             }
 
             return result.comment is null ? NotFound() : Ok(result.comment);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        });
     }
 
     [HttpPost("{id}/resolve")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<ActionResult<RequestItem>> Resolve(string id, [FromBody] ResolveRequestRequest request, CancellationToken ct)
     {
-        var result = await _requests.ResolveAsync(id, request, User, ct);
-        if (result.forbidden)
+        return await ExecuteAsync(async () =>
         {
-            return Forbid();
-        }
+            var result = await _requests.ResolveAsync(id, request, User, ct);
+            if (result.forbidden)
+            {
+                return Forbid();
+            }
 
-        return result.resolved is null ? NotFound() : Ok(result.resolved);
+            return result.resolved is null ? NotFound() : Ok(result.resolved);
+        });
     }
 
     [HttpDelete("{id}")]
@@ -145,5 +133,17 @@ public class RequestsController : ControllerBase
         }
 
         return result.deleted ? NoContent() : NotFound();
+    }
+
+    private async Task<ActionResult> ExecuteAsync(Func<Task<ActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (AppValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message, errors = ex.Errors });
+        }
     }
 }

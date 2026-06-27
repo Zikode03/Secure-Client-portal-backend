@@ -93,7 +93,7 @@ public class AuthorizationScopeTests
         };
 
         var forbiddenDoc = await accountantController.Create(
-            CreateDocument(DocumentBetaId, ClientBetaId, AccountantOneId, "Forbidden"),
+            CreateDocumentRequestPayload(ClientBetaId, AccountantOneId, "Forbidden"),
             TestContext.Current.CancellationToken);
         Assert.IsType<ForbidResult>(forbiddenDoc);
 
@@ -368,6 +368,21 @@ public class AuthorizationScopeTests
         _ => UserRole.Client
     };
 
+    private static CreateDocumentRequest CreateDocumentRequestPayload(Guid clientId, Guid uploadedByUserId, string name)
+    {
+        return new CreateDocumentRequest(
+            clientId,
+            Guid.NewGuid(),
+            null,
+            name,
+            "invoices",
+            "application/pdf",
+            10,
+            $"{clientId}/test.pdf",
+            uploadedByUserId,
+            "uploaded");
+    }
+
     private static Document CreateDocument(Guid id, Guid clientId, Guid uploadedByUserId, string name)
     {
         return Document.CreateUploaded(
@@ -411,4 +426,6 @@ public class AuthorizationScopeTests
         public string BuildSetupUrl(string email, string token) => $"https://example.test/setup?email={email}&token={token}";
     }
 }
+
+
 

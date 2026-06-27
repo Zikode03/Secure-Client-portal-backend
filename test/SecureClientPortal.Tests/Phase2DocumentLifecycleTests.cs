@@ -288,21 +288,9 @@ public class Phase2DocumentLifecycleTests
 
         db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientAlphaId));
 
-        db.MonthlyPacks.Add(new MonthlyPack
-        {
-            Id = MonthlyPackId,
-            ClientId = ClientAlphaId,
-            Year = 2026,
-            Month = 6
-        });
+        db.MonthlyPacks.Add(MonthlyPack.Create(MonthlyPackId, ClientAlphaId, 2026, 6));
 
-        var slot = new DocumentSlot
-        {
-            Id = SlotId,
-            MonthlyPackId = MonthlyPackId,
-            ClientId = ClientAlphaId
-        };
-        slot.UpdateDefinition("bank_statement", "Bank Statement", true);
+        var slot = DocumentSlot.Create(SlotId, MonthlyPackId, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
         db.DocumentSlots.Add(slot);
 
         db.SaveChanges();
@@ -346,5 +334,6 @@ public class Phase2DocumentLifecycleTests
         }
     }
 }
+
 
 

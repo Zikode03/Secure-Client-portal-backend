@@ -4,7 +4,7 @@ namespace SecureClientPortal.Backend.Models;
 
 public class User
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; private set; }
     public string FullName { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
     public string PasswordHash { get; private set; } = string.Empty;
@@ -12,12 +12,15 @@ public class User
     public string ClientIdsJson { get; private set; } = "[]";
     public string? ProfileJson { get; private set; }
     public string? SecurityJson { get; private set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
-    public static User CreateInvited(Guid id, string fullName, string email, UserRole role, string passwordHash, string clientIdsJson, string? profileJson)
+    public static User CreateInvited(Guid id, string fullName, string email, UserRole role, string passwordHash, string clientIdsJson, string? profileJson, DateTime? createdAtUtc = null)
     {
-        var user = new User { Id = id, CreatedAtUtc = DateTime.UtcNow };
+        if (id == Guid.Empty) throw new DomainRuleException("User id is required.");
+
+        var created = createdAtUtc ?? DateTime.UtcNow;
+        var user = new User { Id = id, CreatedAtUtc = created, UpdatedAtUtc = created };
         user.SetFullName(fullName);
         user.Email = EmailAddress.Parse(email);
         user.PasswordHash = passwordHash;
@@ -32,7 +35,7 @@ public class User
     public void CompleteSetup(string fullName, string passwordHash)
     {
         SetFullName(fullName);
-        PasswordHash = passwordHash;
+        SetPasswordHash(passwordHash);
         SecurityJson = UserSecurityProfile.SetStatus(SecurityJson, SecurityStatus.Active.ToStorageValue());
         Touch();
     }
@@ -64,6 +67,7 @@ public class User
 
     public void SetPasswordHash(string passwordHash)
     {
+        if (string.IsNullOrWhiteSpace(passwordHash)) throw new DomainRuleException("Password hash is required.");
         PasswordHash = passwordHash;
         Touch();
     }
@@ -90,9 +94,3 @@ public class User
         UpdatedAtUtc = DateTime.UtcNow;
     }
 }
-
-
-
-
-
-
