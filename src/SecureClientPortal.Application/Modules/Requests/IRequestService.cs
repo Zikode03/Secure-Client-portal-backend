@@ -15,6 +15,7 @@ public interface IRequestService
     Task<(bool forbidden, IReadOnlyList<RequestComment>? comments)> GetCommentsAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
     Task<(bool forbidden, RequestComment? comment)> AddCommentAsync(string id, AddRequestCommentRequest request, ClaimsPrincipal user, CancellationToken ct = default);
     Task<(bool forbidden, RequestItem? resolved)> ResolveAsync(string id, ResolveRequestRequest request, ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<RequestItem>> EscalateAsync(string id, EscalateRequestRequest request, ClaimsPrincipal user, CancellationToken ct = default);
     Task<(bool forbidden, bool deleted)> DeleteAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<RequestWorkspaceResponse>> GetWorkspaceAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<RequestDocumentUploadResponse>> UploadDocumentAsync(string id, UploadRequestDocumentRequest request, ClaimsPrincipal user, CancellationToken ct = default);

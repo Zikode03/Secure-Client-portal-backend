@@ -68,8 +68,15 @@ public sealed class RequestQueryService : IRequestQueryService
             return (true, null);
         }
 
-        var comments = await _requests.RequestComments
-            .Where(x => x.RequestId == item.Id)
+        var commentsQuery = _requests.RequestComments
+            .Where(x => x.RequestId == item.Id);
+
+        if (user.IsClient())
+        {
+            commentsQuery = commentsQuery.Where(x => !x.IsInternal);
+        }
+
+        var comments = await commentsQuery
             .OrderBy(x => x.CreatedAtUtc)
             .ToListAsync(ct);
 
@@ -97,8 +104,15 @@ public sealed class RequestQueryService : IRequestQueryService
             return ServiceResult<RequestWorkspaceResponse>.ForbiddenResult();
         }
 
-        var comments = await _requests.RequestComments
-            .Where(x => x.RequestId == item.Id)
+        var commentsQuery = _requests.RequestComments
+            .Where(x => x.RequestId == item.Id);
+
+        if (user.IsClient())
+        {
+            commentsQuery = commentsQuery.Where(x => !x.IsInternal);
+        }
+
+        var comments = await commentsQuery
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => new RequestWorkspaceCommentResponse(
                 x.Id,
@@ -106,6 +120,7 @@ public sealed class RequestQueryService : IRequestQueryService
                 x.ClientId,
                 x.AuthorUserId,
                 x.AuthorRole,
+                x.IsInternal,
                 x.Message,
                 x.CreatedAtUtc))
             .ToListAsync(ct);

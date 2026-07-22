@@ -209,10 +209,16 @@ public sealed class RequestCommandService : IRequestCommandService
             throw new AppValidationException("Unsupported request status.");
         }
 
+        var currentUser = _currentUserContextFactory.Create(user);
         var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
+        if (!RequestWorkflowPolicy.CanManuallySetStatus(currentUser.ToWorkflowActorContext(), status))
+        {
+            throw new AppValidationException("You are not allowed to set that request status manually.");
+        }
+
         if (status == RequestStatus.Resolved)
         {
-            item.Resolve(_currentUserContextFactory.Create(user).UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
+            item.Resolve(currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
         }
         else
         {
@@ -257,10 +263,18 @@ public sealed class RequestCommandService : IRequestCommandService
         var currentUser = _currentUserContextFactory.Create(user);
         var authorId = currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required.");
         var authorRole = currentUser.IsAdmin ? "admin" : currentUser.IsAccountant ? "accountant" : "client";
-        var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, request.Message);
+        if (request.IsInternal && currentUser.IsClient)
+        {
+            throw new AppValidationException("Clients cannot add internal notes.");
+        }
+
+        var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, request.IsInternal, request.Message);
         _requests.RequestComments.Add(comment);
 
-        RequestWorkflowPolicy.ApplyCommentTransition(item, currentUser.ToWorkflowActorContext());
+        if (!request.IsInternal)
+        {
+            RequestWorkflowPolicy.ApplyCommentTransition(item, currentUser.ToWorkflowActorContext());
+        }
 
         await _requests.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -269,21 +283,24 @@ public sealed class RequestCommandService : IRequestCommandService
             "request",
             item.Id,
             item.ClientId,
-            JsonSerializer.Serialize(new { comment.Id, comment.AuthorRole, target = "request" }),
+            JsonSerializer.Serialize(new { comment.Id, comment.AuthorRole, comment.IsInternal, target = "request" }),
             ct);
 
-        var recipientRole = authorRole == "client" ? "accountant" : "client";
-        var recipientIds = await _db.ResolveNotificationRecipientsAsync(item.ClientId, recipientRole, ct);
-        await _db.AddNotificationsAsync(
-            user,
-            recipientIds,
-            item.ClientId,
-            "request.comment",
-            "Request replied to",
-            $"New comment on request '{item.Title}'.",
-            $"/requests/{item.Id}",
-            new { requestId = item.Id, commentId = comment.Id },
-            ct);
+        if (!request.IsInternal)
+        {
+            var recipientRole = authorRole == "client" ? "accountant" : "client";
+            var recipientIds = await _db.ResolveNotificationRecipientsAsync(item.ClientId, recipientRole, ct);
+            await _db.AddNotificationsAsync(
+                user,
+                recipientIds,
+                item.ClientId,
+                "request.comment",
+                "Request replied to",
+                $"New comment on request '{item.Title}'.",
+                $"/requests/{item.Id}",
+                new { requestId = item.Id, commentId = comment.Id },
+                ct);
+        }
 
         return (false, comment);
     }
@@ -323,6 +340,77 @@ public sealed class RequestCommandService : IRequestCommandService
         await _domainEventDispatcher.DispatchAsync(item.DequeueDomainEvents(), ct);
 
         return (false, item);
+    }
+
+    public async Task<ServiceResult<RequestItem>> EscalateAsync(string id, EscalateRequestRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        RequestValidators.ValidateEscalation(request);
+
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return ServiceResult<RequestItem>.NotFoundResult();
+        }
+
+        var item = await _requests.Requests.FindAsync([requestId], ct);
+        if (item is null)
+        {
+            return ServiceResult<RequestItem>.NotFoundResult();
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(item.ClientId))
+        {
+            return ServiceResult<RequestItem>.ForbiddenResult();
+        }
+
+        if (!user.IsAdmin() && !user.IsAccountant())
+        {
+            return ServiceResult<RequestItem>.ForbiddenResult("Only firm users can escalate requests.");
+        }
+
+        var currentUser = _currentUserContextFactory.Create(user);
+        var authorId = currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required.");
+        var authorRole = currentUser.IsAdmin ? "admin" : "accountant";
+        var escalateToRole = string.IsNullOrWhiteSpace(request.EscalateToRole)
+            ? (currentUser.IsAdmin ? "accountant" : "admin")
+            : request.EscalateToRole.Trim().ToLowerInvariant();
+        var reason = string.IsNullOrWhiteSpace(request.Reason)
+            ? "Manual escalation requested."
+            : request.Reason.Trim();
+
+        var comment = RequestComment.Create(
+            Guid.NewGuid(),
+            item.Id,
+            item.ClientId,
+            authorId,
+            authorRole,
+            true,
+            $"Escalation requested for {escalateToRole}: {reason}");
+        _requests.RequestComments.Add(comment);
+
+        await _requests.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "request.escalated",
+            "request",
+            item.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { targetRole = escalateToRole, reason, commentId = comment.Id, item.Status }),
+            ct);
+
+        var recipientIds = await _db.ResolveNotificationRecipientsAsync(item.ClientId, escalateToRole, ct);
+        await _db.AddNotificationsAsync(
+            user,
+            recipientIds,
+            item.ClientId,
+            "request.escalation",
+            "Request escalated",
+            $"Request '{item.Title}' was escalated for attention.",
+            $"/requests/{item.Id}",
+            new { requestId = item.Id, commentId = comment.Id, targetRole = escalateToRole, reason },
+            ct);
+
+        return ServiceResult<RequestItem>.Success(item);
     }
 
     public async Task<(bool forbidden, bool deleted)> DeleteAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
@@ -386,7 +474,7 @@ public sealed class RequestCommandService : IRequestCommandService
             ? "Corrected document uploaded for review."
             : message.Trim();
 
-        var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, note);
+        var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, false, note);
         _requests.RequestComments.Add(comment);
         item.MarkWaitingOnAccountant();
 

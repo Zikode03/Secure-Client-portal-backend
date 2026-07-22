@@ -212,6 +212,8 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
+await ApplyDatabaseMigrationsAsync(app.Services, app.Logger);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -227,6 +229,20 @@ app.MapControllers();
 await SeedData.InitializeAsync(app.Services);
 
 app.Run();
+
+static async Task ApplyDatabaseMigrationsAsync(IServiceProvider services, ILogger logger)
+{
+    await using var scope = services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
+    var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
+    if (!pendingMigrations.Any())
+    {
+        return;
+    }
+
+    logger.LogInformation("Applying {MigrationCount} pending database migrations.", pendingMigrations.Count());
+    await db.Database.MigrateAsync();
+}
 
 static string PartitionKey(HttpContext httpContext)
 {

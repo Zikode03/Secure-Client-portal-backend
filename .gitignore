@@ -15,3 +15,4 @@
 # Local storage and generated files
 storage/
 artifacts/
+.tmp/

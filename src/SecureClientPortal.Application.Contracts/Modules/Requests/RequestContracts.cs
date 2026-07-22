@@ -20,9 +20,10 @@ public record UpdateRequestRequest(
     Guid? RelatedDocumentId,
     string Status);
 
-public record AddRequestCommentRequest(string Message);
+public record AddRequestCommentRequest(string Message, bool IsInternal = false);
 public record UpdateRequestStatusRequest(string Status);
 public record ResolveRequestRequest(string? ResolutionNote);
+public record EscalateRequestRequest(string? Reason, string? EscalateToRole);
 
 public class UploadRequestDocumentRequest
 {
@@ -36,6 +37,7 @@ public record RequestWorkspaceCommentResponse(
     Guid ClientId,
     Guid AuthorUserId,
     string AuthorRole,
+    bool IsInternal,
     string Message,
     DateTime CreatedAtUtc);
 

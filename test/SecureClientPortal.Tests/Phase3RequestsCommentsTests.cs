@@ -61,6 +61,218 @@ public class Phase3RequestsCommentsTests
         Assert.Contains(notifications, x => x.UserId == AccountantUserId && x.Type == "request.comment");
     }
 
+    [Fact]
+    public async Task AddComment_InternalNoteFromClient_IsRejected()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(client)
+        };
+
+        var result = await controller.AddComment(
+            RequestAlphaId.ToString(),
+            new AddRequestCommentRequest("Internal note", true),
+            TestContext.Current.CancellationToken);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var payload = JsonSerializer.Serialize(badRequest.Value);
+        Assert.Contains("Clients cannot add internal notes.", payload);
+    }
+
+    [Fact]
+    public async Task GetComments_HidesInternalNotesFromClient()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        db.RequestComments.Add(RequestComment.Create(
+            Guid.Parse("89999999-9999-9999-9999-999999999992"),
+            RequestAlphaId,
+            ClientAlphaId,
+            AccountantUserId,
+            "accountant",
+            true,
+            "Internal escalation note"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(client)
+        };
+
+        var result = await controller.GetComments(RequestAlphaId.ToString(), TestContext.Current.CancellationToken);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var comments = Assert.IsAssignableFrom<IEnumerable<RequestComment>>(ok.Value).ToList();
+
+        Assert.Single(comments);
+        Assert.DoesNotContain(comments, x => x.IsInternal);
+    }
+
+    [Fact]
+    public async Task Escalate_CreatesInternalCommentAndAdminNotification()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var adminUserId = Guid.Parse("81111111-1111-1111-1111-111111111111");
+        db.Users.Add(BuildActiveUser(adminUserId, "Admin", "admin@test.com", UserRole.Admin));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(accountant)
+        };
+
+        var result = await controller.Escalate(
+            RequestAlphaId.ToString(),
+            new EscalateRequestRequest("Need admin review", "admin"),
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var comment = await db.RequestComments
+            .Where(x => x.RequestId == RequestAlphaId && x.IsInternal)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(comment);
+        Assert.Contains("Need admin review", comment.Message);
+
+        var notification = await db.Notifications
+            .FirstOrDefaultAsync(
+                x => x.ClientId == ClientAlphaId &&
+                     x.UserId == adminUserId &&
+                     x.Type == "request.escalation",
+                TestContext.Current.CancellationToken);
+
+        Assert.NotNull(notification);
+    }
+
+    [Fact]
+    public async Task AddComment_InternalNoteFromAccountant_DoesNotNotifyClient_AndDoesNotChangeStatus()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var request = await db.Requests.FirstAsync(x => x.Id == RequestAlphaId, TestContext.Current.CancellationToken);
+        request.MarkWaitingOnClient();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(accountant)
+        };
+
+        var result = await controller.AddComment(
+            RequestAlphaId.ToString(),
+            new AddRequestCommentRequest("Internal workflow note", true),
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var updated = await db.Requests.FirstAsync(x => x.Id == RequestAlphaId, TestContext.Current.CancellationToken);
+        Assert.Equal("waiting_on_client", updated.Status);
+
+        var comment = await db.RequestComments
+            .Where(x => x.RequestId == RequestAlphaId && x.IsInternal)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(comment);
+
+        var notifications = await db.Notifications
+            .Where(x => x.ClientId == ClientAlphaId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(notifications, x => x.UserId == ClientUserId && x.Type == "request.comment");
+    }
+
+    [Fact]
+    public async Task GetWorkspace_HidesInternalNotesFromClient()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        db.RequestComments.Add(RequestComment.Create(
+            Guid.Parse("89999999-9999-9999-9999-999999999993"),
+            RequestAlphaId,
+            ClientAlphaId,
+            AccountantUserId,
+            "accountant",
+            true,
+            "Internal workspace note"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(client)
+        };
+
+        var result = await controller.GetWorkspace(RequestAlphaId.ToString(), TestContext.Current.CancellationToken);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var workspace = Assert.IsType<RequestWorkspaceResponse>(ok.Value);
+
+        Assert.Single(workspace.Comments);
+        Assert.DoesNotContain(workspace.Comments, x => x.IsInternal);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_FromClient_IsRejected()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(client)
+        };
+
+        var result = await controller.UpdateStatus(
+            RequestAlphaId.ToString(),
+            new UpdateRequestStatusRequest("resolved"),
+            TestContext.Current.CancellationToken);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var payload = JsonSerializer.Serialize(badRequest.Value);
+        Assert.Contains("not allowed to set that request status manually", payload);
+
+        var request = await db.Requests.FirstAsync(x => x.Id == RequestAlphaId, TestContext.Current.CancellationToken);
+        Assert.NotEqual("resolved", request.Status);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ToOverdue_FromAccountant_IsRejected()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var accountant = BuildUser(AccountantUserId, "accountant");
+        var controller = new RequestsController(RequestService.CreateForTests(db))
+        {
+            ControllerContext = BuildControllerContext(accountant)
+        };
+
+        var result = await controller.UpdateStatus(
+            RequestAlphaId.ToString(),
+            new UpdateRequestStatusRequest("overdue"),
+            TestContext.Current.CancellationToken);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var payload = JsonSerializer.Serialize(badRequest.Value);
+        Assert.Contains("not allowed to set that request status manually", payload);
+
+        var request = await db.Requests.FirstAsync(x => x.Id == RequestAlphaId, TestContext.Current.CancellationToken);
+        Assert.NotEqual("overdue", request.Status);
+    }
+
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)
     {
         return new ControllerContext
@@ -125,6 +337,7 @@ public class Phase3RequestsCommentsTests
             ClientAlphaId,
             ClientUserId,
             "client",
+            false,
             "Please review"));
 
         db.SaveChanges();

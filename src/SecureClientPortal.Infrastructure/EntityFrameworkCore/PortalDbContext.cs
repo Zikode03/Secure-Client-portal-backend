@@ -306,6 +306,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.AuthorUserId).IsRequired();
             entity.Property(x => x.AuthorRole).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.IsInternal).HasDefaultValue(false);
             entity.Property(x => x.Message).HasMaxLength(2000).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.RequestId, x.CreatedAtUtc });

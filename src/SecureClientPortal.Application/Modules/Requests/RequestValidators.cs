@@ -35,6 +35,18 @@ public static class RequestValidators
     {
     }
 
+    public static void ValidateEscalation(EscalateRequestRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.EscalateToRole))
+        {
+            var role = request.EscalateToRole.Trim().ToLowerInvariant();
+            if (role is not ("admin" or "accountant"))
+            {
+                throw new AppValidationException("Escalation role must be admin or accountant.");
+            }
+        }
+    }
+
     public static void ValidateUpload(UploadRequestDocumentRequest request)
     {
         if (request.File is null) throw new AppValidationException("File is required.");

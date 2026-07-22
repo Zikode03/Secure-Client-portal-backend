@@ -57,6 +57,9 @@ public sealed class RequestService : IRequestService
     public Task<(bool forbidden, RequestItem? resolved)> ResolveAsync(string id, ResolveRequestRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default) =>
         _commands.ResolveAsync(id, request, user, ct);
 
+    public Task<ServiceResult<RequestItem>> EscalateAsync(string id, EscalateRequestRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default) =>
+        _commands.EscalateAsync(id, request, user, ct);
+
     public Task<(bool forbidden, bool deleted)> DeleteAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default) =>
         _commands.DeleteAsync(id, user, ct);
 

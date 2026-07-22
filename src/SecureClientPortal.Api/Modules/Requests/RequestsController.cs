@@ -136,6 +136,13 @@ public class RequestsController : ControllerBase
         });
     }
 
+    [HttpPost("{id}/escalate")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> Escalate(string id, [FromBody] EscalateRequestRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _requests.EscalateAsync(id, request, User, ct)));
+    }
+
     [HttpDelete("{id}")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
