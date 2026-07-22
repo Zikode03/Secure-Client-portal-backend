@@ -579,6 +579,16 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.Property<DateTime?>("DueDateUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -611,7 +621,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
 
                     b.ToTable("AppDocumentSlots", null, t =>
                         {
-                            t.HasCheckConstraint("CK_AppDocumentSlots_Status", "Status IN ('missing','uploaded','under_review','accepted','rejected','filed')");
+                            t.HasCheckConstraint("CK_AppDocumentSlots_Status", "Status IN ('not_started','draft','submitted','under_review','accepted','rejected','reupload_required','not_applicable')");
                         });
                 });
 
@@ -736,9 +746,6 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
-                    b.Property<DateTime?>("SubmittedAtUtc")
-                        .HasColumnType("datetime2");
-
                     b.Property<DateTime>("UpdatedAtUtc")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
@@ -756,7 +763,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         {
                             t.HasCheckConstraint("CK_AppMonthlyPacks_Month", "Month >= 1 AND Month <= 12");
 
-                            t.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('draft','in_progress','submitted','under_review','completed','reopened')");
+                            t.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('not_started','in_progress','partially_submitted','under_review','complete','closed')");
                         });
                 });
 

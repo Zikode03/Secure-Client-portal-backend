@@ -1,0 +1,122 @@
+using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Modules.Requests;
+using SecureClientPortal.Backend.Auth;
+using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Models;
+using System.Security.Claims;
+
+namespace SecureClientPortal.Backend.Infrastructure.Modules.Requests;
+
+public sealed class TaskService : ITaskService
+{
+    private readonly PortalDbContext _db;
+
+    public TaskService(PortalDbContext db)
+    {
+        _db = db;
+    }
+
+    public async Task<IReadOnlyList<TaskItem>> GetAllAsync(ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        return await _db.Tasks
+            .Where(x => allowedClientIds.Contains(x.ClientId))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+    }
+
+    public async Task<(bool forbidden, TaskItem? item)> GetByIdAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, null);
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
+        if (item is null)
+        {
+            return (false, null);
+        }
+
+        return allowedClientIds.Contains(item.ClientId) ? (false, item) : (true, null);
+    }
+
+    public async Task<(bool forbidden, TaskItem created)> CreateAsync(TaskItem request, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(request.ClientId))
+        {
+            return (true, null!);
+        }
+
+        var clientExists = await _db.Clients.AnyAsync(x => x.Id == request.ClientId, ct);
+        if (!clientExists)
+        {
+            throw new ArgumentException("Client does not exist.");
+        }
+
+        var createdByUserId = user.GetUserId() ?? request.CreatedByUserId;
+        var created = TaskItem.Create(
+            request.Id == Guid.Empty ? Guid.NewGuid() : request.Id,
+            request.ClientId,
+            request.Title,
+            request.Status,
+            request.Priority,
+            request.DueDateUtc,
+            createdByUserId);
+
+        _db.Tasks.Add(created);
+        await _db.SaveChangesAsync(ct);
+        return (false, created);
+    }
+
+    public async Task<(bool forbidden, TaskItem? updated)> UpdateAsync(string id, TaskItem request, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, null);
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
+        if (item is null)
+        {
+            return (false, null);
+        }
+
+        if (!allowedClientIds.Contains(item.ClientId))
+        {
+            return (true, null);
+        }
+
+        item.Update(request.Title, request.Status, request.Priority, request.DueDateUtc);
+
+        await _db.SaveChangesAsync(ct);
+        return (false, item);
+    }
+
+    public async Task<(bool forbidden, bool deleted)> DeleteAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(id, out var taskId))
+        {
+            return (false, false);
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var item = await _db.Tasks.FindAsync([taskId], ct);
+        if (item is null)
+        {
+            return (false, false);
+        }
+
+        if (!allowedClientIds.Contains(item.ClientId))
+        {
+            return (true, false);
+        }
+
+        _db.Tasks.Remove(item);
+        await _db.SaveChangesAsync(ct);
+        return (false, true);
+    }
+}

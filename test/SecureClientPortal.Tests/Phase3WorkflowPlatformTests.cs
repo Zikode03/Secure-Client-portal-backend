@@ -1,13 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SecureClientPortal.Backend.Application.Contracts;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Documents;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Notifications;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 using SecureClientPortal.Backend.Models;
-using SecureClientPortal.Backend.Storage;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -30,7 +27,7 @@ public class Phase3WorkflowPlatformTests
         Seed(db);
         var storage = new InMemoryFileStorage();
 
-        var clientDocuments = new DocumentsController(new DocumentWorkflowService(db, storage))
+        var clientDocuments = new DocumentsController(DocumentWorkflowTestFactory.Create(db, storage))
         {
             ControllerContext = BuildControllerContext(BuildUser(ClientUserId, "client", [ClientAlphaId]))
         };
@@ -47,7 +44,7 @@ public class Phase3WorkflowPlatformTests
 
         var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
 
-        var accountantDocuments = new DocumentsController(new DocumentWorkflowService(db, storage))
+        var accountantDocuments = new DocumentsController(DocumentWorkflowTestFactory.Create(db, storage))
         {
             ControllerContext = BuildControllerContext(BuildUser(AccountantUserId, "accountant"))
         };
@@ -71,28 +68,38 @@ public class Phase3WorkflowPlatformTests
         var notificationItems = Assert.IsAssignableFrom<IEnumerable<Notification>>(notificationsOk.Value);
         Assert.Contains(notificationItems, x => x.Type == "document.rejected");
 
-        var clientRequests = new RequestsController(new RequestService(db))
+        var clientRequests = new RequestsController(RequestService.CreateForTests(db, DocumentWorkflowTestFactory.Create(db, storage)))
         {
             ControllerContext = BuildControllerContext(BuildUser(ClientUserId, "client", [ClientAlphaId]))
         };
+        var workspace = await clientRequests.GetWorkspace(request.Id.ToString(), TestContext.Current.CancellationToken);
+        var workspaceOk = Assert.IsType<OkObjectResult>(workspace);
+        var requestWorkspace = Assert.IsType<RequestWorkspaceResponse>(workspaceOk.Value);
+        Assert.True(requestWorkspace.CanUploadCorrection);
+        Assert.NotNull(requestWorkspace.RelatedDocument);
+        Assert.Single(requestWorkspace.RelatedDocument!.Versions);
+
         var reply = await clientRequests.AddComment(
             request.Id.ToString(),
             new AddRequestCommentRequest("Uploaded the corrected statement."),
             TestContext.Current.CancellationToken);
-        Assert.IsType<OkObjectResult>(reply.Result);
+        Assert.IsType<OkObjectResult>(reply);
 
-        var reupload = await clientDocuments.Upload(new UploadDocumentRequest
-        {
-            ClientId = ClientAlphaId,
-            MonthlyPackId = MonthlyPackId,
-            DocumentSlotId = SlotId,
-            DocumentType = "bank_statement",
-            DocumentId = document.Id,
-            File = BuildFormFile("statement-v2.pdf", "good statement")
-        }, TestContext.Current.CancellationToken);
-        Assert.IsType<CreatedResult>(reupload);
+        var reupload = await clientRequests.UploadDocument(
+            request.Id.ToString(),
+            new UploadRequestDocumentRequest
+            {
+                File = BuildFormFile("statement-v2.pdf", "good statement"),
+                Message = "Corrected statement uploaded from the request."
+            },
+            TestContext.Current.CancellationToken);
+        var reuploadOk = Assert.IsType<OkObjectResult>(reupload);
+        var uploadResponse = Assert.IsType<RequestDocumentUploadResponse>(reuploadOk.Value);
+        Assert.Equal("waiting_on_accountant", uploadResponse.Workspace.Request.Status);
+        Assert.NotNull(uploadResponse.Workspace.RelatedDocument);
+        Assert.Equal(2, uploadResponse.Workspace.RelatedDocument!.CurrentVersionNumber);
 
-        var accountantRequests = new RequestsController(new RequestService(db))
+        var accountantRequests = new RequestsController(RequestService.CreateForTests(db, DocumentWorkflowTestFactory.Create(db, storage)))
         {
             ControllerContext = BuildControllerContext(BuildUser(AccountantUserId, "accountant"))
         };
@@ -100,12 +107,24 @@ public class Phase3WorkflowPlatformTests
             request.Id.ToString(),
             new ResolveRequestRequest("All set."),
             TestContext.Current.CancellationToken);
-        Assert.IsType<OkObjectResult>(resolve.Result);
+        Assert.IsType<OkObjectResult>(resolve);
 
         var refreshedRequest = await db.Requests.SingleAsync(TestContext.Current.CancellationToken);
         var refreshedDocument = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal("resolved", refreshedRequest.Status);
         Assert.Equal(2, refreshedDocument.CurrentVersionNumber);
+
+        var requestComments = await db.RequestComments
+            .Where(x => x.RequestId == request.Id)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, requestComments.Count);
+        Assert.Equal("Corrected statement uploaded from the request.", requestComments[^1].Message);
+
+        var accountantNotifications = await db.Notifications
+            .Where(x => x.UserId == AccountantUserId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(accountantNotifications, x => x.Type == "request.document_uploaded");
 
         var versions = await db.DocumentVersions
             .Where(x => x.DocumentId == document.Id)

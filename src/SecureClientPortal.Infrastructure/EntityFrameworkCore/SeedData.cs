@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SecureClientPortal.Backend.Auth;
+using SecureClientPortal.Backend.Domain.Modules.Documents;
+using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Models;
 using System.Security.Cryptography;
 using System.Text;
@@ -240,7 +242,7 @@ public static class SeedData
             SeedGuid("c_001"),
             2026,
             6);
-        pack.MarkDraft();
+        pack.MarkNotStarted();
         return pack;
     }
 
@@ -254,7 +256,7 @@ public static class SeedData
             label,
             true,
             null);
-        slot.MarkMissing();
+        slot.MarkNotStarted();
         return slot;
     }
 
@@ -367,20 +369,20 @@ public static class SeedData
             case "in_progress":
                 pack.MarkInProgress();
                 break;
-            case "submitted":
-                pack.MarkSubmitted();
+            case "partially_submitted":
+                pack.MarkPartiallySubmitted();
                 break;
             case "under_review":
                 pack.MarkUnderReview();
                 break;
-            case "reopened":
-                pack.Reopen();
+            case "closed":
+                pack.Close();
                 break;
-            case "completed":
+            case "complete":
                 pack.Complete();
                 break;
             default:
-                pack.MarkDraft();
+                pack.MarkNotStarted();
                 break;
         }
     }
@@ -404,20 +406,30 @@ public static class SeedData
     {
         switch (status)
         {
+            case "draft":
             case "uploaded":
-                if (slot.CurrentDocumentId.HasValue) slot.MarkUploaded(slot.CurrentDocumentId.Value); else slot.MarkMissing();
+                if (slot.CurrentDocumentId.HasValue) slot.MarkDraft(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
+                break;
+            case "submitted":
+                if (slot.CurrentDocumentId.HasValue && slot.SubmittedByUserId.HasValue) slot.Submit(slot.SubmittedByUserId.Value, slot.SubmittedAtUtc); else if (slot.CurrentDocumentId.HasValue) slot.MarkDraft(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
                 break;
             case "under_review":
                 slot.MarkUnderReview();
                 break;
             case "accepted":
-                if (slot.CurrentDocumentId.HasValue) slot.Accept(slot.CurrentDocumentId.Value); else slot.MarkMissing();
+                if (slot.CurrentDocumentId.HasValue) slot.Accept(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
                 break;
             case "rejected":
-                if (slot.CurrentDocumentId.HasValue) slot.Reject(slot.CurrentDocumentId.Value); else slot.MarkMissing();
+                if (slot.CurrentDocumentId.HasValue) slot.Reject(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
+                break;
+            case "reupload_required":
+                if (slot.CurrentDocumentId.HasValue) slot.RequestReupload(slot.CurrentDocumentId.Value, slot.RejectionReason); else slot.MarkNotStarted();
+                break;
+            case "not_applicable":
+                slot.MarkNotApplicable();
                 break;
             default:
-                slot.MarkMissing();
+                slot.MarkNotStarted();
                 break;
         }
     }

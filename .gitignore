@@ -1,5 +1,6 @@
 # Visual Studio / .NET
 .vs/
+.vscode/
 **/.vs/
 **/bin/
 **/obj/
@@ -13,3 +14,4 @@
 
 # Local storage and generated files
 storage/
+artifacts/

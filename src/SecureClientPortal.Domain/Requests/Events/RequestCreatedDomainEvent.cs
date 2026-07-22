@@ -1,4 +1,6 @@
-namespace SecureClientPortal.Backend.Models;
+namespace SecureClientPortal.Backend.Domain.Modules.Requests.Events;
+
+using SecureClientPortal.Backend.Models;
 
 public sealed record RequestCreatedDomainEvent(
     Guid RequestId,

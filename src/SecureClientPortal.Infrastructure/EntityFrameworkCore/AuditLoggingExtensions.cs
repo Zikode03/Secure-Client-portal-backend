@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SecureClientPortal.Backend.Auth;
+using SecureClientPortal.Backend.Domain.Modules.Documents;
 using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Data;

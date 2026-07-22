@@ -1,6 +1,6 @@
 using SecureClientPortal.Backend.Models;
 
-namespace SecureClientPortal.Backend.Application.Notifications.Events;
+namespace SecureClientPortal.Backend.Application.Modules.Notifications.Events;
 
 public sealed record NotificationRequestedIntegrationEvent(
     Guid? ActorUserId,

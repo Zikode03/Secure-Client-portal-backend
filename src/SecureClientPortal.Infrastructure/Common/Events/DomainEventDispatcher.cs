@@ -1,10 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using SecureClientPortal.Backend.Application.Common.Events;
+using System.Reflection;
 
 namespace SecureClientPortal.Backend.Infrastructure.Common.Events;
 
 public sealed class DomainEventDispatcher : IDomainEventDispatcher
 {
+    private static readonly MethodInfo DispatchDomainEventMethod =
+        typeof(DomainEventDispatcher).GetMethod(nameof(DispatchDomainEventAsync), BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException($"Unable to locate {nameof(DispatchDomainEventAsync)}.");
+
     private readonly IServiceProvider _serviceProvider;
     private readonly IIntegrationEventDispatcher _integrationEventDispatcher;
 
@@ -18,14 +23,24 @@ public sealed class DomainEventDispatcher : IDomainEventDispatcher
     {
         foreach (var domainEvent in domainEvents)
         {
-            var handlerType = typeof(IDomainEventHandler<>).MakeGenericType(domainEvent.GetType());
-            var handlers = _serviceProvider.GetServices(handlerType);
+            var dispatchTask = DispatchDomainEventMethod
+                .MakeGenericMethod(domainEvent.GetType())
+                .Invoke(this, [domainEvent, ct]) as Task
+                ?? throw new InvalidOperationException($"Unable to dispatch domain event of type '{domainEvent.GetType().FullName}'.");
 
-            foreach (var handler in handlers)
-            {
-                var integrationEvents = await ((dynamic)handler).HandleAsync((dynamic)domainEvent, ct);
-                await _integrationEventDispatcher.DispatchAsync(integrationEvents, ct);
-            }
+            await dispatchTask;
+        }
+    }
+
+    private async Task DispatchDomainEventAsync<TDomainEvent>(TDomainEvent domainEvent, CancellationToken ct)
+        where TDomainEvent : IDomainEvent
+    {
+        var handlers = _serviceProvider.GetServices<IDomainEventHandler<TDomainEvent>>();
+
+        foreach (var handler in handlers)
+        {
+            var integrationEvents = await handler.HandleAsync(domainEvent, ct);
+            await _integrationEventDispatcher.DispatchAsync(integrationEvents, ct);
         }
     }
 }

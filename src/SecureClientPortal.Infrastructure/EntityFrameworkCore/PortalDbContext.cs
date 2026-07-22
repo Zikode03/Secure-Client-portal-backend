@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
-using SecureClientPortal.Backend.Application.Documents;
-using SecureClientPortal.Backend.Application.Requests;
+using SecureClientPortal.Backend.Application.Modules.Documents;
+using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Application.Modules.Requests;
+using SecureClientPortal.Backend.Domain.Modules.Documents;
+using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Data;
@@ -220,13 +223,12 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.Id);
             entity.Property(x => x.ClientId).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
-            entity.Property(x => x.SubmittedAtUtc);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.Year, x.Month }).IsUnique();
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('draft','in_progress','submitted','under_review','completed','reopened')");
+                table.HasCheckConstraint("CK_AppMonthlyPacks_Status", "Status IN ('not_started','in_progress','partially_submitted','under_review','complete','closed')");
                 table.HasCheckConstraint("CK_AppMonthlyPacks_Month", "Month >= 1 AND Month <= 12");
             });
         });
@@ -243,13 +245,16 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.IsRequired).HasDefaultValue(true);
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.CurrentDocumentId);
+            entity.Property(x => x.SubmittedAtUtc);
+            entity.Property(x => x.SubmittedByUserId);
+            entity.Property(x => x.RejectionReason).HasMaxLength(1000);
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.MonthlyPackId);
             entity.HasIndex(x => new { x.MonthlyPackId, x.Category }).IsUnique();
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppDocumentSlots_Status", "Status IN ('missing','uploaded','under_review','accepted','rejected','filed')");
+                table.HasCheckConstraint("CK_AppDocumentSlots_Status", "Status IN ('not_started','draft','submitted','under_review','accepted','rejected','reupload_required','not_applicable')");
             });
         });
 

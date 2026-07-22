@@ -1,3 +1,5 @@
+using SecureClientPortal.Backend.Domain.Shared.Modules.Requests;
+
 namespace SecureClientPortal.Backend.Models;
 
 public class TaskItem

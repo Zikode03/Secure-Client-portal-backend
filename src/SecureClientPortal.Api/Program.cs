@@ -2,28 +2,23 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
-using SecureClientPortal.Backend.Application.Assignments;
-using SecureClientPortal.Backend.Application.FirmManagement;
 using SecureClientPortal.Backend.Application.Identity;
-using SecureClientPortal.Backend.Application.Roles;
-using SecureClientPortal.Backend.Application.Requests;
-using SecureClientPortal.Backend.Application.Compliance;
-using SecureClientPortal.Backend.Application.Documents;
-using SecureClientPortal.Backend.Application.Platform;
-using SecureClientPortal.Backend.Application.Reporting;
-using SecureClientPortal.Backend.Infrastructure.Compliance.Application;
+using SecureClientPortal.Backend.Application.Modules.Assignments;
+using SecureClientPortal.Backend.Application.Modules.AuditLogs;
+using SecureClientPortal.Backend.Application.Modules.Auth;
+using SecureClientPortal.Backend.Application.Modules.Clients;
+using SecureClientPortal.Backend.Application.Modules.Compliance;
+using SecureClientPortal.Backend.Application.Modules.FirmManagement;
+using SecureClientPortal.Backend.Application.Modules.Platform;
+using SecureClientPortal.Backend.Application.Modules.Reports;
+using SecureClientPortal.Backend.Application.Modules.UsersRoles;
+using SecureClientPortal.Backend.Application.Modules.Requests;
 using SecureClientPortal.Backend.Infrastructure.DependencyInjection;
-using SecureClientPortal.Backend.Infrastructure.Documents;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
-using SecureClientPortal.Backend.Infrastructure.Identity.Application;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
-using SecureClientPortal.Backend.Infrastructure.Platform;
-using SecureClientPortal.Backend.Infrastructure.Reporting;
+using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
+using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 using Microsoft.IdentityModel.Tokens;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Storage;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -41,6 +36,7 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.Section));
 builder.Services.Configure<PortalLinksOptions>(builder.Configuration.GetSection(PortalLinksOptions.Section));
 builder.Services.Configure<AccessEmailOptions>(builder.Configuration.GetSection(AccessEmailOptions.Section));
+builder.Services.Configure<AutomationOptions>(builder.Configuration.GetSection(AutomationOptions.Section));
 var jwt = builder.Configuration.GetSection(JwtOptions.Section).Get<JwtOptions>() ?? new JwtOptions();
 var jwtSigningKeyFromEnv = Environment.GetEnvironmentVariable("JWT_SIGNING_KEY");
 if (!string.IsNullOrWhiteSpace(jwtSigningKeyFromEnv))
@@ -130,12 +126,19 @@ builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAcce
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
 builder.Services
     .AddPlatformModule()
-    .AddIdentityModule()
-    .AddComplianceModule()
+    .AddAuthModule()
+    .AddUsersRolesModule()
+    .AddMonthlyPacksModule()
     .AddDocumentModule()
+    .AddNotificationsModule()
+    .AddClientsModule()
+    .AddAssignmentsModule()
     .AddFirmManagementModule()
     .AddRequestModule()
-    .AddReportingModule();
+    .AddReviewQueueModule()
+    .AddComplianceModule()
+    .AddAuditLogsModule()
+    .AddReportsModule();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

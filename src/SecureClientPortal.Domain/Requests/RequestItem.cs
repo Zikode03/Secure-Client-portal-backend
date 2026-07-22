@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations.Schema;
+using SecureClientPortal.Backend.Domain.Modules.Requests.Events;
+using SecureClientPortal.Backend.Domain.Shared.Modules.Requests;
 
 namespace SecureClientPortal.Backend.Models;
 

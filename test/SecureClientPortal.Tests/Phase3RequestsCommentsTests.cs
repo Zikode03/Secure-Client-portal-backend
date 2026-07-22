@@ -1,11 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SecureClientPortal.Backend.Application.Contracts;
 using SecureClientPortal.Backend.Auth;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -30,13 +28,13 @@ public class Phase3RequestsCommentsTests
         Seed(db);
 
         var accountant = BuildUser(AccountantUserId, "accountant");
-        var okController = new RequestsController(new RequestService(db)) { ControllerContext = BuildControllerContext(accountant) };
+        var okController = new RequestsController(RequestService.CreateForTests(db)) { ControllerContext = BuildControllerContext(accountant) };
         var okResult = await okController.GetComments(RequestAlphaId.ToString(), TestContext.Current.CancellationToken);
         var ok = Assert.IsType<OkObjectResult>(okResult.Result);
         var comments = Assert.IsAssignableFrom<IEnumerable<RequestComment>>(ok.Value);
         Assert.Single(comments);
 
-        var blockedController = new RequestsController(new RequestService(db)) { ControllerContext = BuildControllerContext(accountant) };
+        var blockedController = new RequestsController(RequestService.CreateForTests(db)) { ControllerContext = BuildControllerContext(accountant) };
         var blocked = await blockedController.GetComments(RequestBetaId.ToString(), TestContext.Current.CancellationToken);
         Assert.IsType<ForbidResult>(blocked.Result);
     }
@@ -48,7 +46,7 @@ public class Phase3RequestsCommentsTests
         Seed(db);
 
         var client = BuildUser(ClientUserId, "client", [ClientAlphaId]);
-        var controller = new RequestsController(new RequestService(db))
+        var controller = new RequestsController(RequestService.CreateForTests(db))
         {
             ControllerContext = BuildControllerContext(client)
         };
@@ -57,7 +55,7 @@ public class Phase3RequestsCommentsTests
             RequestAlphaId.ToString(),
             new AddRequestCommentRequest("Need an update"),
             TestContext.Current.CancellationToken);
-        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.IsType<OkObjectResult>(result);
 
         var notifications = await db.Notifications.Where(x => x.ClientId == ClientAlphaId).ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains(notifications, x => x.UserId == AccountantUserId && x.Type == "request.comment");

@@ -1,32 +1,44 @@
 using Microsoft.Extensions.DependencyInjection;
 using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Application.Common.Events;
-using SecureClientPortal.Backend.Application.Compliance;
-using SecureClientPortal.Backend.Application.Documents;
-using SecureClientPortal.Backend.Application.FirmManagement;
-using SecureClientPortal.Backend.Application.Identity;
-using SecureClientPortal.Backend.Application.Notifications.Events;
-using SecureClientPortal.Backend.Application.Platform;
-using SecureClientPortal.Backend.Application.Reporting;
-using SecureClientPortal.Backend.Application.Requests;
-using SecureClientPortal.Backend.Application.Roles;
-using SecureClientPortal.Backend.Application.Assignments;
+using SecureClientPortal.Backend.Application.Modules.Assignments;
+using SecureClientPortal.Backend.Application.Modules.AuditLogs;
+using SecureClientPortal.Backend.Application.Modules.Auth;
+using SecureClientPortal.Backend.Application.Modules.Clients;
+using SecureClientPortal.Backend.Application.Modules.Compliance;
+using SecureClientPortal.Backend.Application.Modules.Documents;
+using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Application.Modules.Notifications;
+using SecureClientPortal.Backend.Application.Modules.Notifications.Events;
+using SecureClientPortal.Backend.Application.Modules.Requests;
+using SecureClientPortal.Backend.Application.Modules.Reports;
+using SecureClientPortal.Backend.Application.Modules.ReviewQueue;
+using SecureClientPortal.Backend.Application.Modules.UsersRoles;
+using SecureClientPortal.Backend.Application.Modules.FirmManagement;
+using SecureClientPortal.Backend.Application.Modules.Platform;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Domain.Modules.Documents.Events;
+using SecureClientPortal.Backend.Domain.Modules.Requests.Events;
 using SecureClientPortal.Backend.Infrastructure.Common.Events;
-using SecureClientPortal.Backend.Infrastructure.Compliance.Application;
-using SecureClientPortal.Backend.Infrastructure.Documents;
-using SecureClientPortal.Backend.Infrastructure.Documents.Application;
-using SecureClientPortal.Backend.Infrastructure.Documents.Application.Events;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
-using SecureClientPortal.Backend.Infrastructure.Identity.Application;
-using SecureClientPortal.Backend.Infrastructure.Notifications.Application;
-using SecureClientPortal.Backend.Infrastructure.Platform;
-using SecureClientPortal.Backend.Infrastructure.Reporting;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application.Events;
-using SecureClientPortal.Backend.Storage;
-using StorageIFileStorage = SecureClientPortal.Backend.Storage.IFileStorage;
+using SecureClientPortal.Backend.Infrastructure.Modules.Assignments.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.AuditLogs;
+using SecureClientPortal.Backend.Infrastructure.Modules.Auth.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Clients;
+using SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application.Events;
+using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
+using SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Infrastructure.Modules.Notifications;
+using SecureClientPortal.Backend.Infrastructure.Modules.Notifications.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application.Events;
+using SecureClientPortal.Backend.Infrastructure.Modules.Reports;
+using SecureClientPortal.Backend.Infrastructure.Modules.ReviewQueue;
+using SecureClientPortal.Backend.Infrastructure.Modules.FirmManagement.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.UsersRoles.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 
 namespace SecureClientPortal.Backend.Infrastructure.DependencyInjection;
 
@@ -35,45 +47,71 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddPlatformModule(this IServiceCollection services)
     {
         services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
-        services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<IHealthService, HealthService>();
+        services.AddScoped<IAutomationWorkflowService, AutomationWorkflowService>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddScoped<IIntegrationEventDispatcher, IntegrationEventDispatcher>();
+        services.AddHostedService<AutomationBackgroundService>();
         return services;
     }
 
-    public static IServiceCollection AddIdentityModule(this IServiceCollection services)
+    public static IServiceCollection AddAuthModule(this IServiceCollection services)
     {
-        services.AddScoped<StorageIFileStorage, LocalFileStorage>();
-        services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IAuthService, AuthService>();
+        return services;
+    }
+
+    public static IServiceCollection AddUsersRolesModule(this IServiceCollection services)
+    {
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IAdminService, AdminService>();
         return services;
     }
 
     public static IServiceCollection AddDocumentModule(this IServiceCollection services)
     {
+        services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IDocumentModuleDbContext>(sp => sp.GetRequiredService<PortalDbContext>());
         services.AddScoped<IDocumentQueryService, DocumentQueryService>();
         services.AddScoped<IDocumentCommandService, DocumentCommandService>();
         services.AddScoped<IDocumentLifecycleService, DocumentLifecycleService>();
         services.AddScoped<IDocumentWorkflowService, DocumentWorkflowService>();
-        services.AddScoped<INotificationService, NotificationService>();
-        services.AddScoped<IDocumentSlotService, DocumentSlotService>();
-        services.AddScoped<IMonthlyPackService, MonthlyPackService>();
         services.AddScoped<IDomainEventHandler<DocumentReviewedDomainEvent>, DocumentReviewedDomainEventHandler>();
+        return services;
+    }
+
+    public static IServiceCollection AddNotificationsModule(this IServiceCollection services)
+    {
+        services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDomainEventHandler<RequestCreatedDomainEvent>, RequestCreatedDomainEventHandler>();
         services.AddScoped<IDomainEventHandler<RequestResolvedDomainEvent>, RequestResolvedDomainEventHandler>();
         services.AddScoped<IIntegrationEventHandler<NotificationRequestedIntegrationEvent>, NotificationRequestedIntegrationEventHandler>();
         return services;
     }
 
+    public static IServiceCollection AddMonthlyPacksModule(this IServiceCollection services)
+    {
+        services.AddScoped<IDocumentSlotService, DocumentSlotService>();
+        services.AddScoped<IMonthlyPackService, MonthlyPackService>();
+        return services;
+    }
+
+    public static IServiceCollection AddClientsModule(this IServiceCollection services)
+    {
+        services.AddScoped<IClientService, ClientService>();
+        return services;
+    }
+
+    public static IServiceCollection AddAssignmentsModule(this IServiceCollection services)
+    {
+        services.AddScoped<IAssignmentService, AssignmentService>();
+        return services;
+    }
+
     public static IServiceCollection AddFirmManagementModule(this IServiceCollection services)
     {
         services.AddScoped<IFirmManagementService, FirmManagementService>();
-        services.AddScoped<IAssignmentService, AssignmentService>();
-        services.AddScoped<IClientService, ClientService>();
         return services;
     }
 
@@ -87,13 +125,25 @@ public static class BackendModuleServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddReviewQueueModule(this IServiceCollection services)
+    {
+        services.AddScoped<IReviewQueueService, ReviewQueueService>();
+        return services;
+    }
+
     public static IServiceCollection AddComplianceModule(this IServiceCollection services)
     {
         services.AddScoped<IComplianceService, ComplianceService>();
         return services;
     }
 
-    public static IServiceCollection AddReportingModule(this IServiceCollection services)
+    public static IServiceCollection AddAuditLogsModule(this IServiceCollection services)
+    {
+        services.AddScoped<IAuditLogService, AuditLogService>();
+        return services;
+    }
+
+    public static IServiceCollection AddReportsModule(this IServiceCollection services)
     {
         services.AddScoped<IReportService, ReportService>();
         return services;

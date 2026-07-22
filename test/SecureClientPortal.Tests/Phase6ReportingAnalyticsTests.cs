@@ -2,9 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Auth;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Reporting;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -23,6 +21,7 @@ public class Phase6ReportingAnalyticsTests
     private static readonly Guid TaxCategoryId = Guid.Parse("accccccc-cccc-cccc-cccc-ccccccccccc1");
     private static readonly Guid DocumentAlphaId = Guid.Parse("addddddd-dddd-dddd-dddd-ddddddddddd1");
     private static readonly Guid DocumentBetaId = Guid.Parse("addddddd-dddd-dddd-dddd-ddddddddddd2");
+    private static readonly Guid DocumentGammaId = Guid.Parse("addddddd-dddd-dddd-dddd-ddddddddddd3");
 
     [Fact]
     public async Task FirmReports_ReturnOverdueMissingOpenRequestAndRiskMetrics()
@@ -89,6 +88,33 @@ public class Phase6ReportingAnalyticsTests
         Assert.DoesNotContain(ClientBetaId.ToString(), json);
     }
 
+    [Fact]
+    public async Task OperationsDashboard_ReturnsQueuePackRequestComplianceAndWorkloadMetrics()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var controller = new ReportsController(new ReportService(db))
+        {
+            ControllerContext = BuildControllerContext(BuildUser(AdminUserId, "admin"))
+        };
+
+        var result = await controller.GetOperationsDashboard(TestContext.Current.CancellationToken);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var json = JsonSerializer.Serialize(ok.Value);
+
+        Assert.Contains("\"reviewQueue\"", json);
+        Assert.Contains("\"monthlyPacks\"", json);
+        Assert.Contains("\"requests\"", json);
+        Assert.Contains("\"compliance\"", json);
+        Assert.Contains("\"workload\"", json);
+        Assert.Contains("\"pendingReviewItems\":2", json);
+        Assert.Contains("\"expired\":1", json);
+        Assert.Contains("\"missingRequiredSlots\":1", json);
+        Assert.Contains("\"waitingOnClient\":1", json);
+        Assert.Contains("\"waitingOnAccountant\":1", json);
+    }
+
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)
     {
         return new ControllerContext
@@ -148,12 +174,26 @@ public class Phase6ReportingAnalyticsTests
         var packBeta = MonthlyPack.Create(Guid.NewGuid(), ClientBetaId, 2026, 6);
         db.MonthlyPacks.AddRange(packAlpha, packBeta);
 
-        var docAlpha = Document.CreateUploaded(DocumentAlphaId, ClientAlphaId, packAlpha.Id, "Bank Statement", "bank_statement", null, "application/pdf", 123, "alpha.pdf", ClientUserId);
+        var alphaSubmittedSlot = DocumentSlot.Create(Guid.NewGuid(), packAlpha.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, DateTime.UtcNow.AddDays(-1));
+        alphaSubmittedSlot.MarkDraft(DocumentAlphaId);
+        alphaSubmittedSlot.Submit(AccountantUserId, DateTime.UtcNow.AddDays(-2));
+
+        var alphaUnderReviewSlot = DocumentSlot.Create(Guid.NewGuid(), packAlpha.Id, ClientAlphaId, "invoices", "Invoices", true, DateTime.UtcNow.AddDays(-1));
+        alphaUnderReviewSlot.MarkDraft(DocumentGammaId);
+        alphaUnderReviewSlot.Submit(AccountantUserId, DateTime.UtcNow.AddDays(-4));
+        alphaUnderReviewSlot.MarkUnderReview();
+
+        var betaMissingSlot = DocumentSlot.Create(Guid.NewGuid(), packBeta.Id, ClientBetaId, "payroll_summary", "Payroll Summary", true, DateTime.UtcNow.AddDays(-1));
+        db.DocumentSlots.AddRange(alphaSubmittedSlot, alphaUnderReviewSlot, betaMissingSlot);
+
+        var docAlpha = Document.CreateUploaded(DocumentAlphaId, ClientAlphaId, packAlpha.Id, "Bank Statement", "bank_statement", alphaSubmittedSlot.Id, "application/pdf", 123, "alpha.pdf", ClientUserId);
         docAlpha.MarkUnderReview();
         docAlpha.UpdateMetadata(docAlpha.Name, docAlpha.Category, DocumentStatus.UnderReview, docAlpha.SizeBytes, docAlpha.StorageKey);
 
         var docBeta = Document.CreateUploaded(DocumentBetaId, ClientBetaId, packBeta.Id, "Invoices", "invoices", null, "application/pdf", 123, "beta.pdf", ClientTwoUserId);
-        db.Documents.AddRange(docAlpha, docBeta);
+        var docGamma = Document.CreateUploaded(DocumentGammaId, ClientAlphaId, packAlpha.Id, "Invoices", "invoices", alphaUnderReviewSlot.Id, "application/pdf", 123, "gamma.pdf", ClientUserId);
+        docGamma.MarkUnderReview();
+        db.Documents.AddRange(docAlpha, docBeta, docGamma);
 
         db.ReviewDecisions.Add(ReviewDecision.Create(
             Guid.NewGuid(),
@@ -167,7 +207,7 @@ public class Phase6ReportingAnalyticsTests
 
         db.Requests.AddRange(
             RequestItem.Create(Guid.NewGuid(), ClientAlphaId, "clarification_needed", null, "Clarify bank statement", "Need explanation", RequestPriority.High, AccountantUserId, RequestStatus.WaitingOnClient, DateTime.UtcNow.AddDays(-1)),
-            RequestItem.Create(Guid.NewGuid(), ClientBetaId, "missing_document", null, "Upload invoices", "Missing", RequestPriority.Medium, AccountantUserId, RequestStatus.Open, DateTime.UtcNow.AddDays(2)));
+            RequestItem.Create(Guid.NewGuid(), ClientBetaId, "missing_document", null, "Upload invoices", "Missing", RequestPriority.Medium, AccountantUserId, RequestStatus.WaitingOnAccountant, DateTime.UtcNow.AddDays(2)));
 
         db.ComplianceCategories.Add(ComplianceCategory.Create(TaxCategoryId, "Tax Compliance", "Tax", "TAX"));
 

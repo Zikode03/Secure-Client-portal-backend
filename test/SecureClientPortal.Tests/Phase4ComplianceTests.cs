@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SecureClientPortal.Backend.Application.Contracts;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Compliance.Application;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;

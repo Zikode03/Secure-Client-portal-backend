@@ -1,13 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SecureClientPortal.Backend.Application.Contracts;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Documents;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 using SecureClientPortal.Backend.Models;
-using SecureClientPortal.Backend.Storage;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -50,7 +46,7 @@ public class Phase2DocumentLifecycleTests
         var packAfterUpload = await db.MonthlyPacks.SingleAsync(TestContext.Current.CancellationToken);
         var slotAfterUpload = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal("in_progress", packAfterUpload.Status);
-        Assert.Equal("uploaded", slotAfterUpload.Status);
+        Assert.Equal("draft", slotAfterUpload.Status);
 
         var accountantController = BuildDocumentsController(db, storage, BuildUser(AccountantUserId, "accountant"));
 
@@ -92,7 +88,7 @@ public class Phase2DocumentLifecycleTests
         Assert.Equal("uploaded", finalDocument.Status);
         Assert.Equal(2, finalDocument.CurrentVersionNumber);
 
-        var requestController = new RequestsController(new RequestService(db))
+        var requestController = new RequestsController(RequestService.CreateForTests(db))
         {
             ControllerContext = BuildControllerContext(BuildUser(ClientUserId, "client", [ClientAlphaId]))
         };
@@ -100,7 +96,7 @@ public class Phase2DocumentLifecycleTests
             reuploadRequest.Id.ToString(),
             new AddRequestCommentRequest("Corrected version uploaded."),
             TestContext.Current.CancellationToken);
-        Assert.IsType<OkObjectResult>(commentResult.Result);
+        Assert.IsType<OkObjectResult>(commentResult);
 
         reuploadRequest = await db.Requests.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal("waiting_on_accountant", reuploadRequest.Status);
@@ -114,10 +110,10 @@ public class Phase2DocumentLifecycleTests
 
         var finalPack = await db.MonthlyPacks.SingleAsync(TestContext.Current.CancellationToken);
         var finalSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("reopened", finalPack.Status);
-        Assert.Equal("uploaded", finalSlot.Status);
+        Assert.Equal("in_progress", finalPack.Status);
+        Assert.Equal("draft", finalSlot.Status);
 
-        var accountantRequestController = new RequestsController(new RequestService(db))
+        var accountantRequestController = new RequestsController(RequestService.CreateForTests(db))
         {
             ControllerContext = BuildControllerContext(BuildUser(AccountantUserId, "accountant"))
         };
@@ -125,7 +121,7 @@ public class Phase2DocumentLifecycleTests
             reuploadRequest.Id.ToString(),
             new ResolveRequestRequest("Corrected document received."),
             TestContext.Current.CancellationToken);
-        Assert.IsType<OkObjectResult>(resolveResult.Result);
+        Assert.IsType<OkObjectResult>(resolveResult);
 
         reuploadRequest = await db.Requests.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal("resolved", reuploadRequest.Status);
@@ -225,7 +221,7 @@ public class Phase2DocumentLifecycleTests
 
     private static DocumentsController BuildDocumentsController(PortalDbContext db, IFileStorage storage, ClaimsPrincipal user)
     {
-        return new DocumentsController(new DocumentWorkflowService(db, storage))
+        return new DocumentsController(DocumentWorkflowTestFactory.Create(db, storage))
         {
             ControllerContext = BuildControllerContext(user)
         };

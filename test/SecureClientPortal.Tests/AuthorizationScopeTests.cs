@@ -3,18 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SecureClientPortal.Backend.Application;
-using SecureClientPortal.Backend.Application.Contracts;
-using SecureClientPortal.Backend.Application.Identity;
 using SecureClientPortal.Backend.Auth;
-using SecureClientPortal.Backend.Controllers;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Infrastructure.Documents;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement;
-using SecureClientPortal.Backend.Infrastructure.FirmManagement.Application;
-using SecureClientPortal.Backend.Infrastructure.Identity.Application;
-using SecureClientPortal.Backend.Infrastructure.Requests.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 using SecureClientPortal.Backend.Models;
-using SecureClientPortal.Backend.Storage;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
@@ -87,7 +79,7 @@ public class AuthorizationScopeTests
         Seed(db);
 
         var accountantUser = BuildUser(AccountantOneId, "accountant");
-        var accountantController = new DocumentsController(new DocumentWorkflowService(db, new TestFileStorage()))
+        var accountantController = new DocumentsController(DocumentWorkflowTestFactory.Create(db, new TestFileStorage()))
         {
             ControllerContext = BuildControllerContext(accountantUser)
         };
@@ -98,7 +90,7 @@ public class AuthorizationScopeTests
         Assert.IsType<ForbidResult>(forbiddenDoc);
 
         var clientUser = BuildUser(ClientUserId, "client", [ClientAlphaId]);
-        var requestsController = new RequestsController(new RequestService(db))
+        var requestsController = new RequestsController(RequestService.CreateForTests(db))
         {
             ControllerContext = BuildControllerContext(clientUser)
         };
@@ -113,7 +105,7 @@ public class AuthorizationScopeTests
                 null,
                 null),
             TestContext.Current.CancellationToken);
-        Assert.IsType<ForbidResult>(forbiddenRequest.Result);
+        Assert.IsType<ForbidResult>(forbiddenRequest);
 
         var taskController = new TasksController(new TaskService(db))
         {
@@ -227,7 +219,7 @@ public class AuthorizationScopeTests
 
     private static async Task<int> GetDocumentsCount(PortalDbContext db, ClaimsPrincipal user)
     {
-        var controller = new DocumentsController(new DocumentWorkflowService(db, new TestFileStorage()))
+        var controller = new DocumentsController(DocumentWorkflowTestFactory.Create(db, new TestFileStorage()))
         {
             ControllerContext = BuildControllerContext(user)
         };
@@ -240,7 +232,7 @@ public class AuthorizationScopeTests
 
     private static async Task<int> GetRequestsCount(PortalDbContext db, ClaimsPrincipal user)
     {
-        var controller = new RequestsController(new RequestService(db))
+        var controller = new RequestsController(RequestService.CreateForTests(db))
         {
             ControllerContext = BuildControllerContext(user)
         };

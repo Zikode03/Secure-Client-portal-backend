@@ -1,4 +1,7 @@
-namespace SecureClientPortal.Backend.Models;
+namespace SecureClientPortal.Backend.Domain.Modules.Requests;
+
+using SecureClientPortal.Backend.Domain.Shared.Modules.Requests;
+using SecureClientPortal.Backend.Models;
 
 public static class RequestWorkflowPolicy
 {
