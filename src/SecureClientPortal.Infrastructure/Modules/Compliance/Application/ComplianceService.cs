@@ -19,10 +19,12 @@ public sealed class ComplianceService : IComplianceService
     private static readonly HashSet<string> AllowedRiskLevels = ["low", "medium", "high", "critical"];
 
     private readonly PortalDbContext _db;
+    private readonly ComplianceAssessmentDomainService _complianceAssessmentDomainService;
 
     public ComplianceService(PortalDbContext db)
     {
         _db = db;
+        _complianceAssessmentDomainService = new ComplianceAssessmentDomainService();
     }
 
     public async Task<IReadOnlyList<ComplianceCategory>> GetCategoriesAsync(CancellationToken ct = default)
@@ -376,23 +378,26 @@ public sealed class ComplianceService : IComplianceService
 
         var report = items
             .GroupBy(x => x.ClientId)
-            .Select(group => new
+            .Select(group =>
             {
-                clientId = group.Key,
-                total = group.Count(),
-                valid = group.Count(x => x.Status == "valid"),
-                expiringSoon = group.Count(x => x.Status == "expiring_soon"),
-                expired = group.Count(x => x.Status == "expired"),
-                missing = group.Count(x => x.Status == "missing"),
-                pending = group.Count(x => x.Status == "pending"),
-                rejected = group.Count(x => x.Status == "rejected"),
-                criticalRisk = group.Count(x => x.RiskLevel == "critical"),
-                highRisk = group.Count(x => x.RiskLevel == "high"),
-                complianceScore = group.Count() == 0
-                    ? 0
-                    : (int)Math.Round((double)group.Count(x => x.Status == "valid") / group.Count() * 100),
-                categories = group
-                    .GroupBy(x => x.CategoryId)
+                var groupItems = group.ToList();
+                var assessment = _complianceAssessmentDomainService.Assess(groupItems);
+
+                return new
+                {
+                    clientId = group.Key,
+                    total = assessment.Total,
+                    valid = assessment.Valid,
+                    expiringSoon = assessment.ExpiringSoon,
+                    expired = assessment.Expired,
+                    missing = assessment.Missing,
+                    pending = assessment.Pending,
+                    rejected = assessment.Rejected,
+                    criticalRisk = assessment.CriticalRisk,
+                    highRisk = assessment.HighRisk,
+                    complianceScore = assessment.ComplianceScore,
+                    categories = groupItems
+                        .GroupBy(x => x.CategoryId)
                     .Select(categoryGroup => new
                     {
                         categoryId = categoryGroup.Key,
@@ -402,11 +407,14 @@ public sealed class ComplianceService : IComplianceService
                         expired = categoryGroup.Count(x => x.Status == "expired"),
                         highRisk = categoryGroup.Count(x => x.RiskLevel is "high" or "critical")
                     })
-                    .OrderBy(x => x.categoryName)
-                    .ToList()
+                        .OrderBy(x => x.categoryName)
+                        .ToList()
+                };
             })
             .OrderBy(x => x.clientId)
             .ToList();
+
+        var overallAssessment = _complianceAssessmentDomainService.Assess(items);
 
         return ServiceResult<object>.Success(new
         {
@@ -414,13 +422,13 @@ public sealed class ComplianceService : IComplianceService
             clients = report,
             totals = new
             {
-                totalItems = items.Count,
-                valid = items.Count(x => x.Status == "valid"),
-                expiringSoon = items.Count(x => x.Status == "expiring_soon"),
-                expired = items.Count(x => x.Status == "expired"),
-                missing = items.Count(x => x.Status == "missing"),
-                criticalRisk = items.Count(x => x.RiskLevel == "critical"),
-                highRisk = items.Count(x => x.RiskLevel == "high")
+                totalItems = overallAssessment.Total,
+                valid = overallAssessment.Valid,
+                expiringSoon = overallAssessment.ExpiringSoon,
+                expired = overallAssessment.Expired,
+                missing = overallAssessment.Missing,
+                criticalRisk = overallAssessment.CriticalRisk,
+                highRisk = overallAssessment.HighRisk
             }
         });
     }

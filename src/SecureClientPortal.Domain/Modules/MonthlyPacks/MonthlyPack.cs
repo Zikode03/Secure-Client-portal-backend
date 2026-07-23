@@ -69,6 +69,23 @@ public class MonthlyPack
         Touch();
     }
 
+    public void RecalculateStatus(IReadOnlyCollection<DocumentSlot> slots)
+    {
+        MonthlyPackStatusPolicy.Recalculate(this, slots);
+    }
+
+    public void CloseIfReady(IReadOnlyCollection<DocumentSlot> slots)
+    {
+        RecalculateStatus(slots);
+
+        if (!MonthlyPackStatusPolicy.CanClose(slots))
+        {
+            throw new DomainRuleException("All applicable required slots must be accepted before the monthly pack can be closed.");
+        }
+
+        Close();
+    }
+
     private void Touch(DateTime? timestamp = null)
     {
         UpdatedAtUtc = timestamp ?? DateTime.UtcNow;

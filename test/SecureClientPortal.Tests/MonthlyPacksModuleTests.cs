@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Domain.Modules.Documents.Services;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -126,7 +127,7 @@ public class MonthlyPacksModuleTests
         var optionalSlot = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "expense_documents", "Expense Documents", false, null);
         optionalSlot.MarkNotApplicable();
 
-        MonthlyPackStatusPolicy.Recalculate(pack, [requiredSlot, optionalSlot]);
+        pack.RecalculateStatus([requiredSlot, optionalSlot]);
 
         Assert.Equal("complete", pack.Status);
     }
@@ -142,7 +143,7 @@ public class MonthlyPacksModuleTests
         var invoices = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "sales_invoices", "Sales Invoices", false, null);
         invoices.RequestReupload(Guid.NewGuid(), "Please correct the invoice batch.");
 
-        MonthlyPackStatusPolicy.Recalculate(pack, [acceptedBankStatement, invoices]);
+        pack.RecalculateStatus([acceptedBankStatement, invoices]);
 
         Assert.Equal("accepted", acceptedBankStatement.Status);
         Assert.Equal("reupload_required", invoices.Status);
@@ -217,7 +218,7 @@ public class MonthlyPacksModuleTests
         var optionalSlot = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "payroll", "Payroll", false, null);
         optionalSlot.MarkNotApplicable();
         db.DocumentSlots.AddRange(requiredSlot, optionalSlot);
-        MonthlyPackStatusPolicy.Recalculate(pack, [requiredSlot, optionalSlot]);
+        pack.RecalculateStatus([requiredSlot, optionalSlot]);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var controller = new MonthlyPacksController(new MonthlyPackService(db))
@@ -230,6 +231,55 @@ public class MonthlyPacksModuleTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var closedPack = Assert.IsType<MonthlyPackResponse>(ok.Value);
         Assert.Equal("closed", closedPack.Status);
+    }
+
+    [Fact]
+    public void MonthlyPackCloseIfReady_RejectsUnacceptedRequiredSlots()
+    {
+        var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 12);
+        var requiredSlot = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
+        requiredSlot.MarkDraft(Guid.NewGuid());
+
+        var error = Assert.Throws<DomainRuleException>(() => pack.CloseIfReady([requiredSlot]));
+        Assert.Equal("All applicable required slots must be accepted before the monthly pack can be closed.", error.Message);
+    }
+
+    [Fact]
+    public void DocumentSubmissionDomainService_SubmitsOnlyCurrentVersionForLinkedSlot()
+    {
+        var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 12);
+        var slot = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
+        var document = Document.CreateUploaded(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            pack.Id,
+            "Bank Statement.pdf",
+            "bank_statement",
+            slot.Id,
+            "application/pdf",
+            10,
+            "alpha/bank.pdf",
+            AccountantOneId);
+        slot.MarkDraft(document.Id);
+        var version = DocumentVersion.Create(
+            Guid.NewGuid(),
+            document.Id,
+            1,
+            "Bank Statement.pdf",
+            "Bank Statement.pdf",
+            "bank.pdf",
+            "application/pdf",
+            10,
+            "alpha/bank.pdf",
+            true,
+            AccountantOneId,
+            DateTime.UtcNow);
+
+        var service = new DocumentSubmissionDomainService();
+
+        service.Submit(document, version, slot, AccountantOneId, DateTime.UtcNow);
+
+        Assert.Equal("submitted", slot.Status);
     }
 
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)

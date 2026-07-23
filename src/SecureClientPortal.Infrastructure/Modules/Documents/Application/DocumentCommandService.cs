@@ -132,7 +132,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
 
         slot.MarkDraft(document.Id);
         var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-        MonthlyPackStatusPolicy.Recalculate(pack, slots);
+        pack.RecalculateStatus(slots);
 
         await _documents.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -268,7 +268,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
 
         if (slot is not null)
         {
-            MonthlyPackStatusPolicy.Recalculate(pack, await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct));
+            pack.RecalculateStatus(await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct));
         }
 
         await _documents.SaveChangesAsync(ct);

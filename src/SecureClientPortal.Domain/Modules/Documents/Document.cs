@@ -63,12 +63,19 @@ public class Document : IHasDomainEvents
 
     public void MarkUnderReview()
     {
+        EnsureStatusIsOneOf(
+            "Only uploaded documents can enter review.",
+            DocumentStatus.Uploaded);
         Status = DocumentStatus.UnderReview.ToStorageValue();
         Touch();
     }
 
     public void Accept()
     {
+        EnsureStatusIsOneOf(
+            "Only uploaded or in-review documents can be accepted.",
+            DocumentStatus.Uploaded,
+            DocumentStatus.UnderReview);
         Status = DocumentStatus.Accepted.ToStorageValue();
         ClearFiling();
         Touch();
@@ -76,6 +83,10 @@ public class Document : IHasDomainEvents
 
     public void Reject()
     {
+        EnsureStatusIsOneOf(
+            "Only uploaded or in-review documents can be rejected.",
+            DocumentStatus.Uploaded,
+            DocumentStatus.UnderReview);
         Status = DocumentStatus.Rejected.ToStorageValue();
         ClearFiling();
         Touch();
@@ -84,6 +95,9 @@ public class Document : IHasDomainEvents
     public void File(Guid filedByUserId)
     {
         if (filedByUserId == Guid.Empty) throw new DomainRuleException("Filing user id is required.");
+        EnsureStatusIsOneOf(
+            "Only accepted documents can be filed.",
+            DocumentStatus.Accepted);
 
         Status = DocumentStatus.Filed.ToStorageValue();
         IsFiled = true;
@@ -133,6 +147,15 @@ public class Document : IHasDomainEvents
         ClearFiling();
         UploadedAtUtc = DateTime.UtcNow;
         Touch(UploadedAtUtc);
+    }
+
+    private void EnsureStatusIsOneOf(string error, params DocumentStatus[] allowedStatuses)
+    {
+        var currentStatus = DocumentDomainValues.ToDocumentStatus(Status);
+        if (!allowedStatuses.Contains(currentStatus))
+        {
+            throw new DomainRuleException(error);
+        }
     }
 
     private void Touch(DateTime? timestamp = null)

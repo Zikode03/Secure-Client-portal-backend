@@ -4,6 +4,13 @@ namespace SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 
 public static class MonthlyPackStatusPolicy
 {
+    public static bool CanClose(IReadOnlyCollection<DocumentSlot> slots)
+    {
+        return slots
+            .Where(x => x.IsRequired && x.Status != DocumentSlotStatus.NotApplicable.ToStorageValue())
+            .All(x => x.Status == DocumentSlotStatus.Accepted.ToStorageValue());
+    }
+
     public static void Recalculate(MonthlyPack pack, IReadOnlyCollection<DocumentSlot> slots)
     {
         if (pack.Status == MonthlyPackStatus.Closed.ToStorageValue())

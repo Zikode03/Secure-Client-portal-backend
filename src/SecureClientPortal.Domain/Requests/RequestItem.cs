@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations.Schema;
+using SecureClientPortal.Backend.Domain.Modules.Requests;
 using SecureClientPortal.Backend.Domain.Modules.Requests.Events;
 using SecureClientPortal.Backend.Domain.Shared.Modules.Requests;
 
@@ -87,6 +88,69 @@ public class RequestItem : IHasDomainEvents
     public void MarkWaitingOnClient() => SetStatus(RequestStatus.WaitingOnClient);
     public void MarkWaitingOnAccountant() => SetStatus(RequestStatus.WaitingOnAccountant);
     public void MarkOverdue() => SetStatus(RequestStatus.Overdue);
+
+    public void ApplyManualStatusChange(WorkflowActorContext actor, RequestStatus status, Guid actingUserId)
+    {
+        if (!RequestWorkflowPolicy.CanManuallySetStatus(actor, status))
+        {
+            throw new DomainRuleException("You are not allowed to set that request status manually.");
+        }
+
+        if (status == RequestStatus.Resolved)
+        {
+            Resolve(actingUserId);
+            return;
+        }
+
+        SetStatus(status);
+    }
+
+    public void ApplyCommentTransition(WorkflowActorContext actor, bool isInternal)
+    {
+        if (isInternal)
+        {
+            return;
+        }
+
+        RequestWorkflowPolicy.ApplyCommentTransition(this, actor);
+    }
+
+    public void RefreshForReupload(string reason)
+    {
+        if (!RelatedDocumentId.HasValue)
+        {
+            throw new DomainRuleException("This request is not linked to a document.");
+        }
+
+        if (RequestType != "reupload_required")
+        {
+            throw new DomainRuleException("Only re-upload requests can be refreshed from document review.");
+        }
+
+        UpdateDetails(
+            RequestType,
+            RelatedDocumentId,
+            Title,
+            reason,
+            RequestDomainValues.ToRequestPriority(Priority),
+            DueDateUtc);
+        MarkWaitingOnClient();
+    }
+
+    public void MarkDocumentUploadedForReview()
+    {
+        if (!RelatedDocumentId.HasValue)
+        {
+            throw new DomainRuleException("This request is not linked to a document.");
+        }
+
+        if (Status == RequestStatus.Resolved.ToStorageValue())
+        {
+            throw new DomainRuleException("Resolved requests cannot accept new uploads.");
+        }
+
+        MarkWaitingOnAccountant();
+    }
 
     public void Resolve(Guid resolvedByUserId)
     {

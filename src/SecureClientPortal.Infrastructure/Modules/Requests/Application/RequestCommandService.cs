@@ -158,14 +158,18 @@ public sealed class RequestCommandService : IRequestCommandService
             RequestDomainValues.ToRequestPriority(request.Priority),
             request.DueDateUtc);
 
+        var currentUser = _currentUserContextFactory.Create(user);
         var status = RequestDomainValues.ToRequestStatus(normalizedStatus);
-        if (status == RequestStatus.Resolved)
+        try
         {
-            item.Resolve(_currentUserContextFactory.Create(user).UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
+            item.ApplyManualStatusChange(
+                currentUser.ToWorkflowActorContext(),
+                status,
+                currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
         }
-        else
+        catch (DomainRuleException ex)
         {
-            item.SetStatus(status);
+            throw new AppValidationException(ex.Message);
         }
 
         await _requests.SaveChangesAsync(ct);
@@ -216,13 +220,16 @@ public sealed class RequestCommandService : IRequestCommandService
             throw new AppValidationException("You are not allowed to set that request status manually.");
         }
 
-        if (status == RequestStatus.Resolved)
+        try
         {
-            item.Resolve(currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
+            item.ApplyManualStatusChange(
+                currentUser.ToWorkflowActorContext(),
+                status,
+                currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required."));
         }
-        else
+        catch (DomainRuleException ex)
         {
-            item.SetStatus(status);
+            throw new AppValidationException(ex.Message);
         }
 
         await _requests.SaveChangesAsync(ct);
@@ -270,11 +277,7 @@ public sealed class RequestCommandService : IRequestCommandService
 
         var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, request.IsInternal, request.Message);
         _requests.RequestComments.Add(comment);
-
-        if (!request.IsInternal)
-        {
-            RequestWorkflowPolicy.ApplyCommentTransition(item, currentUser.ToWorkflowActorContext());
-        }
+        item.ApplyCommentTransition(currentUser.ToWorkflowActorContext(), request.IsInternal);
 
         await _requests.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
@@ -457,16 +460,6 @@ public sealed class RequestCommandService : IRequestCommandService
             return ServiceResult<RequestItem>.ForbiddenResult();
         }
 
-        if (!item.RelatedDocumentId.HasValue)
-        {
-            return ServiceResult<RequestItem>.ErrorResult("This request is not linked to a document.");
-        }
-
-        if (item.Status == RequestStatus.Resolved.ToStorageValue())
-        {
-            return ServiceResult<RequestItem>.ErrorResult("Resolved requests cannot accept new uploads.");
-        }
-
         var currentUser = _currentUserContextFactory.Create(user);
         var authorId = currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required.");
         var authorRole = currentUser.IsAdmin ? "admin" : currentUser.IsAccountant ? "accountant" : "client";
@@ -476,7 +469,14 @@ public sealed class RequestCommandService : IRequestCommandService
 
         var comment = RequestComment.Create(Guid.NewGuid(), item.Id, item.ClientId, authorId, authorRole, false, note);
         _requests.RequestComments.Add(comment);
-        item.MarkWaitingOnAccountant();
+        try
+        {
+            item.MarkDocumentUploadedForReview();
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<RequestItem>.ErrorResult(ex.Message);
+        }
 
         await _requests.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(

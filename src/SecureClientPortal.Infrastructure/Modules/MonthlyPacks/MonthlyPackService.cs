@@ -114,16 +114,14 @@ public sealed class MonthlyPackService : IMonthlyPackService
         }
 
         var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-        var requiredApplicableComplete = slots
-            .Where(x => x.IsRequired && x.Status != "not_applicable")
-            .All(x => x.Status == "accepted");
-
-        if (!requiredApplicableComplete)
+        try
         {
-            return (false, true, "All applicable required slots must be accepted before the monthly pack can be closed.", null);
+            pack.CloseIfReady(slots);
         }
-
-        pack.Close();
+        catch (DomainRuleException ex)
+        {
+            return (false, true, ex.Message, null);
+        }
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             user,

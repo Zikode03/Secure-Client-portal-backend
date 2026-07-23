@@ -156,7 +156,7 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
         if (pack is not null)
         {
             var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-            MonthlyPackStatusPolicy.Recalculate(pack, slots);
+            pack.RecalculateStatus(slots);
         }
 
         await _documents.SaveChangesAsync(ct);
@@ -212,14 +212,7 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
 
         if (existing is not null)
         {
-            existing.UpdateDetails(
-                existing.RequestType,
-                existing.RelatedDocumentId,
-                existing.Title,
-                reason.Trim(),
-                RequestDomainValues.ToRequestPriority(existing.Priority),
-                existing.DueDateUtc);
-            existing.MarkWaitingOnClient();
+            existing.RefreshForReupload(reason.Trim());
             await _documents.SaveChangesAsync(ct);
             return [];
         }

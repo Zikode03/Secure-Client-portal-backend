@@ -4,6 +4,7 @@ using SecureClientPortal.Backend.Application.Contracts.Modules.Assignments;
 using SecureClientPortal.Backend.Application.Modules.Assignments;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Domain.Modules.Assignments;
 using SecureClientPortal.Backend.Models;
 using System.Security.Claims;
 using System.Text.Json;
@@ -13,10 +14,12 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Assignments.Applicat
 public sealed class AssignmentService : IAssignmentService
 {
     private readonly PortalDbContext _db;
+    private readonly AssignmentDomainService _assignmentDomainService;
 
     public AssignmentService(PortalDbContext db)
     {
         _db = db;
+        _assignmentDomainService = new AssignmentDomainService();
     }
 
     public async Task<(bool forbidden, IReadOnlyList<object> results)> GetAllAsync(ClaimsPrincipal user, string? clientId, CancellationToken ct = default)
@@ -145,18 +148,13 @@ public sealed class AssignmentService : IAssignmentService
             return true;
         }
 
-        var isPrimary = client.AssignedAccountantId == assignment.AccountantUserId;
-        if (isPrimary)
+        var replacement = _assignmentDomainService.SelectReplacementPrimary(
+            client,
+            assignment,
+            await _db.ClientAssignments.Where(x => x.ClientId == assignment.ClientId).ToListAsync(ct));
+        var isPrimary = replacement is not null;
+        if (replacement is not null)
         {
-            var replacement = await _db.ClientAssignments
-                .Where(x => x.ClientId == assignment.ClientId && x.Id != assignment.Id)
-                .OrderBy(x => x.CreatedAtUtc)
-                .FirstOrDefaultAsync(ct);
-            if (replacement is null)
-            {
-                throw new InvalidOperationException("Cannot remove the only primary accountant assignment for a client.");
-            }
-
             client.AssignAccountant(replacement.AccountantUserId);
         }
 

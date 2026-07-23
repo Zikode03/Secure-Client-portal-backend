@@ -273,6 +273,71 @@ public class Phase3RequestsCommentsTests
         Assert.NotEqual("overdue", request.Status);
     }
 
+    [Fact]
+    public void RequestItem_ApplyManualStatusChange_RejectsClientActor()
+    {
+        var request = RequestItem.Create(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            "clarification_needed",
+            null,
+            "Clarify invoices",
+            "Need supporting detail",
+            RequestPriority.Medium,
+            AccountantUserId,
+            RequestStatus.Open,
+            null);
+        var actor = new WorkflowActorContext(ClientUserId, "client");
+
+        var error = Assert.Throws<DomainRuleException>(() =>
+            request.ApplyManualStatusChange(actor, RequestStatus.Resolved, ClientUserId));
+
+        Assert.Equal("You are not allowed to set that request status manually.", error.Message);
+    }
+
+    [Fact]
+    public void RequestItem_MarkDocumentUploadedForReview_RequiresRelatedDocument()
+    {
+        var request = RequestItem.Create(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            "clarification_needed",
+            null,
+            "Clarify invoices",
+            "Need supporting detail",
+            RequestPriority.Medium,
+            AccountantUserId,
+            RequestStatus.WaitingOnClient,
+            null);
+
+        var error = Assert.Throws<DomainRuleException>(() => request.MarkDocumentUploadedForReview());
+
+        Assert.Equal("This request is not linked to a document.", error.Message);
+    }
+
+    [Fact]
+    public void RequestItem_RefreshForReupload_UpdatesDescriptionAndResetsClientAction()
+    {
+        var relatedDocumentId = Guid.NewGuid();
+        var request = RequestItem.Create(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            "reupload_required",
+            relatedDocumentId,
+            "Re-upload required: Bank statement",
+            "Old reason",
+            RequestPriority.High,
+            AccountantUserId,
+            RequestStatus.WaitingOnAccountant,
+            null);
+
+        request.RefreshForReupload("Upload all statement pages.");
+
+        Assert.Equal("Upload all statement pages.", request.Description);
+        Assert.Equal("waiting_on_client", request.Status);
+        Assert.Equal(relatedDocumentId, request.RelatedDocumentId);
+    }
+
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)
     {
         return new ControllerContext

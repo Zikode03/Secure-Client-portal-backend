@@ -4,6 +4,7 @@ using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Domain.Modules.Documents.Services;
 using SecureClientPortal.Backend.Domain.Shared.Modules.Documents;
 using System.Security.Claims;
 using System.Text.Json;
@@ -13,10 +14,12 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 public sealed class DocumentSlotService : IDocumentSlotService
 {
     private readonly PortalDbContext _db;
+    private readonly DocumentSubmissionDomainService _documentSubmissionDomainService;
 
     public DocumentSlotService(PortalDbContext db)
     {
         _db = db;
+        _documentSubmissionDomainService = new DocumentSubmissionDomainService();
     }
 
     public async Task<(bool forbidden, IReadOnlyList<DocumentSlot>? items)> GetByMonthlyPackIdAsync(string monthlyPackId, ClaimsPrincipal user, CancellationToken ct = default)
@@ -109,18 +112,23 @@ public sealed class DocumentSlotService : IDocumentSlotService
         var document = !slot.CurrentDocumentId.HasValue
             ? null
             : await _db.Documents.FirstOrDefaultAsync(x => x.Id == slot.CurrentDocumentId.Value && x.ClientId == slot.ClientId, ct);
-        var hasCurrentVersion = document is not null && await _db.DocumentVersions.AnyAsync(
-            x => x.DocumentId == document.Id && x.IsCurrentVersion,
-            ct);
+        var currentVersion = document is null
+            ? null
+            : await _db.DocumentVersions.FirstOrDefaultAsync(
+                x => x.DocumentId == document.Id && x.IsCurrentVersion,
+                ct);
 
-        if (document is null || !hasCurrentVersion)
+        if (document is null || currentVersion is null)
         {
             return (false, true, "The slot must have an uploaded current document version before it can be submitted.", null);
         }
 
         try
         {
-            slot.Submit(
+            _documentSubmissionDomainService.Submit(
+                document,
+                currentVersion,
+                slot,
                 user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required."),
                 DateTime.UtcNow);
         }
@@ -133,7 +141,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (pack is not null)
         {
             var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-            MonthlyPackStatusPolicy.Recalculate(pack, slots);
+            pack.RecalculateStatus(slots);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -196,7 +204,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (pack is not null)
         {
             var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-            MonthlyPackStatusPolicy.Recalculate(pack, slots);
+            pack.RecalculateStatus(slots);
         }
 
         await _db.SaveChangesAsync(ct);

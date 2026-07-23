@@ -137,6 +137,27 @@ public class Phase4ComplianceTests
         Assert.Contains("POPIA Compliance", names);
     }
 
+    [Fact]
+    public void ComplianceAssessmentDomainService_ComputesExpectedCountsAndScore()
+    {
+        var service = new ComplianceAssessmentDomainService();
+        var items = new[]
+        {
+            ComplianceItem.Create(Guid.NewGuid(), ClientAlphaId, TaxCategoryId, "Valid Tax", ComplianceItemStatus.Valid, AccountantUserId, ComplianceRiskLevel.High, null, null, DateTime.UtcNow.AddDays(10)),
+            ComplianceItem.Create(Guid.NewGuid(), ClientAlphaId, TaxCategoryId, "Expired VAT", ComplianceItemStatus.Expired, AccountantUserId, ComplianceRiskLevel.Critical, null, null, DateTime.UtcNow.AddDays(-1)),
+            ComplianceItem.Create(Guid.NewGuid(), ClientAlphaId, PopiaCategoryId, "Pending POPIA", ComplianceItemStatus.Pending, AccountantUserId, ComplianceRiskLevel.Medium, null, null, null)
+        };
+
+        var assessment = service.Assess(items);
+
+        Assert.Equal(3, assessment.Total);
+        Assert.Equal(1, assessment.Valid);
+        Assert.Equal(1, assessment.Expired);
+        Assert.Equal(1, assessment.Pending);
+        Assert.Equal(1, assessment.CriticalRisk);
+        Assert.Equal(33, assessment.ComplianceScore);
+    }
+
     private static ControllerContext BuildControllerContext(ClaimsPrincipal user)
     {
         return new ControllerContext

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Domain.Modules.Assignments;
 using SecureClientPortal.Backend.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -73,6 +74,21 @@ public class Phase5AdministrationTests
 
         client = await db.Clients.FirstAsync(x => x.Id == ClientAlphaId, TestContext.Current.CancellationToken);
         Assert.Equal(AccountantUserId, client.AssignedAccountantId);
+    }
+
+    [Fact]
+    public void AssignmentDomainService_RequiresReplacementBeforeRemovingPrimary()
+    {
+        var client = Client.Create(ClientAlphaId, "Alpha", "Pty Ltd", "A", "a@test.com", ClientStatus.Active);
+        client.AssignAccountant(AccountantUserId);
+        var assignment = ClientAssignment.Create(Guid.NewGuid(), AccountantUserId, ClientAlphaId);
+
+        var service = new AssignmentDomainService();
+
+        var error = Assert.Throws<DomainRuleException>(() =>
+            service.SelectReplacementPrimary(client, assignment, [assignment]));
+
+        Assert.Equal("Cannot remove the only primary accountant assignment for a client.", error.Message);
     }
 
     [Fact]

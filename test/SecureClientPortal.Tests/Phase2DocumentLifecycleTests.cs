@@ -183,6 +183,55 @@ public class Phase2DocumentLifecycleTests
     }
 
     [Fact]
+    public async Task ReuploadDecision_RefreshesExistingRequestInsteadOfCreatingDuplicate()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var storage = new InMemoryFileStorage();
+
+        var clientController = BuildDocumentsController(db, storage, BuildUser(ClientUserId, "client", [ClientAlphaId]));
+        var upload = await clientController.Upload(new UploadDocumentRequest
+        {
+            ClientId = ClientAlphaId,
+            MonthlyPackId = MonthlyPackId,
+            DocumentSlotId = SlotId,
+            DocumentType = "bank_statement",
+            File = BuildFormFile("bank-statement.pdf", "Initial upload")
+        }, TestContext.Current.CancellationToken);
+        Assert.IsType<CreatedResult>(upload);
+
+        var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
+        var accountantController = BuildDocumentsController(db, storage, BuildUser(AccountantUserId, "accountant"));
+
+        var first = await accountantController.RequestReupload(
+            document.Id.ToString(),
+            new RequestReuploadRequest("Please upload the missing pages.", null),
+            TestContext.Current.CancellationToken);
+        Assert.IsType<OkObjectResult>(first);
+
+        var request = await db.Requests.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("Please upload the missing pages.", request.Description);
+        Assert.Equal("waiting_on_client", request.Status);
+
+        request.MarkWaitingOnAccountant();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var second = await accountantController.RequestReupload(
+            document.Id.ToString(),
+            new RequestReuploadRequest("Please include the closing balance page too.", null),
+            TestContext.Current.CancellationToken);
+        Assert.IsType<OkObjectResult>(second);
+
+        var requests = await db.Requests
+            .Where(x => x.RelatedDocumentId == document.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Single(requests);
+        Assert.Equal("Please include the closing balance page too.", requests[0].Description);
+        Assert.Equal("waiting_on_client", requests[0].Status);
+    }
+
+    [Fact]
     public async Task ViewAndDownload_WriteDocumentAccessLogs()
     {
         await using var db = BuildDb();
@@ -217,6 +266,49 @@ public class Phase2DocumentLifecycleTests
             .ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains(accessLogs, x => x.Action == "view" && x.AccessedByRole == "accountant");
         Assert.Contains(accessLogs, x => x.Action == "download" && x.AccessedByRole == "accountant");
+    }
+
+    [Fact]
+    public void Document_File_RequiresAcceptedStatus()
+    {
+        var document = Document.CreateUploaded(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            MonthlyPackId,
+            "Bank Statement.pdf",
+            "bank_statement",
+            SlotId,
+            "application/pdf",
+            10,
+            "alpha/bank.pdf",
+            ClientUserId);
+
+        var error = Assert.Throws<DomainRuleException>(() => document.File(AccountantUserId));
+
+        Assert.Equal("Only accepted documents can be filed.", error.Message);
+    }
+
+    [Fact]
+    public void Document_CannotReturnToReviewAfterBeingFiled()
+    {
+        var document = Document.CreateUploaded(
+            Guid.NewGuid(),
+            ClientAlphaId,
+            MonthlyPackId,
+            "Bank Statement.pdf",
+            "bank_statement",
+            SlotId,
+            "application/pdf",
+            10,
+            "alpha/bank.pdf",
+            ClientUserId);
+
+        document.Accept();
+        document.File(AccountantUserId);
+
+        var error = Assert.Throws<DomainRuleException>(() => document.MarkUnderReview());
+
+        Assert.Equal("Only uploaded documents can enter review.", error.Message);
     }
 
     private static DocumentsController BuildDocumentsController(PortalDbContext db, IFileStorage storage, ClaimsPrincipal user)
