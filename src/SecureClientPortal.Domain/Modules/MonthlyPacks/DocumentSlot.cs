@@ -97,6 +97,11 @@ public class DocumentSlot
 
     public void MarkUnderReview()
     {
+        if (Status != DocumentSlotStatus.Submitted.ToStorageValue())
+        {
+            throw new DomainRuleException("Only submitted slots can move into review.");
+        }
+
         Status = DocumentSlotStatus.UnderReview.ToStorageValue();
         Touch();
     }
@@ -104,6 +109,11 @@ public class DocumentSlot
     public void Accept(Guid documentId)
     {
         if (documentId == Guid.Empty) throw new DomainRuleException("Document id is required.");
+        if (Status is not ("submitted" or "under_review"))
+        {
+            throw new DomainRuleException("Only submitted or in-review slots can be accepted.");
+        }
+
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.Accepted.ToStorageValue();
         RejectionReason = null;
@@ -113,6 +123,11 @@ public class DocumentSlot
     public void Reject(Guid documentId, string? reason = null)
     {
         if (documentId == Guid.Empty) throw new DomainRuleException("Document id is required.");
+        if (Status is not ("submitted" or "under_review"))
+        {
+            throw new DomainRuleException("Only submitted or in-review slots can be rejected.");
+        }
+
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.Rejected.ToStorageValue();
         RejectionReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
@@ -122,6 +137,11 @@ public class DocumentSlot
     public void RequestReupload(Guid documentId, string? reason = null)
     {
         if (documentId == Guid.Empty) throw new DomainRuleException("Document id is required.");
+        if (Status is not ("submitted" or "under_review"))
+        {
+            throw new DomainRuleException("Only submitted or in-review slots can request a re-upload.");
+        }
+
         CurrentDocumentId = documentId;
         Status = DocumentSlotStatus.ReuploadRequired.ToStorageValue();
         RejectionReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();

@@ -1,6 +1,12 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Common;
+using SecureClientPortal.Backend.Application.Contracts.Modules.Documents;
 using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Application.Contracts.Modules.ReviewQueue;
+using SecureClientPortal.Backend.Application.Modules.Documents;
 using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Application.Modules.ReviewQueue;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
@@ -15,11 +21,18 @@ public sealed class DocumentSlotService : IDocumentSlotService
 {
     private readonly PortalDbContext _db;
     private readonly DocumentSubmissionDomainService _documentSubmissionDomainService;
+    private readonly IDocumentWorkflowService _documentWorkflowService;
+    private readonly IReviewQueueService _reviewQueueService;
 
-    public DocumentSlotService(PortalDbContext db)
+    public DocumentSlotService(
+        PortalDbContext db,
+        IDocumentWorkflowService documentWorkflowService,
+        IReviewQueueService reviewQueueService)
     {
         _db = db;
         _documentSubmissionDomainService = new DocumentSubmissionDomainService();
+        _documentWorkflowService = documentWorkflowService;
+        _reviewQueueService = reviewQueueService;
     }
 
     public async Task<(bool forbidden, IReadOnlyList<DocumentSlot>? items)> GetByMonthlyPackIdAsync(string monthlyPackId, ClaimsPrincipal user, CancellationToken ct = default)
@@ -219,6 +232,149 @@ public sealed class DocumentSlotService : IDocumentSlotService
 
         return (false, false, null, slot);
     }
+
+    public async Task<ServiceResult<DocumentSlot>> UploadAsync(string slotId, UploadDocumentSlotRequest request, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var slot = await ResolveAccessibleSlotAsync(slotId, user, ct);
+        if (slot.Forbidden) return ServiceResult<DocumentSlot>.ForbiddenResult();
+        if (slot.NotFound || slot.Value is null) return ServiceResult<DocumentSlot>.NotFoundResult();
+
+        var uploadResult = await _documentWorkflowService.UploadAsync(new UploadDocumentRequest
+        {
+            ClientId = slot.Value.ClientId,
+            MonthlyPackId = slot.Value.MonthlyPackId,
+            DocumentSlotId = slot.Value.Id,
+            DocumentType = slot.Value.Category,
+            DocumentId = slot.Value.CurrentDocumentId,
+            File = request.File
+        }, user, ct);
+
+        if (uploadResult.Forbidden) return ServiceResult<DocumentSlot>.ForbiddenResult();
+        if (uploadResult.NotFound) return ServiceResult<DocumentSlot>.NotFoundResult(uploadResult.Error);
+        if (!string.IsNullOrWhiteSpace(uploadResult.Error))
+        {
+            return ServiceResult<DocumentSlot>.ErrorResult(uploadResult.Error, uploadResult.ErrorCode, uploadResult.StatusCode);
+        }
+
+        var refreshed = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == slot.Value.Id, ct);
+        return refreshed is null
+            ? ServiceResult<DocumentSlot>.NotFoundResult()
+            : ServiceResult<DocumentSlot>.Success(refreshed);
+    }
+
+    public async Task<ServiceResult<IReadOnlyList<object>>> GetVersionsAsync(string slotId, ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
+    {
+        var slot = await ResolveAccessibleSlotAsync(slotId, user, ct);
+        if (slot.Forbidden) return ServiceResult<IReadOnlyList<object>>.ForbiddenResult();
+        if (slot.NotFound || slot.Value is null) return ServiceResult<IReadOnlyList<object>>.NotFoundResult();
+        if (!slot.Value.CurrentDocumentId.HasValue)
+        {
+            return ServiceResult<IReadOnlyList<object>>.Success([]);
+        }
+
+        return await _documentWorkflowService.GetVersionsAsync(slot.Value.CurrentDocumentId.Value.ToString(), user, httpContext, ct);
+    }
+
+    public async Task<ServiceResult<DocumentSlotWorkspaceResponse>> GetWorkspaceAsync(string slotId, ClaimsPrincipal user, HttpContext httpContext, CancellationToken ct = default)
+    {
+        var slot = await ResolveAccessibleSlotAsync(slotId, user, ct);
+        if (slot.Forbidden) return ServiceResult<DocumentSlotWorkspaceResponse>.ForbiddenResult();
+        if (slot.NotFound || slot.Value is null) return ServiceResult<DocumentSlotWorkspaceResponse>.NotFoundResult();
+        if (!slot.Value.CurrentDocumentId.HasValue)
+        {
+            return ServiceResult<DocumentSlotWorkspaceResponse>.ErrorResult("The slot does not have an uploaded document yet.");
+        }
+
+        var workspace = await _reviewQueueService.GetWorkspaceAsync(slot.Value.CurrentDocumentId.Value.ToString(), user, httpContext, ct);
+        if (workspace.Forbidden) return ServiceResult<DocumentSlotWorkspaceResponse>.ForbiddenResult();
+        if (workspace.NotFound) return ServiceResult<DocumentSlotWorkspaceResponse>.NotFoundResult(workspace.Error);
+        if (!string.IsNullOrWhiteSpace(workspace.Error))
+        {
+            return ServiceResult<DocumentSlotWorkspaceResponse>.ErrorResult(workspace.Error, workspace.ErrorCode, workspace.StatusCode);
+        }
+
+        var refreshed = await _db.DocumentSlots.FirstAsync(x => x.Id == slot.Value.Id, ct);
+        return ServiceResult<DocumentSlotWorkspaceResponse>.Success(new DocumentSlotWorkspaceResponse(
+            Map(refreshed),
+            workspace.Value!));
+    }
+
+    public Task<ServiceResult<object>> StartReviewAsync(string slotId, StartDocumentSlotReviewRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
+        ReviewSlotAsync(slotId, new AddReviewDecisionRequest("under_review", null, request.InternalNote), user, ct);
+
+    public Task<ServiceResult<object>> ApproveAsync(string slotId, ApproveDocumentSlotRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
+        ReviewSlotAsync(slotId, new AddReviewDecisionRequest("accepted", null, request.InternalNote), user, ct);
+
+    public Task<ServiceResult<object>> RejectAsync(string slotId, RejectDocumentSlotRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
+        ReviewSlotAsync(slotId, new AddReviewDecisionRequest("rejected", request.Reason, request.InternalNote), user, ct);
+
+    public async Task<ServiceResult<object>> RequestReuploadAsync(string slotId, RequestDocumentSlotReuploadRequest request, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var slot = await ResolveAccessibleSlotAsync(slotId, user, ct);
+        if (slot.Forbidden) return ServiceResult<object>.ForbiddenResult();
+        if (slot.NotFound || slot.Value is null) return ServiceResult<object>.NotFoundResult();
+        if (!slot.Value.CurrentDocumentId.HasValue)
+        {
+            return ServiceResult<object>.ErrorResult("The slot does not have an uploaded document yet.");
+        }
+
+        return await _documentWorkflowService.RequestReuploadAsync(
+            slot.Value.CurrentDocumentId.Value.ToString(),
+            new RequestReuploadRequest(request.Reason, request.InternalNote),
+            user,
+            ct);
+    }
+
+    private async Task<ServiceResult<object>> ReviewSlotAsync(string slotId, AddReviewDecisionRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        var slot = await ResolveAccessibleSlotAsync(slotId, user, ct);
+        if (slot.Forbidden) return ServiceResult<object>.ForbiddenResult();
+        if (slot.NotFound || slot.Value is null) return ServiceResult<object>.NotFoundResult();
+        if (!slot.Value.CurrentDocumentId.HasValue)
+        {
+            return ServiceResult<object>.ErrorResult("The slot does not have an uploaded document yet.");
+        }
+
+        return await _documentWorkflowService.ReviewAsync(slot.Value.CurrentDocumentId.Value.ToString(), request, user, ct);
+    }
+
+    private async Task<ServiceResult<DocumentSlot>> ResolveAccessibleSlotAsync(string slotId, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!Guid.TryParse(slotId, out var documentSlotId))
+        {
+            return ServiceResult<DocumentSlot>.NotFoundResult();
+        }
+
+        var slot = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId, ct);
+        if (slot is null)
+        {
+            return ServiceResult<DocumentSlot>.NotFoundResult();
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        return allowedClientIds.Contains(slot.ClientId)
+            ? ServiceResult<DocumentSlot>.Success(slot)
+            : ServiceResult<DocumentSlot>.ForbiddenResult();
+    }
+
+    private static DocumentSlotResponse Map(DocumentSlot slot) =>
+        new(
+            slot.Id,
+            slot.MonthlyPackId,
+            slot.ClientId,
+            slot.Category,
+            slot.Label,
+            slot.IsRequired,
+            slot.Status,
+            slot.CanCurrentlyBeSubmitted,
+            slot.CurrentDocumentId,
+            slot.DueDateUtc,
+            slot.SubmittedAtUtc,
+            slot.SubmittedByUserId,
+            slot.ReviewStatus,
+            slot.RejectionReason,
+            slot.CreatedAtUtc,
+            slot.UpdatedAtUtc);
 }
 
 

@@ -58,7 +58,7 @@ public class MvpBackendAcceptanceTests
         var createPackCreated = Assert.IsType<CreatedResult>(createPackResult.Result);
         var pack = Assert.IsType<MonthlyPackResponse>(createPackCreated.Value);
 
-        var accountantSlots = new DocumentSlotsController(new DocumentSlotService(db))
+        var accountantSlots = new DocumentSlotsController(new DocumentSlotService(db, workflow, new ReviewQueueService(db)))
         {
             ControllerContext = BuildControllerContext(BuildUser(AccountantUserId, "accountant"))
         };
@@ -93,7 +93,7 @@ public class MvpBackendAcceptanceTests
         var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, document.CurrentVersionNumber);
 
-        var clientSlots = new DocumentSlotsController(new DocumentSlotService(db))
+        var clientSlots = new DocumentSlotsController(new DocumentSlotService(db, workflow, new ReviewQueueService(db)))
         {
             ControllerContext = BuildControllerContext(BuildUser(ClientUserId, "client", [ClientId]))
         };

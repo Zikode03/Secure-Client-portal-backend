@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
@@ -77,6 +79,54 @@ public class DocumentSlotsController : ControllerBase
         return Ok(Map(result.slot));
     }
 
+    [HttpPost("{slotId}/upload")]
+    [RequestSizeLimit(100_000_000)]
+    public async Task<IActionResult> Upload(string slotId, [FromForm] UploadDocumentSlotRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.UploadAsync(slotId, request, User, ct), Map));
+    }
+
+    [HttpGet("{slotId}/versions")]
+    public async Task<IActionResult> GetVersions(string slotId, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.GetVersionsAsync(slotId, User, HttpContext, ct)));
+    }
+
+    [HttpGet("{slotId}/workspace")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> GetWorkspace(string slotId, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.GetWorkspaceAsync(slotId, User, HttpContext, ct)));
+    }
+
+    [HttpPost("{slotId}/start-review")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> StartReview(string slotId, [FromBody] StartDocumentSlotReviewRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.StartReviewAsync(slotId, request, User, ct)));
+    }
+
+    [HttpPost("{slotId}/approve")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> Approve(string slotId, [FromBody] ApproveDocumentSlotRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.ApproveAsync(slotId, request, User, ct)));
+    }
+
+    [HttpPost("{slotId}/reject")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> Reject(string slotId, [FromBody] RejectDocumentSlotRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.RejectAsync(slotId, request, User, ct)));
+    }
+
+    [HttpPost("{slotId}/request-reupload")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> RequestReupload(string slotId, [FromBody] RequestDocumentSlotReuploadRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _documentSlotService.RequestReuploadAsync(slotId, request, User, ct)));
+    }
+
     [HttpPost("{slotId}/not-applicable")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<ActionResult<DocumentSlotResponse>> MarkNotApplicable(string slotId, CancellationToken ct)
@@ -98,6 +148,36 @@ public class DocumentSlotsController : ControllerBase
         }
 
         return Ok(Map(result.slot));
+    }
+
+    private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (AppValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message, errors = ex.Errors });
+        }
+    }
+
+    private IActionResult FromResult<T>(ServiceResult<T> result)
+    {
+        if (result.Forbidden) return Forbid();
+        if (result.NotFound) return string.IsNullOrWhiteSpace(result.Error) ? NotFound() : NotFound(new { error = result.Error });
+        if (result.Unauthorized) return StatusCode(result.StatusCode ?? StatusCodes.Status401Unauthorized, new { code = result.ErrorCode, message = result.Error });
+        if (!string.IsNullOrWhiteSpace(result.Error)) return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });
+        return Ok(result.Value);
+    }
+
+    private IActionResult FromResult<TValue, TResponse>(ServiceResult<TValue> result, Func<TValue, TResponse> map)
+    {
+        if (result.Forbidden) return Forbid();
+        if (result.NotFound) return string.IsNullOrWhiteSpace(result.Error) ? NotFound() : NotFound(new { error = result.Error });
+        if (result.Unauthorized) return StatusCode(result.StatusCode ?? StatusCodes.Status401Unauthorized, new { code = result.ErrorCode, message = result.Error });
+        if (!string.IsNullOrWhiteSpace(result.Error)) return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });
+        return Ok(map(result.Value!));
     }
 
     private static DocumentSlotResponse Map(DocumentSlot slot) =>

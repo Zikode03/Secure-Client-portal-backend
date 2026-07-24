@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Http;
+using SecureClientPortal.Backend.Application.Contracts.Modules.ReviewQueue;
+
 namespace SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
 
 public record CreateDocumentSlotRequest(
@@ -6,6 +9,16 @@ public record CreateDocumentSlotRequest(
     string Label,
     bool IsRequired,
     DateTime? DueDateUtc);
+
+public class UploadDocumentSlotRequest
+{
+    public IFormFile File { get; set; } = default!;
+}
+
+public record StartDocumentSlotReviewRequest(string? InternalNote);
+public record ApproveDocumentSlotRequest(string? InternalNote);
+public record RejectDocumentSlotRequest(string Reason, string? InternalNote);
+public record RequestDocumentSlotReuploadRequest(string Reason, string? InternalNote);
 
 public record DocumentSlotResponse(
     Guid Id,
@@ -24,3 +37,7 @@ public record DocumentSlotResponse(
     string? RejectionReason,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
+
+public record DocumentSlotWorkspaceResponse(
+    DocumentSlotResponse Slot,
+    ReviewQueueWorkspaceResponse Workspace);

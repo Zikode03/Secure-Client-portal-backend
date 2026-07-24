@@ -414,16 +414,52 @@ public static class SeedData
                 if (slot.CurrentDocumentId.HasValue && slot.SubmittedByUserId.HasValue) slot.Submit(slot.SubmittedByUserId.Value, slot.SubmittedAtUtc); else if (slot.CurrentDocumentId.HasValue) slot.MarkDraft(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
                 break;
             case "under_review":
-                slot.MarkUnderReview();
+                if (slot.CurrentDocumentId.HasValue)
+                {
+                    slot.MarkDraft(slot.CurrentDocumentId.Value);
+                    slot.Submit(slot.SubmittedByUserId ?? SeedGuid("u_acc_001"), slot.SubmittedAtUtc);
+                    slot.MarkUnderReview();
+                }
+                else
+                {
+                    slot.MarkNotStarted();
+                }
                 break;
             case "accepted":
-                if (slot.CurrentDocumentId.HasValue) slot.Accept(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
+                if (slot.CurrentDocumentId.HasValue)
+                {
+                    slot.MarkDraft(slot.CurrentDocumentId.Value);
+                    slot.Submit(slot.SubmittedByUserId ?? SeedGuid("u_acc_001"), slot.SubmittedAtUtc);
+                    slot.Accept(slot.CurrentDocumentId.Value);
+                }
+                else
+                {
+                    slot.MarkNotStarted();
+                }
                 break;
             case "rejected":
-                if (slot.CurrentDocumentId.HasValue) slot.Reject(slot.CurrentDocumentId.Value); else slot.MarkNotStarted();
+                if (slot.CurrentDocumentId.HasValue)
+                {
+                    slot.MarkDraft(slot.CurrentDocumentId.Value);
+                    slot.Submit(slot.SubmittedByUserId ?? SeedGuid("u_acc_001"), slot.SubmittedAtUtc);
+                    slot.Reject(slot.CurrentDocumentId.Value);
+                }
+                else
+                {
+                    slot.MarkNotStarted();
+                }
                 break;
             case "reupload_required":
-                if (slot.CurrentDocumentId.HasValue) slot.RequestReupload(slot.CurrentDocumentId.Value, slot.RejectionReason); else slot.MarkNotStarted();
+                if (slot.CurrentDocumentId.HasValue)
+                {
+                    slot.MarkDraft(slot.CurrentDocumentId.Value);
+                    slot.Submit(slot.SubmittedByUserId ?? SeedGuid("u_acc_001"), slot.SubmittedAtUtc);
+                    slot.RequestReupload(slot.CurrentDocumentId.Value, slot.RejectionReason);
+                }
+                else
+                {
+                    slot.MarkNotStarted();
+                }
                 break;
             case "not_applicable":
                 slot.MarkNotApplicable();
