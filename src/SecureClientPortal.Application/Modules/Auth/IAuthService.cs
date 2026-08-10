@@ -13,4 +13,9 @@ public interface IAuthService
     Task<ServiceResult<object>> ChangePasswordAsync(ChangePasswordRequest request, System.Security.Claims.ClaimsPrincipal actor, HttpContext httpContext, CancellationToken ct = default);
     Task LogoutAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
     Task<ServiceResult<object>> MeAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> GetSecuritySettingsAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> UpdateSecuritySettingsAsync(UpdateSecuritySettingsRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> GetSessionsAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> RevokeSessionAsync(Guid sessionId, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> RevokeOtherSessionsAsync(System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
 }

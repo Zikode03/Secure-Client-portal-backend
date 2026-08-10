@@ -1,6 +1,7 @@
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Compliance;
 using SecureClientPortal.Backend.Models;
+using SecureClientPortal.Backend.Application.Modules.Documents;
 
 namespace SecureClientPortal.Backend.Application.Modules.Compliance;
 
@@ -17,4 +18,9 @@ public interface IComplianceService
     Task<ServiceResult<ComplianceReminder>> CreateReminderAsync(CreateComplianceReminderRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<ComplianceReminder>> UpdateReminderStatusAsync(string id, UpdateComplianceReminderStatusRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<object>> GetSummaryReportAsync(System.Security.Claims.ClaimsPrincipal user, string? clientId = null, CancellationToken ct = default);
+    Task<ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>> GetHistoryAsync(System.Security.Claims.ClaimsPrincipal user, string? clientId = null, string? itemId = null, int limit = 200, CancellationToken ct = default);
+    Task<ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>> GetEvidenceVersionsAsync(string itemId, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<ComplianceEvidenceVersionResponse>> UploadEvidenceAsync(string itemId, UploadComplianceEvidenceRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<(StoredFileContent Content, string FileName)>> DownloadEvidenceAsync(string versionId, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<RequestItem>> CreateWorkflowRequestAsync(string itemId, CreateComplianceWorkflowRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default);
 }

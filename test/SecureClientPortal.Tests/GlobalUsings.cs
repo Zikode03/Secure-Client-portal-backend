@@ -20,7 +20,9 @@ global using SecureClientPortal.Backend.Application.Contracts.Modules.Compliance
 global using SecureClientPortal.Backend.Application.Contracts.Modules.Documents;
 global using SecureClientPortal.Backend.Application.Contracts.Modules.FirmManagement;
 global using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
+global using SecureClientPortal.Backend.Application.Contracts.Modules.Notifications;
 global using SecureClientPortal.Backend.Application.Contracts.Modules.Requests;
+global using SecureClientPortal.Backend.Application.Contracts.Modules.Reports;
 global using SecureClientPortal.Backend.Application.Contracts.Modules.ReviewQueue;
 global using SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles;
 global using SecureClientPortal.Backend.Application.Modules.Assignments;

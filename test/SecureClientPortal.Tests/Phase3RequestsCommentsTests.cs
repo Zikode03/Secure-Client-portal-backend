@@ -287,7 +287,7 @@ public class Phase3RequestsCommentsTests
             AccountantUserId,
             RequestStatus.Open,
             null);
-        var actor = new WorkflowActorContext(ClientUserId, "client");
+        var actor = WorkflowActorContext.Create(ClientUserId, "client");
 
         var error = Assert.Throws<DomainRuleException>(() =>
             request.ApplyManualStatusChange(actor, RequestStatus.Resolved, ClientUserId));

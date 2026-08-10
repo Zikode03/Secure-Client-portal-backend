@@ -5,12 +5,15 @@ using SecureClientPortal.Backend.Application.Contracts.Modules.Documents;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Requests;
 using SecureClientPortal.Backend.Application.Modules.AuditLogs;
 using SecureClientPortal.Backend.Application.Modules.Documents;
+using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Application.Modules.Requests;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Infrastructure.Common.Events;
 using SecureClientPortal.Backend.Infrastructure.Modules.Notifications.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application;
 using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application.Events;
+using SecureClientPortal.Backend.Infrastructure.Modules.ReviewQueue;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 
@@ -19,19 +22,32 @@ public sealed class RequestService : IRequestService
     private readonly IRequestQueryService _queries;
     private readonly IRequestCommandService _commands;
     private readonly IDocumentWorkflowService? _documentWorkflowService;
+    private readonly IDocumentSlotService? _documentSlotService;
 
-    public RequestService(IRequestQueryService queries, IRequestCommandService commands, IDocumentWorkflowService? documentWorkflowService = null)
+    public RequestService(
+        IRequestQueryService queries,
+        IRequestCommandService commands,
+        IDocumentWorkflowService? documentWorkflowService = null,
+        IDocumentSlotService? documentSlotService = null)
     {
         _queries = queries;
         _commands = commands;
         _documentWorkflowService = documentWorkflowService;
+        _documentSlotService = documentSlotService;
     }
 
-    public static RequestService CreateForTests(PortalDbContext db, IDocumentWorkflowService? documentWorkflowService = null) =>
-        new(
+    public static RequestService CreateForTests(PortalDbContext db, IDocumentWorkflowService? documentWorkflowService = null)
+    {
+        var documentSlotService = documentWorkflowService is null
+            ? null
+            : new DocumentSlotService(db, documentWorkflowService, new ReviewQueueService(db));
+
+        return new RequestService(
             new RequestQueryService(db, db),
             new RequestCommandService(db, db, new CurrentUserContextFactory(), CreateStandaloneDispatcher(db)),
-            documentWorkflowService);
+            documentWorkflowService,
+            documentSlotService);
+    }
 
     public Task<(bool forbidden, IReadOnlyList<RequestItem> results)> GetAllAsync(System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default) =>
         _queries.GetAllAsync(user, ct);
@@ -120,6 +136,29 @@ public sealed class RequestService : IRequestService
         if (!string.IsNullOrWhiteSpace(uploadResult.Error))
         {
             return ServiceResult<RequestDocumentUploadResponse>.ErrorResult(uploadResult.Error, uploadResult.ErrorCode, uploadResult.StatusCode ?? 400);
+        }
+
+        if (!relatedDocument.DocumentSlotId.HasValue || _documentSlotService is null)
+        {
+            return ServiceResult<RequestDocumentUploadResponse>.ErrorResult(
+                "The corrected document is not linked to a submittable document slot.");
+        }
+
+        var submitResult = await _documentSlotService.SubmitAsync(
+            relatedDocument.DocumentSlotId.Value.ToString(),
+            user,
+            ct);
+        if (submitResult.forbidden)
+        {
+            return ServiceResult<RequestDocumentUploadResponse>.ForbiddenResult();
+        }
+
+        if (submitResult.slot is null)
+        {
+            return submitResult.invalid
+                ? ServiceResult<RequestDocumentUploadResponse>.ErrorResult(
+                    submitResult.error ?? "The corrected document could not be submitted for review.")
+                : ServiceResult<RequestDocumentUploadResponse>.NotFoundResult();
         }
 
         var requestUpdateResult = await _commands.MarkDocumentUploadedAsync(id, request.Message, user, ct);

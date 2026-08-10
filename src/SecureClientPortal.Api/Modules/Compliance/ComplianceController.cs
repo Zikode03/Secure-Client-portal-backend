@@ -91,6 +91,53 @@ public class ComplianceController : ControllerBase
         return await ExecuteAsync(async () => FromResult(await _service.GetSummaryReportAsync(User, clientId, ct)));
     }
 
+    [HttpGet("history")]
+    public async Task<IActionResult> GetHistory(
+        [FromQuery] string? clientId = null,
+        [FromQuery] string? itemId = null,
+        [FromQuery] int limit = 200,
+        CancellationToken ct = default)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.GetHistoryAsync(User, clientId, itemId, limit, ct)));
+    }
+
+    [HttpGet("items/{id}/evidence")]
+    public async Task<IActionResult> GetEvidenceVersions(string id, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.GetEvidenceVersionsAsync(id, User, ct)));
+    }
+
+    [HttpPost("items/{id}/evidence")]
+    [RequestSizeLimit(100_000_000)]
+    public async Task<IActionResult> UploadEvidence(string id, [FromForm] UploadComplianceEvidenceRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.UploadEvidenceAsync(id, request, User, ct)));
+    }
+
+    [HttpGet("evidence/{versionId:guid}/download")]
+    public async Task<IActionResult> DownloadEvidence(Guid versionId, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            var result = await _service.DownloadEvidenceAsync(versionId.ToString(), User, ct);
+            if (result.Forbidden) return Forbid();
+            if (result.NotFound) return NotFound(new { error = result.Error ?? "Evidence file was not found." });
+            if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });
+            }
+
+            return File(result.Value!.Content.Stream, result.Value.Content.ContentType, result.Value.FileName);
+        });
+    }
+
+    [HttpPost("items/{id}/request")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> CreateWorkflowRequest(string id, [FromBody] CreateComplianceWorkflowRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.CreateWorkflowRequestAsync(id, request, User, ct)));
+    }
+
     private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> action)
     {
         try

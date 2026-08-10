@@ -98,6 +98,18 @@ public class ClientsController : ControllerBase
         return Ok(result.updated);
     }
 
+    [HttpGet("{id}/profile")]
+    public async Task<IActionResult> GetBusinessProfile(string id, CancellationToken ct)
+    {
+        return FromResult(await _clientService.GetBusinessProfileAsync(id, User, ct));
+    }
+
+    [HttpPut("{id}/profile")]
+    public async Task<IActionResult> UpdateBusinessProfile(string id, [FromBody] UpdateClientBusinessProfileRequest request, CancellationToken ct)
+    {
+        return FromResult(await _clientService.UpdateBusinessProfileAsync(id, request, User, ct));
+    }
+
     [HttpDelete("{id}")]
     [Authorize(Policy = "AdminOnly")]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
@@ -109,5 +121,17 @@ public class ClientsController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    private IActionResult FromResult<T>(SecureClientPortal.Backend.Application.Common.ServiceResult<T> result)
+    {
+        if (result.Forbidden) return Forbid();
+        if (result.NotFound) return NotFound();
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });
+        }
+
+        return Ok(result.Value);
     }
 }

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SecureClientPortal.Backend.Application.Common;
+using SecureClientPortal.Backend.Application.Contracts.Modules.Notifications;
 using SecureClientPortal.Backend.Application.Modules.Notifications;
 using SecureClientPortal.Backend.Models;
 
@@ -61,5 +63,28 @@ public class NotificationsController : ControllerBase
         }
 
         return Ok(new { updated = result.updated });
+    }
+
+    [HttpGet("preferences")]
+    public async Task<IActionResult> GetPreferences(CancellationToken ct)
+    {
+        return FromResult(await _notificationService.GetPreferencesAsync(User, ct));
+    }
+
+    [HttpPut("preferences")]
+    public async Task<IActionResult> UpdatePreferences([FromBody] UpdateNotificationPreferenceRequest request, CancellationToken ct)
+    {
+        return FromResult(await _notificationService.UpdatePreferencesAsync(request, User, ct));
+    }
+
+    private IActionResult FromResult<T>(ServiceResult<T> result)
+    {
+        if (result.Unauthorized) return Unauthorized();
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });
+        }
+
+        return Ok(result.Value);
     }
 }

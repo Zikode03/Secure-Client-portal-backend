@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Common;
+using SecureClientPortal.Backend.Application.Contracts.Modules.Notifications;
 using SecureClientPortal.Backend.Application.Modules.Notifications;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
@@ -93,4 +95,95 @@ public sealed class NotificationService : INotificationService
         await _db.WriteAuditLogAsync(user, "notification.read_all", "notification_batch", userId.Value, null, JsonSerializer.Serialize(new { count = items.Count }), ct);
         return (false, items.Count);
     }
+
+    public async Task<ServiceResult<NotificationPreferenceResponse>> GetPreferencesAsync(ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var userId = user.GetUserId();
+        if (!userId.HasValue || userId.Value == Guid.Empty)
+        {
+            return ServiceResult<NotificationPreferenceResponse>.UnauthorizedResult();
+        }
+
+        var preference = await _db.NotificationPreferences.FirstOrDefaultAsync(x => x.UserId == userId.Value, ct);
+        return ServiceResult<NotificationPreferenceResponse>.Success(
+            preference is null ? DefaultPreferences() : MapPreferences(preference));
+    }
+
+    public async Task<ServiceResult<NotificationPreferenceResponse>> UpdatePreferencesAsync(
+        UpdateNotificationPreferenceRequest request,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var userId = user.GetUserId();
+        if (!userId.HasValue || userId.Value == Guid.Empty)
+        {
+            return ServiceResult<NotificationPreferenceResponse>.UnauthorizedResult();
+        }
+
+        var preference = await _db.NotificationPreferences.FirstOrDefaultAsync(x => x.UserId == userId.Value, ct);
+        var isNew = preference is null;
+        if (preference is null)
+        {
+            preference = NotificationPreference.Create(userId.Value);
+        }
+
+        try
+        {
+            preference.Update(
+                request.DeadlineAlerts,
+                request.RejectionAlerts,
+                request.ComplianceAlerts,
+                request.WeeklySummary,
+                request.BrowserAlerts,
+                request.EmailReminders,
+                request.EscalationAlerts,
+                request.QuietHours);
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<NotificationPreferenceResponse>.ErrorResult(ex.Message);
+        }
+
+        if (isNew)
+        {
+            _db.NotificationPreferences.Add(preference);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "notification.preferences_updated",
+            "notification_preference",
+            userId.Value,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                preference.DeadlineAlerts,
+                preference.RejectionAlerts,
+                preference.ComplianceAlerts,
+                preference.WeeklySummary,
+                preference.BrowserAlerts,
+                preference.EmailReminders,
+                preference.EscalationAlerts,
+                preference.QuietHours
+            }),
+            ct);
+
+        return ServiceResult<NotificationPreferenceResponse>.Success(MapPreferences(preference));
+    }
+
+    private static NotificationPreferenceResponse DefaultPreferences() =>
+        new(true, true, true, false, false, true, true, "22:00-06:00", null);
+
+    private static NotificationPreferenceResponse MapPreferences(NotificationPreference preference) =>
+        new(
+            preference.DeadlineAlerts,
+            preference.RejectionAlerts,
+            preference.ComplianceAlerts,
+            preference.WeeklySummary,
+            preference.BrowserAlerts,
+            preference.EmailReminders,
+            preference.EscalationAlerts,
+            preference.QuietHours,
+            preference.UpdatedAtUtc);
 }

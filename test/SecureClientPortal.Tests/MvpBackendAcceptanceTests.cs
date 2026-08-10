@@ -161,6 +161,8 @@ public class MvpBackendAcceptanceTests
         var correctionUpload = Assert.IsType<RequestDocumentUploadResponse>(correctionUploadOk.Value);
         Assert.Equal("waiting_on_accountant", correctionUpload.Workspace.Request.Status);
         Assert.Equal(2, correctionUpload.Workspace.RelatedDocument!.CurrentVersionNumber);
+        var resubmittedBankSlot = await db.DocumentSlots.SingleAsync(x => x.Id == bankSlot.Id, TestContext.Current.CancellationToken);
+        Assert.Equal("submitted", resubmittedBankSlot.Status);
 
         var approveResult = await reviewQueue.Review(
             document.Id.ToString(),

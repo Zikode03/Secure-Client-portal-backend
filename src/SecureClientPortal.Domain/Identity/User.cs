@@ -69,6 +69,16 @@ public class User
     {
         if (string.IsNullOrWhiteSpace(passwordHash)) throw new DomainRuleException("Password hash is required.");
         PasswordHash = passwordHash;
+        SecurityJson = UserSecurityProfile.RecordPasswordChanged(SecurityJson, DateTime.UtcNow);
+        Touch();
+    }
+
+    public void SetRecoveryEmail(string? recoveryEmail)
+    {
+        string? normalizedEmail = string.IsNullOrWhiteSpace(recoveryEmail)
+            ? null
+            : EmailAddress.Parse(recoveryEmail).Value;
+        SecurityJson = UserSecurityProfile.SetRecoveryEmail(SecurityJson, normalizedEmail);
         Touch();
     }
 

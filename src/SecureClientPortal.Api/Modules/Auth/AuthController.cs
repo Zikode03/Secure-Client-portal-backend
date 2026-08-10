@@ -74,6 +74,44 @@ public class AuthController : ControllerBase
         return await ExecuteAsync(async () => FromResult(await _service.MeAsync(User, ct)));
     }
 
+    [HttpGet("security")]
+    [Authorize]
+    public async Task<IActionResult> Security(CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.GetSecuritySettingsAsync(User, ct)));
+    }
+
+    [HttpPut("security")]
+    [Authorize]
+    [EnableRateLimiting("auth-account")]
+    public async Task<IActionResult> UpdateSecurity([FromBody] UpdateSecuritySettingsRequest request, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.UpdateSecuritySettingsAsync(request, User, ct)));
+    }
+
+    [HttpGet("sessions")]
+    [Authorize]
+    public async Task<IActionResult> Sessions(CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.GetSessionsAsync(User, ct)));
+    }
+
+    [HttpDelete("sessions/{sessionId:guid}")]
+    [Authorize]
+    [EnableRateLimiting("auth-account")]
+    public async Task<IActionResult> RevokeSession(Guid sessionId, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.RevokeSessionAsync(sessionId, User, ct)));
+    }
+
+    [HttpPost("sessions/revoke-others")]
+    [Authorize]
+    [EnableRateLimiting("auth-account")]
+    public async Task<IActionResult> RevokeOtherSessions(CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _service.RevokeOtherSessionsAsync(User, ct)));
+    }
+
     private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> action)
     {
         try

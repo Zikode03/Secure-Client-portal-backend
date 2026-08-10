@@ -10,6 +10,8 @@ public static class UserSecurityProfile
     private const string OneTimeTokenHashKey = "oneTimeTokenHash";
     private const string OneTimeTokenPurposeKey = "oneTimeTokenPurpose";
     private const string OneTimeTokenExpiresAtUtcKey = "oneTimeTokenExpiresAtUtc";
+    private const string PasswordLastChangedAtUtcKey = "passwordLastChangedAtUtc";
+    private const string RecoveryEmailKey = "recoveryEmail";
 
     public static string GetStatus(string? securityJson)
     {
@@ -61,6 +63,39 @@ public static class UserSecurityProfile
         node.Remove(OneTimeTokenHashKey);
         node.Remove(OneTimeTokenPurposeKey);
         node.Remove(OneTimeTokenExpiresAtUtcKey);
+        return node.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    public static DateTime? GetPasswordLastChangedAtUtc(string? securityJson)
+    {
+        var rawValue = ParseObject(securityJson)[PasswordLastChangedAtUtcKey]?.GetValue<string>();
+        return DateTime.TryParse(rawValue, out var value) ? value.ToUniversalTime() : null;
+    }
+
+    public static string RecordPasswordChanged(string? securityJson, DateTime changedAtUtc)
+    {
+        var node = ParseObject(securityJson);
+        node[PasswordLastChangedAtUtcKey] = changedAtUtc.ToUniversalTime().ToString("O");
+        return node.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    public static string? GetRecoveryEmail(string? securityJson)
+    {
+        return ParseObject(securityJson)[RecoveryEmailKey]?.GetValue<string>();
+    }
+
+    public static string SetRecoveryEmail(string? securityJson, string? recoveryEmail)
+    {
+        var node = ParseObject(securityJson);
+        if (string.IsNullOrWhiteSpace(recoveryEmail))
+        {
+            node.Remove(RecoveryEmailKey);
+        }
+        else
+        {
+            node[RecoveryEmailKey] = recoveryEmail.Trim().ToLowerInvariant();
+        }
+
         return node.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
     }
 

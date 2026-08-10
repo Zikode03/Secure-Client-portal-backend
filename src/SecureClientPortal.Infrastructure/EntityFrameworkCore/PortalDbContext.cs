@@ -27,6 +27,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<ReviewDecision> ReviewDecisions => Set<ReviewDecision>();
     public DbSet<RequestComment> RequestComments => Set<RequestComment>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RoleDefinition> RoleDefinitions => Set<RoleDefinition>();
     public DbSet<Permission> Permissions => Set<Permission>();
@@ -36,6 +37,8 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
     public DbSet<ComplianceItem> ComplianceItems => Set<ComplianceItem>();
     public DbSet<ComplianceReminder> ComplianceReminders => Set<ComplianceReminder>();
+    public DbSet<ComplianceEvidenceVersion> ComplianceEvidenceVersions => Set<ComplianceEvidenceVersion>();
+    public DbSet<ReportSchedule> ReportSchedules => Set<ReportSchedule>();
     public DbSet<RequiredDocumentTemplate> RequiredDocumentTemplates => Set<RequiredDocumentTemplate>();
     public DbSet<MonthlyPackTemplate> MonthlyPackTemplates => Set<MonthlyPackTemplate>();
     public DbSet<MonthlyPackTemplateItem> MonthlyPackTemplateItems => Set<MonthlyPackTemplateItem>();
@@ -78,6 +81,16 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.AssignedAccountantId).IsRequired();
             entity.Property(x => x.PrimaryContact).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
+            entity.Property(x => x.TradingName).HasMaxLength(250).IsRequired();
+            entity.Property(x => x.RegistrationNumber).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.TaxNumber).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.VatNumber).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Phone).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.AddressLine).HasMaxLength(300).IsRequired();
+            entity.Property(x => x.City).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Country).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Industry).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.PrimaryContactJobTitle).HasMaxLength(160).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => x.AssignedAccountantId);
@@ -409,6 +422,20 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.HasIndex(x => new { x.UserId, x.RevokedAtUtc, x.ExpiresAtUtc });
         });
 
+        modelBuilder.Entity<NotificationPreference>(entity =>
+        {
+            entity.ToTable("AppNotificationPreferences");
+            entity.HasKey(x => x.UserId);
+            entity.Property(x => x.UserId).ValueGeneratedNever();
+            entity.Property(x => x.QuietHours).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.HasOne<User>()
+                .WithOne()
+                .HasForeignKey<NotificationPreference>(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<UserAccessToken>(entity =>
         {
             entity.ToTable("AppUserAccessTokens");
@@ -491,6 +518,49 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
                 table.HasCheckConstraint(
                     "CK_AppComplianceReminders_Status",
                     "Status IN ('pending','sent','dismissed')");
+            });
+        });
+
+        modelBuilder.Entity<ComplianceEvidenceVersion>(entity =>
+        {
+            entity.ToTable("AppComplianceEvidenceVersions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id);
+            entity.Property(x => x.ComplianceItemId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.VersionNumber).IsRequired();
+            entity.Property(x => x.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(x => x.ContentType).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.StorageKey).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.UploadedByUserId).IsRequired();
+            entity.Property(x => x.Note).HasMaxLength(2000);
+            entity.Property(x => x.UploadedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.HasIndex(x => new { x.ComplianceItemId, x.VersionNumber }).IsUnique();
+            entity.HasIndex(x => new { x.ClientId, x.UploadedAtUtc });
+            entity.HasOne<ComplianceItem>()
+                .WithMany()
+                .HasForeignKey(x => x.ComplianceItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReportSchedule>(entity =>
+        {
+            entity.ToTable("AppReportSchedules");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id);
+            entity.Property(x => x.CreatedByUserId).IsRequired();
+            entity.Property(x => x.ClientId);
+            entity.Property(x => x.ReportType).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.Frequency).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.RecipientsJson).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.HasIndex(x => new { x.ClientId, x.NextRunAtUtc });
+            entity.HasIndex(x => new { x.CreatedByUserId, x.NextRunAtUtc });
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_AppReportSchedules_ReportType", "ReportType IN ('compliance')");
+                table.HasCheckConstraint("CK_AppReportSchedules_Frequency", "Frequency IN ('weekly','monthly')");
             });
         });
 

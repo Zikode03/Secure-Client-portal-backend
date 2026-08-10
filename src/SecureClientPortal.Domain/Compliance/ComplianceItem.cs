@@ -53,6 +53,12 @@ public class ComplianceItem
 
     public bool IsExpiredAt(DateTime now) => ExpiryDateUtc.HasValue && ExpiryDateUtc.Value.Date < now.Date;
 
+    public void SubmitEvidence()
+    {
+        Status = ComplianceItemStatus.Pending.ToStorageValue();
+        Touch();
+    }
+
     private void Touch()
     {
         UpdatedAtUtc = DateTime.UtcNow;

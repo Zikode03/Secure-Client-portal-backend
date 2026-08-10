@@ -103,9 +103,7 @@ public class MonthlyPacksModuleTests
             DateTime.UtcNow));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage())
-        {
-        };
+        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var submitResult = await controller.Submit(bankStatementSlot.Id.ToString(), TestContext.Current.CancellationToken);
 
@@ -174,9 +172,7 @@ public class MonthlyPacksModuleTests
             null));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage())
-        {
-        };
+        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var result = await controller.GetByMonthlyPackId(pack.Id.ToString(), TestContext.Current.CancellationToken);
 
@@ -197,9 +193,7 @@ public class MonthlyPacksModuleTests
         db.DocumentSlots.AddRange(requiredSlot, optionalSlot);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage())
-        {
-        };
+        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var result = await controller.MarkNotApplicable(optionalSlot.Id.ToString(), TestContext.Current.CancellationToken);
 

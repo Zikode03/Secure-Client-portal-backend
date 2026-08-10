@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
+using MigraDoc.DocumentObjectModel;
+using MigraDoc.DocumentObjectModel.Tables;
+using MigraDoc.Rendering;
+using PdfSharp.Fonts;
+using SecureClientPortal.Backend.Application.Common;
+using SecureClientPortal.Backend.Application.Contracts.Modules.Reports;
 using SecureClientPortal.Backend.Application.Modules.Reports;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Models;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Reports;
 
@@ -15,6 +22,14 @@ public sealed class ReportService : IReportService
     public ReportService(PortalDbContext db)
     {
         _db = db;
+    }
+
+    static ReportService()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            GlobalFontSettings.UseWindowsFontsUnderWindows = true;
+        }
     }
 
     public async Task<(bool forbidden, object? report)> GetFirmReportsAsync(ClaimsPrincipal user, CancellationToken ct = default)
@@ -377,6 +392,382 @@ public sealed class ReportService : IReportService
             generatedAtUtc = DateTime.UtcNow,
             clients = report
         };
+    }
+
+    public async Task<ServiceResult<ReportFileResponse>> GenerateCompliancePdfAsync(
+        ClaimsPrincipal user,
+        string? clientId = null,
+        CancellationToken ct = default)
+    {
+        var scope = await ResolveReportScopeAsync(user, clientId, ct);
+        if (scope.Error is not null)
+        {
+            return scope.Error;
+        }
+
+        var clients = await _db.Clients
+            .Where(x => scope.ClientIds.Contains(x.Id))
+            .OrderBy(x => x.Name)
+            .ToListAsync(ct);
+        if (clients.Count == 0)
+        {
+            return ServiceResult<ReportFileResponse>.NotFoundResult("No accessible clients were found for this report.");
+        }
+
+        var items = await _db.ComplianceItems
+            .Where(x => scope.ClientIds.Contains(x.ClientId))
+            .OrderBy(x => x.Name)
+            .ToListAsync(ct);
+        var auditLogs = await _db.AuditLogs
+            .Where(x => x.ClientId.HasValue && scope.ClientIds.Contains(x.ClientId.Value) && x.Action.StartsWith("compliance."))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(50)
+            .ToListAsync(ct);
+
+        var generatedAtUtc = DateTime.UtcNow;
+        var content = BuildCompliancePdf(clients, items, auditLogs, generatedAtUtc);
+        var fileToken = clients.Count == 1
+            ? SanitizeFileToken(clients[0].Name)
+            : "portfolio";
+        var response = new ReportFileResponse(
+            content,
+            "application/pdf",
+            $"compliance-report-{fileToken}-{generatedAtUtc:yyyyMMdd-HHmm}.pdf");
+
+        foreach (var client in clients)
+        {
+            await _db.WriteAuditLogAsync(
+                user,
+                "compliance.report_downloaded",
+                "client",
+                client.Id,
+                client.Id,
+                JsonSerializer.Serialize(new { generatedAtUtc, reportClientCount = clients.Count, response.FileName }),
+                ct);
+        }
+
+        return ServiceResult<ReportFileResponse>.Success(response);
+    }
+
+    public async Task<ServiceResult<IReadOnlyList<ReportScheduleResponse>>> GetSchedulesAsync(
+        ClaimsPrincipal user,
+        string? clientId = null,
+        CancellationToken ct = default)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            return ServiceResult<IReadOnlyList<ReportScheduleResponse>>.UnauthorizedResult();
+        }
+
+        var query = _db.ReportSchedules.Where(x =>
+            (user.IsAdmin() || x.CreatedByUserId == userId.Value) &&
+            ((x.ClientId.HasValue && allowedClientIds.Contains(x.ClientId.Value)) ||
+             (!x.ClientId.HasValue && x.CreatedByUserId == userId.Value)));
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            if (!Guid.TryParse(clientId, out var parsedClientId))
+            {
+                return ServiceResult<IReadOnlyList<ReportScheduleResponse>>.ErrorResult("Client id is invalid.");
+            }
+
+            if (!allowedClientIds.Contains(parsedClientId))
+            {
+                return ServiceResult<IReadOnlyList<ReportScheduleResponse>>.ForbiddenResult();
+            }
+
+            query = query.Where(x => x.ClientId == parsedClientId);
+        }
+
+        var schedules = await query.OrderBy(x => x.NextRunAtUtc).ToListAsync(ct);
+        return ServiceResult<IReadOnlyList<ReportScheduleResponse>>.Success(schedules.Select(MapSchedule).ToList());
+    }
+
+    public async Task<ServiceResult<ReportScheduleResponse>> CreateScheduleAsync(
+        CreateReportScheduleRequest request,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            return ServiceResult<ReportScheduleResponse>.UnauthorizedResult();
+        }
+
+        var resolvedClient = await ResolveScheduleClientIdAsync(user, request.ClientId, ct);
+        if (resolvedClient.Forbidden)
+        {
+            return ServiceResult<ReportScheduleResponse>.ForbiddenResult();
+        }
+
+        try
+        {
+            var schedule = ReportSchedule.Create(
+                Guid.NewGuid(),
+                userId.Value,
+                resolvedClient.ClientId,
+                request.Frequency,
+                request.Recipients,
+                DateTime.UtcNow);
+            _db.ReportSchedules.Add(schedule);
+            await _db.SaveChangesAsync(ct);
+            await WriteScheduleAuditAsync(user, schedule, "reports.schedule_created", ct);
+            return ServiceResult<ReportScheduleResponse>.Success(MapSchedule(schedule));
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<ReportScheduleResponse>.ErrorResult(ex.Message);
+        }
+    }
+
+    public async Task<ServiceResult<ReportScheduleResponse>> UpdateScheduleAsync(
+        string id,
+        UpdateReportScheduleRequest request,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var scheduleResult = await ResolveAccessibleScheduleAsync(id, user, ct);
+        if (scheduleResult.Error is not null)
+        {
+            return scheduleResult.Error;
+        }
+
+        try
+        {
+            scheduleResult.Schedule!.Update(request.Frequency, request.Recipients, DateTime.UtcNow);
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<ReportScheduleResponse>.ErrorResult(ex.Message);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await WriteScheduleAuditAsync(user, scheduleResult.Schedule, "reports.schedule_updated", ct);
+        return ServiceResult<ReportScheduleResponse>.Success(MapSchedule(scheduleResult.Schedule));
+    }
+
+    public async Task<ServiceResult<bool>> DeleteScheduleAsync(
+        string id,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var scheduleResult = await ResolveAccessibleScheduleAsync(id, user, ct);
+        if (scheduleResult.Error is not null)
+        {
+            return new ServiceResult<bool>(
+                Forbidden: scheduleResult.Error.Forbidden,
+                NotFound: scheduleResult.Error.NotFound,
+                Unauthorized: scheduleResult.Error.Unauthorized,
+                Error: scheduleResult.Error.Error,
+                ErrorCode: scheduleResult.Error.ErrorCode,
+                StatusCode: scheduleResult.Error.StatusCode);
+        }
+
+        var schedule = scheduleResult.Schedule!;
+        _db.ReportSchedules.Remove(schedule);
+        await _db.SaveChangesAsync(ct);
+        await WriteScheduleAuditAsync(user, schedule, "reports.schedule_deleted", ct);
+        return ServiceResult<bool>.Success(true);
+    }
+
+    private async Task<(HashSet<Guid> ClientIds, ServiceResult<ReportFileResponse>? Error)> ResolveReportScopeAsync(
+        ClaimsPrincipal user,
+        string? clientId,
+        CancellationToken ct)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return (allowedClientIds, null);
+        }
+
+        if (!Guid.TryParse(clientId, out var parsedClientId))
+        {
+            return ([], ServiceResult<ReportFileResponse>.ErrorResult("Client id is invalid."));
+        }
+
+        return allowedClientIds.Contains(parsedClientId)
+            ? ([parsedClientId], null)
+            : ([], ServiceResult<ReportFileResponse>.ForbiddenResult());
+    }
+
+    private async Task<(Guid? ClientId, bool Forbidden)> ResolveScheduleClientIdAsync(
+        ClaimsPrincipal user,
+        Guid? requestedClientId,
+        CancellationToken ct)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (requestedClientId.HasValue)
+        {
+            return allowedClientIds.Contains(requestedClientId.Value)
+                ? (requestedClientId, false)
+                : (null, true);
+        }
+
+        if (user.IsClient())
+        {
+            return allowedClientIds.Count == 1
+                ? (allowedClientIds.Single(), false)
+                : (null, true);
+        }
+
+        return (null, false);
+    }
+
+    private async Task<(ReportSchedule? Schedule, ServiceResult<ReportScheduleResponse>? Error)> ResolveAccessibleScheduleAsync(
+        string id,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        if (!Guid.TryParse(id, out var scheduleId))
+        {
+            return (null, ServiceResult<ReportScheduleResponse>.NotFoundResult());
+        }
+
+        var schedule = await _db.ReportSchedules.FirstOrDefaultAsync(x => x.Id == scheduleId, ct);
+        if (schedule is null)
+        {
+            return (null, ServiceResult<ReportScheduleResponse>.NotFoundResult());
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var userId = user.GetUserId();
+        var ownsSchedule = user.IsAdmin() || (userId.HasValue && schedule.CreatedByUserId == userId.Value);
+        var canAccess = ownsSchedule && (schedule.ClientId.HasValue
+            ? allowedClientIds.Contains(schedule.ClientId.Value)
+            : userId.HasValue && schedule.CreatedByUserId == userId.Value);
+        return canAccess
+            ? (schedule, null)
+            : (null, ServiceResult<ReportScheduleResponse>.ForbiddenResult());
+    }
+
+    private async Task WriteScheduleAuditAsync(ClaimsPrincipal user, ReportSchedule schedule, string action, CancellationToken ct)
+    {
+        await _db.WriteAuditLogAsync(
+            user,
+            action,
+            "report_schedule",
+            schedule.Id,
+            schedule.ClientId,
+            JsonSerializer.Serialize(new { schedule.ReportType, schedule.Frequency, schedule.NextRunAtUtc, recipients = schedule.GetRecipients() }),
+            ct);
+    }
+
+    private static ReportScheduleResponse MapSchedule(ReportSchedule schedule) =>
+        new(
+            schedule.Id,
+            schedule.CreatedByUserId,
+            schedule.ClientId,
+            schedule.ReportType,
+            schedule.Frequency,
+            schedule.GetRecipients(),
+            schedule.NextRunAtUtc,
+            schedule.LastScheduledAtUtc,
+            schedule.CreatedAtUtc,
+            schedule.UpdatedAtUtc);
+
+    private static byte[] BuildCompliancePdf(
+        IReadOnlyCollection<Client> clients,
+        IReadOnlyCollection<ComplianceItem> items,
+        IReadOnlyCollection<AuditLog> auditLogs,
+        DateTime generatedAtUtc)
+    {
+        var document = new MigraDoc.DocumentObjectModel.Document();
+        document.Info.Title = "Compliance report";
+        document.Info.Subject = "Current compliance register and controlled history";
+        var normal = document.Styles[StyleNames.Normal]!;
+        normal.Font.Name = "Arial";
+        normal.Font.Size = 9;
+
+        var section = document.AddSection();
+        section.PageSetup.TopMargin = Unit.FromCentimeter(1.5);
+        section.PageSetup.BottomMargin = Unit.FromCentimeter(1.5);
+        section.PageSetup.LeftMargin = Unit.FromCentimeter(1.5);
+        section.PageSetup.RightMargin = Unit.FromCentimeter(1.5);
+
+        var title = section.AddParagraph("Compliance Report");
+        title.Format.Font.Size = 20;
+        title.Format.Font.Bold = true;
+        title.Format.Font.Color = Colors.DarkBlue;
+        title.Format.SpaceAfter = Unit.FromPoint(4);
+        var subtitle = section.AddParagraph($"Generated {generatedAtUtc:yyyy-MM-dd HH:mm} UTC | {clients.Count} client(s)");
+        subtitle.Format.Font.Color = Colors.Gray;
+        subtitle.Format.SpaceAfter = Unit.FromPoint(14);
+
+        foreach (var client in clients)
+        {
+            var clientItems = items.Where(x => x.ClientId == client.Id).ToList();
+            var heading = section.AddParagraph(client.Name);
+            heading.Format.Font.Size = 13;
+            heading.Format.Font.Bold = true;
+            heading.Format.SpaceBefore = Unit.FromPoint(10);
+            heading.Format.SpaceAfter = Unit.FromPoint(5);
+
+            var summary = section.AddParagraph(
+                $"Score: {CalculateComplianceScore(clientItems)}%   Valid: {clientItems.Count(x => x.Status == "valid")}   " +
+                $"Expiring: {clientItems.Count(x => x.Status == "expiring_soon")}   Expired: {clientItems.Count(x => x.Status == "expired")}   " +
+                $"Missing: {clientItems.Count(x => x.Status == "missing")}");
+            summary.Format.SpaceAfter = Unit.FromPoint(6);
+
+            var table = section.AddTable();
+            table.Borders.Width = 0.5;
+            table.Borders.Color = Colors.LightGray;
+            table.AddColumn(Unit.FromCentimeter(7.2));
+            table.AddColumn(Unit.FromCentimeter(3.2));
+            table.AddColumn(Unit.FromCentimeter(3.0));
+            table.AddColumn(Unit.FromCentimeter(3.0));
+            var header = table.AddRow();
+            header.Shading.Color = Colors.LightGray;
+            header.Format.Font.Bold = true;
+            header.Cells[0].AddParagraph("Item");
+            header.Cells[1].AddParagraph("Status");
+            header.Cells[2].AddParagraph("Risk");
+            header.Cells[3].AddParagraph("Expiry");
+
+            foreach (var item in clientItems)
+            {
+                var row = table.AddRow();
+                row.Cells[0].AddParagraph(item.Name);
+                row.Cells[1].AddParagraph(item.Status.Replace('_', ' '));
+                row.Cells[2].AddParagraph(item.RiskLevel);
+                row.Cells[3].AddParagraph(item.ExpiryDateUtc?.ToString("yyyy-MM-dd") ?? "-");
+            }
+
+            if (clientItems.Count == 0)
+            {
+                var row = table.AddRow();
+                row.Cells[0].MergeRight = 3;
+                row.Cells[0].AddParagraph("No compliance items are currently configured.");
+            }
+        }
+
+        var auditHeading = section.AddParagraph("Recent controlled history");
+        auditHeading.Format.Font.Size = 13;
+        auditHeading.Format.Font.Bold = true;
+        auditHeading.Format.SpaceBefore = Unit.FromPoint(16);
+        auditHeading.Format.SpaceAfter = Unit.FromPoint(5);
+        foreach (var log in auditLogs.Take(20))
+        {
+            section.AddParagraph($"{log.CreatedAtUtc:yyyy-MM-dd HH:mm} UTC | {log.Action} | {log.ActorRole}");
+        }
+
+        if (auditLogs.Count == 0)
+        {
+            section.AddParagraph("No compliance history has been recorded yet.");
+        }
+
+        var renderer = new PdfDocumentRenderer { Document = document };
+        renderer.RenderDocument();
+        using var stream = new MemoryStream();
+        renderer.PdfDocument.Save(stream, false);
+        return stream.ToArray();
+    }
+
+    private static string SanitizeFileToken(string value)
+    {
+        var chars = value.Trim().ToLowerInvariant().Select(x => char.IsLetterOrDigit(x) ? x : '-').ToArray();
+        return new string(chars).Trim('-');
     }
 
     private static int CalculateComplianceScore(IReadOnlyCollection<ComplianceItem> items)

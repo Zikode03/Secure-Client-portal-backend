@@ -177,6 +177,135 @@ public class AuthorizationScopeTests
     }
 
     [Fact]
+    public async Task BusinessProfile_ClientCanUpdateOwnProfileWithoutChangingAdministrativeFields()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var service = new ClientService(db);
+        var actor = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+
+        var result = await service.UpdateBusinessProfileAsync(
+            ClientAlphaId.ToString(),
+            new UpdateClientBusinessProfileRequest(
+                "Alpha Holdings (Pty) Ltd",
+                "Alpha Advisory",
+                "2020/123456/07",
+                "9123456789",
+                "4123456789",
+                "A Person",
+                "finance@alpha.test",
+                "+27 10 555 0100",
+                "1 Main Road",
+                "Johannesburg",
+                "South Africa",
+                "Professional services",
+                "Finance Director"),
+            actor,
+            TestContext.Current.CancellationToken);
+
+        var profile = Assert.IsType<ClientBusinessProfileResponse>(result.Value);
+        Assert.Equal("Alpha Advisory", profile.TradingName);
+        Assert.Equal("finance@alpha.test", profile.FinanceEmail);
+
+        var stored = await db.Clients.SingleAsync(x => x.Id == ClientAlphaId, TestContext.Current.CancellationToken);
+        Assert.Equal(AccountantOneId, stored.AssignedAccountantId);
+        Assert.Equal(90, stored.ComplianceHealth);
+        Assert.Equal("active", stored.Status);
+
+        var forbidden = await service.UpdateBusinessProfileAsync(
+            ClientBetaId.ToString(),
+            new UpdateClientBusinessProfileRequest(
+                "Beta", "", "", "", "", "B", "b@test.com", "", "", "", "", "", ""),
+            actor,
+            TestContext.Current.CancellationToken);
+        Assert.True(forbidden.Forbidden);
+    }
+
+    [Fact]
+    public async Task NotificationPreferences_DefaultThenPersistPerUser()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var service = new NotificationService(db);
+        var actor = BuildUser(ClientUserId, "client", [ClientAlphaId]);
+
+        var defaultsResult = await service.GetPreferencesAsync(actor, TestContext.Current.CancellationToken);
+        var defaults = Assert.IsType<NotificationPreferenceResponse>(defaultsResult.Value);
+        Assert.True(defaults.DeadlineAlerts);
+        Assert.Equal("22:00-06:00", defaults.QuietHours);
+
+        var updateResult = await service.UpdatePreferencesAsync(
+            new UpdateNotificationPreferenceRequest(
+                false,
+                true,
+                false,
+                true,
+                true,
+                false,
+                false,
+                "21:30-07:00"),
+            actor,
+            TestContext.Current.CancellationToken);
+
+        var updated = Assert.IsType<NotificationPreferenceResponse>(updateResult.Value);
+        Assert.False(updated.DeadlineAlerts);
+        Assert.True(updated.WeeklySummary);
+        Assert.Equal("21:30-07:00", updated.QuietHours);
+        Assert.Equal(1, await db.NotificationPreferences.CountAsync(TestContext.Current.CancellationToken));
+
+        var invalid = await service.UpdatePreferencesAsync(
+            new UpdateNotificationPreferenceRequest(true, true, true, false, false, true, true, "overnight"),
+            actor,
+            TestContext.Current.CancellationToken);
+        Assert.Equal("Quiet hours must use the HH:mm-HH:mm format.", invalid.Error);
+    }
+
+    [Fact]
+    public async Task SecuritySettings_ListSessionsAndRevokeOnlyOtherSessions()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var currentJwtId = Guid.NewGuid();
+        var otherJwtId = Guid.NewGuid();
+        var currentSession = UserSession.Start(Guid.NewGuid(), ClientUserId, currentJwtId, DateTime.UtcNow.AddHours(1), "127.0.0.1", "Current browser");
+        var otherSession = UserSession.Start(Guid.NewGuid(), ClientUserId, otherJwtId, DateTime.UtcNow.AddHours(1), "127.0.0.2", "Other browser");
+        db.UserSessions.AddRange(currentSession, otherSession);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new AuthService(
+            db,
+            Options.Create(new JwtOptions
+            {
+                SigningKey = "test-signing-key-test-signing-key",
+                Audience = "test",
+                Issuer = "test",
+                ExpiresMinutes = 60
+            }),
+            new FakeAccessEmailSender(),
+            new FakeAccessLinkBuilder());
+        var actor = BuildSessionUser(ClientUserId, "client", currentJwtId, [ClientAlphaId]);
+
+        var updateResult = await service.UpdateSecuritySettingsAsync(
+            new UpdateSecuritySettingsRequest("recovery@alpha.test"),
+            actor,
+            TestContext.Current.CancellationToken);
+        var settings = Assert.IsType<SecuritySettingsResponse>(updateResult.Value);
+        Assert.False(settings.MfaSupported);
+        Assert.False(settings.MfaEnabled);
+        Assert.Equal("recovery@alpha.test", settings.RecoveryEmail);
+        Assert.NotNull(settings.PasswordLastChangedAtUtc);
+        Assert.Equal(2, settings.Sessions.Count);
+        Assert.Single(settings.Sessions, x => x.IsCurrent);
+
+        var revokeResult = await service.RevokeOtherSessionsAsync(actor, TestContext.Current.CancellationToken);
+        var revoked = Assert.IsType<SessionRevocationResponse>(revokeResult.Value);
+        Assert.Equal(1, revoked.RevokedCount);
+
+        Assert.Null((await db.UserSessions.SingleAsync(x => x.Id == currentSession.Id, TestContext.Current.CancellationToken)).RevokedAtUtc);
+        Assert.NotNull((await db.UserSessions.SingleAsync(x => x.Id == otherSession.Id, TestContext.Current.CancellationToken)).RevokedAtUtc);
+    }
+
+    [Fact]
     public async Task AssignmentsEndpoint_RespectsVisibilityAndPrimaryFlag()
     {
         await using var db = BuildDb();
@@ -282,6 +411,13 @@ public class AuthorizationScopeTests
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
+
+    private static ClaimsPrincipal BuildSessionUser(Guid userId, string role, Guid jwtId, IEnumerable<Guid>? clientIds = null)
+    {
+        var principal = BuildUser(userId, role, clientIds);
+        principal.Identities.Single().AddClaim(new Claim(JwtRegisteredClaimNames.Jti, jwtId.ToString()));
+        return principal;
     }
 
     private static PortalDbContext BuildDb()

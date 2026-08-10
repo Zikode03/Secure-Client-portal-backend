@@ -43,6 +43,9 @@ public class Phase3WorkflowPlatformTests
         Assert.IsType<CreatedResult>(upload);
 
         var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
+        var submittedSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        submittedSlot.Submit(ClientUserId);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var accountantDocuments = new DocumentsController(DocumentWorkflowTestFactory.Create(db, storage))
         {
@@ -98,6 +101,8 @@ public class Phase3WorkflowPlatformTests
         Assert.Equal("waiting_on_accountant", uploadResponse.Workspace.Request.Status);
         Assert.NotNull(uploadResponse.Workspace.RelatedDocument);
         Assert.Equal(2, uploadResponse.Workspace.RelatedDocument!.CurrentVersionNumber);
+        var resubmittedSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("submitted", resubmittedSlot.Status);
 
         var accountantRequests = new RequestsController(RequestService.CreateForTests(db, DocumentWorkflowTestFactory.Create(db, storage)))
         {

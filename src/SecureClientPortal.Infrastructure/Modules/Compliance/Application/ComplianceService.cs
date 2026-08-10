@@ -3,6 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Compliance;
 using SecureClientPortal.Backend.Application.Modules.Compliance;
+using SecureClientPortal.Backend.Application.Modules.Documents;
+using SecureClientPortal.Backend.Application.Modules.Requests;
+using SecureClientPortal.Backend.Application.Contracts.Modules.Requests;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Models;
@@ -14,17 +17,22 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Applicati
 
 public sealed class ComplianceService : IComplianceService
 {
+    private static readonly HashSet<string> AllowedEvidenceExtensions = [".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"];
     private static readonly HashSet<string> AllowedItemStatuses = ["missing", "pending", "valid", "expiring_soon", "expired", "rejected"];
     private static readonly HashSet<string> AllowedReminderStatuses = ["pending", "sent", "dismissed"];
     private static readonly HashSet<string> AllowedRiskLevels = ["low", "medium", "high", "critical"];
 
     private readonly PortalDbContext _db;
     private readonly ComplianceAssessmentDomainService _complianceAssessmentDomainService;
+    private readonly IFileStorage? _fileStorage;
+    private readonly IRequestService? _requestService;
 
-    public ComplianceService(PortalDbContext db)
+    public ComplianceService(PortalDbContext db, IFileStorage? fileStorage = null, IRequestService? requestService = null)
     {
         _db = db;
         _complianceAssessmentDomainService = new ComplianceAssessmentDomainService();
+        _fileStorage = fileStorage;
+        _requestService = requestService;
     }
 
     public async Task<IReadOnlyList<ComplianceCategory>> GetCategoriesAsync(CancellationToken ct = default)
@@ -432,6 +440,322 @@ public sealed class ComplianceService : IComplianceService
             }
         });
     }
+
+    public async Task<ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>> GetHistoryAsync(
+        System.Security.Claims.ClaimsPrincipal user,
+        string? clientId = null,
+        string? itemId = null,
+        int limit = 200,
+        CancellationToken ct = default)
+    {
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var scopedClientIds = allowedClientIds;
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            if (!Guid.TryParse(clientId, out var parsedClientId))
+            {
+                return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.ErrorResult("Client id is invalid.");
+            }
+
+            if (!allowedClientIds.Contains(parsedClientId))
+            {
+                return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.ForbiddenResult();
+            }
+
+            scopedClientIds = [parsedClientId];
+        }
+
+        Guid? parsedItemId = null;
+        if (!string.IsNullOrWhiteSpace(itemId))
+        {
+            if (!Guid.TryParse(itemId, out var value))
+            {
+                return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.ErrorResult("Compliance item id is invalid.");
+            }
+
+            var item = await _db.ComplianceItems.FirstOrDefaultAsync(x => x.Id == value, ct);
+            if (item is null)
+            {
+                return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.NotFoundResult();
+            }
+
+            if (!allowedClientIds.Contains(item.ClientId))
+            {
+                return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.ForbiddenResult();
+            }
+
+            parsedItemId = value;
+            scopedClientIds = [item.ClientId];
+        }
+
+        var query = _db.AuditLogs.Where(x =>
+            x.ClientId.HasValue &&
+            scopedClientIds.Contains(x.ClientId.Value) &&
+            x.Action.StartsWith("compliance."));
+        if (parsedItemId.HasValue)
+        {
+            var itemToken = parsedItemId.Value.ToString();
+            query = query.Where(x =>
+                x.EntityId == parsedItemId.Value ||
+                (x.MetadataJson != null && x.MetadataJson.Contains(itemToken)));
+        }
+
+        var logs = await query
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(Math.Clamp(limit, 1, 500))
+            .ToListAsync(ct);
+        var actorIds = logs.Where(x => x.ActorUserId.HasValue).Select(x => x.ActorUserId!.Value).Distinct().ToArray();
+        var actors = await _db.Users.Where(x => actorIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.FullName, ct);
+
+        return ServiceResult<IReadOnlyList<ComplianceHistoryEntryResponse>>.Success(logs.Select(x =>
+            new ComplianceHistoryEntryResponse(
+                x.Id,
+                x.Action,
+                x.ActorUserId.HasValue ? actors.GetValueOrDefault(x.ActorUserId.Value) ?? "Unknown user" : "System",
+                x.ActorRole,
+                x.CreatedAtUtc,
+                DescribeHistoryAction(x.Action),
+                x.EntityType,
+                x.EntityId,
+                x.MetadataJson)).ToList());
+    }
+
+    public async Task<ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>> GetEvidenceVersionsAsync(
+        string itemId,
+        System.Security.Claims.ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var itemResult = await ResolveAccessibleItemAsync(itemId, user, ct);
+        if (itemResult.Error is not null) return ConvertError<IReadOnlyList<ComplianceEvidenceVersionResponse>>(itemResult.Error);
+
+        var versions = await _db.ComplianceEvidenceVersions
+            .Where(x => x.ComplianceItemId == itemResult.Item!.Id)
+            .OrderByDescending(x => x.VersionNumber)
+            .ToListAsync(ct);
+        var uploaderIds = versions.Select(x => x.UploadedByUserId).Distinct().ToArray();
+        var uploaders = await _db.Users.Where(x => uploaderIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.FullName, ct);
+        return ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>.Success(
+            versions.Select(x => MapEvidence(x, uploaders.GetValueOrDefault(x.UploadedByUserId))).ToList());
+    }
+
+    public async Task<ServiceResult<ComplianceEvidenceVersionResponse>> UploadEvidenceAsync(
+        string itemId,
+        UploadComplianceEvidenceRequest request,
+        System.Security.Claims.ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        if (request.File is null || request.File.Length <= 0)
+        {
+            return ServiceResult<ComplianceEvidenceVersionResponse>.ErrorResult("An evidence file is required.");
+        }
+
+        if (request.File.Length > DocumentValidators.MaxUploadFileSizeBytes)
+        {
+            return ServiceResult<ComplianceEvidenceVersionResponse>.ErrorResult("File exceeds the maximum upload size of 100 MB.");
+        }
+
+        var extension = Path.GetExtension(request.File.FileName ?? string.Empty).Trim().ToLowerInvariant();
+        if (!AllowedEvidenceExtensions.Contains(extension))
+        {
+            return ServiceResult<ComplianceEvidenceVersionResponse>.ErrorResult("Unsupported file type. Allowed file types: .pdf, .png, .jpg, .jpeg, .doc, .docx, .xls, .xlsx.");
+        }
+
+        if (_fileStorage is null)
+        {
+            return ServiceResult<ComplianceEvidenceVersionResponse>.ErrorResult("Evidence storage is not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var itemResult = await ResolveAccessibleItemAsync(itemId, user, ct);
+        if (itemResult.Error is not null) return ConvertError<ComplianceEvidenceVersionResponse>(itemResult.Error);
+        var item = itemResult.Item!;
+        var actorUserId = user.GetUserId();
+        if (!actorUserId.HasValue)
+        {
+            return ServiceResult<ComplianceEvidenceVersionResponse>.UnauthorizedResult();
+        }
+
+        var stored = await _fileStorage.SaveAsync(request.File, item.ClientId.ToString(), ct);
+        var currentVersions = await _db.ComplianceEvidenceVersions
+            .Where(x => x.ComplianceItemId == item.Id && x.IsCurrentVersion)
+            .ToListAsync(ct);
+        foreach (var current in currentVersions)
+        {
+            current.MarkNotCurrent();
+        }
+
+        var nextVersion = (await _db.ComplianceEvidenceVersions
+            .Where(x => x.ComplianceItemId == item.Id)
+            .MaxAsync(x => (int?)x.VersionNumber, ct) ?? 0) + 1;
+        var version = ComplianceEvidenceVersion.Create(
+            Guid.NewGuid(),
+            item.Id,
+            item.ClientId,
+            nextVersion,
+            stored.OriginalFileName,
+            stored.ContentType,
+            stored.SizeBytes,
+            stored.StorageKey,
+            actorUserId.Value,
+            request.Note);
+        item.SubmitEvidence();
+        _db.ComplianceEvidenceVersions.Add(version);
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "compliance.evidence_uploaded",
+            "compliance_evidence_version",
+            version.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { complianceItemId = item.Id, version.VersionNumber, version.FileName, version.Note }),
+            ct);
+
+        return ServiceResult<ComplianceEvidenceVersionResponse>.Success(MapEvidence(version, user.Identity?.Name));
+    }
+
+    public async Task<ServiceResult<(StoredFileContent Content, string FileName)>> DownloadEvidenceAsync(
+        string versionId,
+        System.Security.Claims.ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(versionId, out var parsedVersionId))
+        {
+            return ServiceResult<(StoredFileContent, string)>.NotFoundResult();
+        }
+
+        if (_fileStorage is null)
+        {
+            return ServiceResult<(StoredFileContent, string)>.ErrorResult("Evidence storage is not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var version = await _db.ComplianceEvidenceVersions.FirstOrDefaultAsync(x => x.Id == parsedVersionId, ct);
+        if (version is null)
+        {
+            return ServiceResult<(StoredFileContent, string)>.NotFoundResult();
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(version.ClientId))
+        {
+            return ServiceResult<(StoredFileContent, string)>.ForbiddenResult();
+        }
+
+        var content = await _fileStorage.OpenReadAsync(version.StorageKey, ct);
+        return content is null
+            ? ServiceResult<(StoredFileContent, string)>.NotFoundResult("Evidence file content was not found.")
+            : ServiceResult<(StoredFileContent, string)>.Success((content, version.FileName));
+    }
+
+    public async Task<ServiceResult<RequestItem>> CreateWorkflowRequestAsync(
+        string itemId,
+        CreateComplianceWorkflowRequest request,
+        System.Security.Claims.ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        if (_requestService is null)
+        {
+            return ServiceResult<RequestItem>.ErrorResult("Request workflow is not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var itemResult = await ResolveAccessibleItemAsync(itemId, user, ct);
+        if (itemResult.Error is not null) return ConvertError<RequestItem>(itemResult.Error);
+        var item = itemResult.Item!;
+        var requestType = NormalizeComplianceRequestType(request.RequestType);
+        var description = string.IsNullOrWhiteSpace(request.Comments)
+            ? $"Please provide the required information or evidence for {item.Name}."
+            : request.Comments.Trim();
+        var created = await _requestService.CreateAsync(
+            new CreateRequestRequest(
+                item.ClientId,
+                requestType,
+                $"Compliance: {item.Name}",
+                description,
+                requestType == "clarification_needed" ? "medium" : "high",
+                request.DueDateUtc,
+                item.LinkedDocumentId),
+            user,
+            ct);
+        if (created.forbidden)
+        {
+            return ServiceResult<RequestItem>.ForbiddenResult();
+        }
+
+        await _db.WriteAuditLogAsync(
+            user,
+            "compliance.request_created",
+            "compliance_item",
+            item.Id,
+            item.ClientId,
+            JsonSerializer.Serialize(new { complianceItemId = item.Id, requestId = created.created.Id, requestType }),
+            ct);
+        return ServiceResult<RequestItem>.Success(created.created);
+    }
+
+    private async Task<(ComplianceItem? Item, ServiceResult<object>? Error)> ResolveAccessibleItemAsync(
+        string itemId,
+        System.Security.Claims.ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        if (!Guid.TryParse(itemId, out var parsedItemId))
+        {
+            return (null, ServiceResult<object>.NotFoundResult());
+        }
+
+        var item = await _db.ComplianceItems.FirstOrDefaultAsync(x => x.Id == parsedItemId, ct);
+        if (item is null)
+        {
+            return (null, ServiceResult<object>.NotFoundResult());
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        return allowedClientIds.Contains(item.ClientId)
+            ? (item, null)
+            : (null, ServiceResult<object>.ForbiddenResult());
+    }
+
+    private static ComplianceEvidenceVersionResponse MapEvidence(ComplianceEvidenceVersion version, string? uploadedBy) =>
+        new(
+            version.Id,
+            version.ComplianceItemId,
+            version.ClientId,
+            version.VersionNumber,
+            version.FileName,
+            version.ContentType,
+            version.SizeBytes,
+            version.UploadedByUserId,
+            uploadedBy,
+            version.Note,
+            version.IsCurrentVersion,
+            version.UploadedAtUtc,
+            $"/api/compliance/evidence/{version.Id}/download");
+
+    private static string NormalizeComplianceRequestType(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "missing_document_request" or "missing_document" => "missing_document",
+        "re_upload_request" or "reupload_required" => "reupload_required",
+        "renewal_request" or "compliance_renewal" => "compliance_renewal",
+        _ => "clarification_needed"
+    };
+
+    private static string DescribeHistoryAction(string action) => action switch
+    {
+        "compliance.item_created" => "Compliance item created.",
+        "compliance.item_updated" => "Compliance item updated.",
+        "compliance.evidence_uploaded" => "A new compliance evidence version was uploaded.",
+        "compliance.request_created" => "A compliance workflow request was created.",
+        "compliance.reminder_created" => "A compliance reminder was scheduled.",
+        "compliance.reminder_status_updated" => "A compliance reminder status changed.",
+        "compliance.report_downloaded" => "A compliance report was downloaded.",
+        _ => action.Replace("compliance.", string.Empty).Replace('_', ' ')
+    };
+
+    private static ServiceResult<T> ConvertError<T>(ServiceResult<object> error) =>
+        new(
+            Forbidden: error.Forbidden,
+            NotFound: error.NotFound,
+            Unauthorized: error.Unauthorized,
+            Error: error.Error,
+            ErrorCode: error.ErrorCode,
+            StatusCode: error.StatusCode);
 
     private static string NormalizeStatus(string raw) => ComplianceDomainValues.ToComplianceItemStatus(raw).ToStorageValue();
     private static string NormalizeRiskLevel(string raw) => ComplianceDomainValues.ToComplianceRiskLevel(raw).ToStorageValue();

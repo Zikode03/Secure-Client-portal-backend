@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Clients;
 using SecureClientPortal.Backend.Application.Modules.Clients;
 using SecureClientPortal.Backend.Auth;
@@ -130,6 +131,69 @@ public sealed class ClientService : IClientService
         return (false, existing);
     }
 
+    public async Task<ServiceResult<ClientBusinessProfileResponse>> GetBusinessProfileAsync(string id, ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var result = await ResolveAccessibleClientAsync(id, user, ct);
+        if (result.forbidden) return ServiceResult<ClientBusinessProfileResponse>.ForbiddenResult();
+        return result.client is null
+            ? ServiceResult<ClientBusinessProfileResponse>.NotFoundResult()
+            : ServiceResult<ClientBusinessProfileResponse>.Success(MapBusinessProfile(result.client));
+    }
+
+    public async Task<ServiceResult<ClientBusinessProfileResponse>> UpdateBusinessProfileAsync(
+        string id,
+        UpdateClientBusinessProfileRequest request,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        var result = await ResolveAccessibleClientAsync(id, user, ct);
+        if (result.forbidden) return ServiceResult<ClientBusinessProfileResponse>.ForbiddenResult();
+        if (result.client is null) return ServiceResult<ClientBusinessProfileResponse>.NotFoundResult();
+
+        try
+        {
+            result.client.UpdateBusinessProfile(
+                request.LegalName,
+                request.TradingName,
+                request.RegistrationNumber,
+                request.TaxNumber,
+                request.VatNumber,
+                request.PrimaryContact,
+                request.FinanceEmail,
+                request.Phone,
+                request.AddressLine,
+                request.City,
+                request.Country,
+                request.Industry,
+                request.PrimaryContactJobTitle);
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<ClientBusinessProfileResponse>.ErrorResult(ex.Message);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "client.business_profile_updated",
+            "client",
+            result.client.Id,
+            result.client.Id,
+            JsonSerializer.Serialize(new
+            {
+                result.client.Name,
+                result.client.TradingName,
+                result.client.PrimaryContact,
+                result.client.Email,
+                result.client.Phone,
+                result.client.City,
+                result.client.Country
+            }),
+            ct);
+
+        return ServiceResult<ClientBusinessProfileResponse>.Success(MapBusinessProfile(result.client));
+    }
+
     public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
     {
         if (!Guid.TryParse(id, out var clientId))
@@ -164,4 +228,30 @@ public sealed class ClientService : IClientService
             _ => "active"
         };
     }
+
+    private async Task<(bool forbidden, Client? client)> ResolveAccessibleClientAsync(string id, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!Guid.TryParse(id, out var clientId)) return (false, null);
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(clientId)) return (true, null);
+        return (false, await _db.Clients.FindAsync([clientId], ct));
+    }
+
+    private static ClientBusinessProfileResponse MapBusinessProfile(Client client) =>
+        new(
+            client.Id,
+            client.Name,
+            client.TradingName,
+            client.RegistrationNumber,
+            client.TaxNumber,
+            client.VatNumber,
+            client.PrimaryContact,
+            client.Email,
+            client.Phone,
+            client.AddressLine,
+            client.City,
+            client.Country,
+            client.Industry,
+            client.PrimaryContactJobTitle,
+            client.UpdatedAtUtc);
 }

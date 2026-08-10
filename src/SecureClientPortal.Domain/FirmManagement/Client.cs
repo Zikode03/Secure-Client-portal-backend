@@ -10,6 +10,16 @@ public class Client
     public Guid AssignedAccountantId { get; private set; }
     public string PrimaryContact { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
+    public string TradingName { get; private set; } = string.Empty;
+    public string RegistrationNumber { get; private set; } = string.Empty;
+    public string TaxNumber { get; private set; } = string.Empty;
+    public string VatNumber { get; private set; } = string.Empty;
+    public string Phone { get; private set; } = string.Empty;
+    public string AddressLine { get; private set; } = string.Empty;
+    public string City { get; private set; } = string.Empty;
+    public string Country { get; private set; } = string.Empty;
+    public string Industry { get; private set; } = string.Empty;
+    public string PrimaryContactJobTitle { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
@@ -42,6 +52,35 @@ public class Client
         Touch();
     }
 
+    public void UpdateBusinessProfile(
+        string legalName,
+        string tradingName,
+        string registrationNumber,
+        string taxNumber,
+        string vatNumber,
+        string primaryContact,
+        string financeEmail,
+        string phone,
+        string addressLine,
+        string city,
+        string country,
+        string industry,
+        string primaryContactJobTitle)
+    {
+        UpdateDetails(legalName, EntityType, primaryContact, financeEmail);
+        TradingName = NormalizeOptional(tradingName);
+        RegistrationNumber = NormalizeOptional(registrationNumber);
+        TaxNumber = NormalizeOptional(taxNumber);
+        VatNumber = NormalizeOptional(vatNumber);
+        Phone = NormalizeOptional(phone);
+        AddressLine = NormalizeOptional(addressLine);
+        City = NormalizeOptional(city);
+        Country = NormalizeOptional(country);
+        Industry = NormalizeOptional(industry);
+        PrimaryContactJobTitle = NormalizeOptional(primaryContactJobTitle);
+        Touch();
+    }
+
     public void ChangeStatus(ClientStatus status)
     {
         Status = status.ToStorageValue();
@@ -66,4 +105,6 @@ public class Client
     {
         UpdatedAtUtc = DateTime.UtcNow;
     }
+
+    private static string NormalizeOptional(string? value) => value?.Trim() ?? string.Empty;
 }

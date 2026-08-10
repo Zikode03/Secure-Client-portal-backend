@@ -253,7 +253,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (uploadResult.NotFound) return ServiceResult<DocumentSlot>.NotFoundResult(uploadResult.Error);
         if (!string.IsNullOrWhiteSpace(uploadResult.Error))
         {
-            return ServiceResult<DocumentSlot>.ErrorResult(uploadResult.Error, uploadResult.ErrorCode, uploadResult.StatusCode);
+            return ServiceResult<DocumentSlot>.ErrorResult(uploadResult.Error, uploadResult.ErrorCode, uploadResult.StatusCode ?? 400);
         }
 
         var refreshed = await _db.DocumentSlots.FirstOrDefaultAsync(x => x.Id == slot.Value.Id, ct);
@@ -290,7 +290,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (workspace.NotFound) return ServiceResult<DocumentSlotWorkspaceResponse>.NotFoundResult(workspace.Error);
         if (!string.IsNullOrWhiteSpace(workspace.Error))
         {
-            return ServiceResult<DocumentSlotWorkspaceResponse>.ErrorResult(workspace.Error, workspace.ErrorCode, workspace.StatusCode);
+            return ServiceResult<DocumentSlotWorkspaceResponse>.ErrorResult(workspace.Error, workspace.ErrorCode, workspace.StatusCode ?? 400);
         }
 
         var refreshed = await _db.DocumentSlots.FirstAsync(x => x.Id == slot.Value.Id, ct);

@@ -351,6 +351,147 @@ public sealed class AuthService : IAuthService
         });
     }
 
+    public async Task<ServiceResult<object>> GetSecuritySettingsAsync(ClaimsPrincipal actor, CancellationToken ct = default)
+    {
+        var identity = await ResolveIdentityAsync(actor, ct);
+        if (identity.Error is not null)
+        {
+            return identity.Error;
+        }
+
+        var sessions = await GetActiveSessionsAsync(identity.User!.Id, identity.JwtId, ct);
+        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions));
+    }
+
+    public async Task<ServiceResult<object>> UpdateSecuritySettingsAsync(
+        UpdateSecuritySettingsRequest request,
+        ClaimsPrincipal actor,
+        CancellationToken ct = default)
+    {
+        var identity = await ResolveIdentityAsync(actor, ct);
+        if (identity.Error is not null)
+        {
+            return identity.Error;
+        }
+
+        try
+        {
+            identity.User!.SetRecoveryEmail(request.RecoveryEmail);
+        }
+        catch (DomainRuleException ex)
+        {
+            return ServiceResult<object>.ErrorResult(ex.Message, "INVALID_SECURITY_SETTINGS");
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            actor,
+            "auth.security_settings_updated",
+            "user",
+            identity.User.Id,
+            null,
+            JsonSerializer.Serialize(new { recoveryEmailConfigured = !string.IsNullOrWhiteSpace(request.RecoveryEmail) }),
+            ct);
+
+        var sessions = await GetActiveSessionsAsync(identity.User.Id, identity.JwtId, ct);
+        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions));
+    }
+
+    public async Task<ServiceResult<object>> GetSessionsAsync(ClaimsPrincipal actor, CancellationToken ct = default)
+    {
+        var identity = await ResolveIdentityAsync(actor, ct);
+        if (identity.Error is not null)
+        {
+            return identity.Error;
+        }
+
+        var sessions = await GetActiveSessionsAsync(identity.User!.Id, identity.JwtId, ct);
+        return ServiceResult<object>.Success(sessions);
+    }
+
+    public async Task<ServiceResult<object>> RevokeSessionAsync(
+        Guid sessionId,
+        ClaimsPrincipal actor,
+        CancellationToken ct = default)
+    {
+        var identity = await ResolveIdentityAsync(actor, ct);
+        if (identity.Error is not null)
+        {
+            return identity.Error;
+        }
+
+        var session = await _db.UserSessions.FirstOrDefaultAsync(
+            x => x.Id == sessionId && x.UserId == identity.User!.Id,
+            ct);
+        if (session is null)
+        {
+            return ServiceResult<object>.NotFoundResult("The session was not found.", "SESSION_NOT_FOUND");
+        }
+
+        var revokedCount = 0;
+        if (session.RevokedAtUtc is null && session.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            session.Revoke("self_service_revoked");
+            await InvalidateRefreshTokensForSessionAsync(session.Id, "self_service_revoked", ct);
+            revokedCount = 1;
+            await _db.SaveChangesAsync(ct);
+            await _db.WriteAuditLogAsync(
+                actor,
+                "auth.session_revoked",
+                "user_session",
+                session.Id,
+                null,
+                JsonSerializer.Serialize(new { session.UserId, isCurrent = session.JwtId == identity.JwtId }),
+                ct);
+        }
+
+        return ServiceResult<object>.Success(new SessionRevocationResponse(revokedCount));
+    }
+
+    public async Task<ServiceResult<object>> RevokeOtherSessionsAsync(ClaimsPrincipal actor, CancellationToken ct = default)
+    {
+        var identity = await ResolveIdentityAsync(actor, ct);
+        if (identity.Error is not null)
+        {
+            return identity.Error;
+        }
+
+        var user = identity.User!;
+        var currentSession = await _db.UserSessions.FirstOrDefaultAsync(
+            x => x.UserId == user.Id && x.JwtId == identity.JwtId && x.RevokedAtUtc == null,
+            ct);
+        if (currentSession is null)
+        {
+            return AuthFailure("SESSION_EXPIRED", "Your session has expired.");
+        }
+
+        var sessions = await _db.UserSessions
+            .Where(x =>
+                x.UserId == user.Id &&
+                x.Id != currentSession.Id &&
+                x.RevokedAtUtc == null &&
+                x.ExpiresAtUtc > DateTime.UtcNow)
+            .ToListAsync(ct);
+
+        foreach (var session in sessions)
+        {
+            session.Revoke("self_service_revoked_others");
+            await InvalidateRefreshTokensForSessionAsync(session.Id, "self_service_revoked_others", ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(
+            actor,
+            "auth.other_sessions_revoked",
+            "user",
+            user.Id,
+            null,
+            JsonSerializer.Serialize(new { revokedCount = sessions.Count }),
+            ct);
+
+        return ServiceResult<object>.Success(new SessionRevocationResponse(sessions.Count));
+    }
+
     private async Task<(object Response, UserSession Session)> IssueAuthResponseAsync(User user, UserSession? existingSession, HttpContext httpContext, CancellationToken ct)
     {
         var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == user.Role, ct);
@@ -535,6 +676,65 @@ public sealed class AuthService : IAuthService
             session.Revoke(reason);
             await InvalidateRefreshTokensForSessionAsync(session.Id, reason, ct);
         }
+    }
+
+    private async Task<(User? User, Guid JwtId, ServiceResult<object>? Error)> ResolveIdentityAsync(
+        ClaimsPrincipal actor,
+        CancellationToken ct)
+    {
+        var userId = actor.GetUserId();
+        var jwtIdValue = actor.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        if (!userId.HasValue || !Guid.TryParse(jwtIdValue, out var jwtId))
+        {
+            return (null, Guid.Empty, AuthFailure("SESSION_EXPIRED", "Your session has expired."));
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId.Value, ct);
+        return user is null
+            ? (null, Guid.Empty, AuthFailure("SESSION_EXPIRED", "Your session has expired."))
+            : (user, jwtId, null);
+    }
+
+    private async Task<IReadOnlyCollection<SecuritySessionResponse>> GetActiveSessionsAsync(
+        Guid userId,
+        Guid currentJwtId,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        return await _db.UserSessions
+            .Where(x => x.UserId == userId && x.RevokedAtUtc == null && x.ExpiresAtUtc > now)
+            .OrderByDescending(x => x.IssuedAtUtc)
+            .Select(x => new SecuritySessionResponse(
+                x.Id,
+                x.IssuedAtUtc,
+                x.ExpiresAtUtc,
+                x.ClientIp,
+                DescribeDevice(x.UserAgent),
+                x.JwtId == currentJwtId))
+            .ToListAsync(ct);
+    }
+
+    private static SecuritySettingsResponse MapSecuritySettings(
+        User user,
+        IReadOnlyCollection<SecuritySessionResponse> sessions)
+    {
+        return new SecuritySettingsResponse(
+            false,
+            false,
+            UserSecurityProfile.GetPasswordLastChangedAtUtc(user.SecurityJson),
+            UserSecurityProfile.GetRecoveryEmail(user.SecurityJson),
+            sessions);
+    }
+
+    private static string? DescribeDevice(string? userAgent)
+    {
+        if (string.IsNullOrWhiteSpace(userAgent))
+        {
+            return null;
+        }
+
+        var normalized = userAgent.Trim();
+        return normalized.Length <= 160 ? normalized : normalized[..160];
     }
 
     private static ServiceResult<object> AuthFailure(string code, string message)

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SecureClientPortal.Backend.Data;
 
@@ -11,9 +12,11 @@ using SecureClientPortal.Backend.Data;
 namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlServer.MigrationsSqlServer
 {
     [DbContext(typeof(PortalDbContext))]
-    partial class PortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810155443_ClientSelfServiceSettings")]
+    partial class ClientSelfServiceSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -696,64 +699,6 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.ToTable("AppComplianceCategories", (string)null);
                 });
 
-            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceEvidenceVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ComplianceItemId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasMaxLength(260)
-                        .HasColumnType("nvarchar(260)");
-
-                    b.Property<bool>("IsCurrentVersion")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Note")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<long>("SizeBytes")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("StorageKey")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("UploadedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.Property<Guid>("UploadedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("VersionNumber")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientId", "UploadedAtUtc");
-
-                    b.HasIndex("ComplianceItemId", "VersionNumber")
-                        .IsUnique();
-
-                    b.ToTable("AppComplianceEvidenceVersions", (string)null);
-                });
-
             modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1182,62 +1127,6 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.ToTable("AppReminderRules", null, t =>
                         {
                             t.HasCheckConstraint("CK_AppReminderRules_AudienceRole", "AudienceRole IN ('admin','accountant','client')");
-                        });
-                });
-
-            modelBuilder.Entity("SecureClientPortal.Backend.Models.ReportSchedule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("ClientId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Frequency")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("LastScheduledAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("NextRunAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RecipientsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ReportType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientId", "NextRunAtUtc");
-
-                    b.HasIndex("CreatedByUserId", "NextRunAtUtc");
-
-                    b.ToTable("AppReportSchedules", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_AppReportSchedules_Frequency", "Frequency IN ('weekly','monthly')");
-
-                            t.HasCheckConstraint("CK_AppReportSchedules_ReportType", "ReportType IN ('compliance')");
                         });
                 });
 
@@ -1777,15 +1666,6 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.HasIndex("UserId", "RevokedAtUtc", "ExpiresAtUtc");
 
                     b.ToTable("AppUserSessions", (string)null);
-                });
-
-            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceEvidenceVersion", b =>
-                {
-                    b.HasOne("SecureClientPortal.Backend.Models.ComplianceItem", null)
-                        .WithMany()
-                        .HasForeignKey("ComplianceItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.NotificationPreference", b =>

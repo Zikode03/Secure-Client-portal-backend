@@ -47,6 +47,8 @@ public class Phase2DocumentLifecycleTests
         var slotAfterUpload = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal("in_progress", packAfterUpload.Status);
         Assert.Equal("draft", slotAfterUpload.Status);
+        slotAfterUpload.Submit(ClientUserId);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var accountantController = BuildDocumentsController(db, storage, BuildUser(AccountantUserId, "accountant"));
 
@@ -159,6 +161,9 @@ public class Phase2DocumentLifecycleTests
         Assert.IsType<CreatedResult>(upload);
 
         var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
+        var submittedSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        submittedSlot.Submit(ClientUserId);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var accountantController = BuildDocumentsController(db, storage, BuildUser(AccountantUserId, "accountant"));
 
@@ -201,6 +206,9 @@ public class Phase2DocumentLifecycleTests
         Assert.IsType<CreatedResult>(upload);
 
         var document = await db.Documents.SingleAsync(TestContext.Current.CancellationToken);
+        var submittedSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        submittedSlot.Submit(ClientUserId);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var accountantController = BuildDocumentsController(db, storage, BuildUser(AccountantUserId, "accountant"));
 
         var first = await accountantController.RequestReupload(
@@ -213,6 +221,19 @@ public class Phase2DocumentLifecycleTests
         Assert.Equal("Please upload the missing pages.", request.Description);
         Assert.Equal("waiting_on_client", request.Status);
 
+        var correctedUpload = await clientController.Upload(new UploadDocumentRequest
+        {
+            ClientId = ClientAlphaId,
+            MonthlyPackId = MonthlyPackId,
+            DocumentSlotId = SlotId,
+            DocumentType = "bank_statement",
+            DocumentId = document.Id,
+            File = BuildFormFile("bank-statement-corrected.pdf", "Corrected upload")
+        }, TestContext.Current.CancellationToken);
+        Assert.IsType<CreatedResult>(correctedUpload);
+
+        var correctedSlot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        correctedSlot.Submit(ClientUserId);
         request.MarkWaitingOnAccountant();
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
