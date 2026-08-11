@@ -239,6 +239,17 @@ public sealed class DocumentSlotService : IDocumentSlotService
         if (slot.Forbidden) return ServiceResult<DocumentSlot>.ForbiddenResult();
         if (slot.NotFound || slot.Value is null) return ServiceResult<DocumentSlot>.NotFoundResult();
 
+        var packStatus = await _db.MonthlyPacks
+            .Where(x => x.Id == slot.Value.MonthlyPackId)
+            .Select(x => x.Status)
+            .FirstOrDefaultAsync(ct);
+        if (packStatus is "under_review" or "complete" or "closed")
+        {
+            return ServiceResult<DocumentSlot>.ErrorResult(
+                "This monthly pack has already been submitted and cannot be changed unless the accountant requests a re-upload.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         var uploadResult = await _documentWorkflowService.UploadAsync(new UploadDocumentRequest
         {
             ClientId = slot.Value.ClientId,

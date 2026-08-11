@@ -47,6 +47,88 @@ public class MonthlyPacksModuleTests
     }
 
     [Fact]
+    public async Task ClientCanSubmitWholeMonth_WhenAllRequiredSlotsHaveDraftUploads()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var clientUserId = Guid.NewGuid();
+        var clientUser = BuildUser(clientUserId, "client", [ClientAlphaId]);
+        var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 6);
+        var bankStatement = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
+        var salesInvoices = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "sales_invoices", "Sales Invoices", true, null);
+        db.MonthlyPacks.Add(pack);
+        db.DocumentSlots.AddRange(bankStatement, salesInvoices);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var slotController = CreateDocumentSlotsController(db, clientUser, new InMemoryFileStorage());
+        await slotController.Upload(
+            bankStatement.Id.ToString(),
+            new UploadDocumentSlotRequest { File = BuildFormFile("bank-statement.pdf", "bank") },
+            TestContext.Current.CancellationToken);
+        await slotController.Upload(
+            salesInvoices.Id.ToString(),
+            new UploadDocumentSlotRequest { File = BuildFormFile("sales-invoices.pdf", "sales") },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("draft", bankStatement.Status);
+        Assert.Equal("draft", salesInvoices.Status);
+
+        var controller = new MonthlyPacksController(new MonthlyPackService(db))
+        {
+            ControllerContext = BuildControllerContext(clientUser)
+        };
+        var result = await controller.Submit(pack.Id.ToString(), TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var submittedPack = Assert.IsType<MonthlyPackResponse>(ok.Value);
+        Assert.Equal("under_review", submittedPack.Status);
+        Assert.Equal("submitted", bankStatement.Status);
+        Assert.Equal("submitted", salesInvoices.Status);
+        Assert.Equal(clientUserId, bankStatement.SubmittedByUserId);
+        Assert.Equal(clientUserId, salesInvoices.SubmittedByUserId);
+
+        var uploadAfterSubmission = await slotController.Upload(
+            bankStatement.Id.ToString(),
+            new UploadDocumentSlotRequest { File = BuildFormFile("changed-bank-statement.pdf", "changed") },
+            TestContext.Current.CancellationToken);
+        var conflict = Assert.IsType<ObjectResult>(uploadAfterSubmission);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        Assert.Equal("submitted", bankStatement.Status);
+    }
+
+    [Fact]
+    public async Task WholeMonthSubmission_RejectsMissingRequiredDocuments_WithoutSubmittingDrafts()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var clientUser = BuildUser(Guid.NewGuid(), "client", [ClientAlphaId]);
+        var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 5);
+        var bankStatement = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
+        var salesInvoices = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "sales_invoices", "Sales Invoices", true, null);
+        db.MonthlyPacks.Add(pack);
+        db.DocumentSlots.AddRange(bankStatement, salesInvoices);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var slotController = CreateDocumentSlotsController(db, clientUser, new InMemoryFileStorage());
+        await slotController.Upload(
+            bankStatement.Id.ToString(),
+            new UploadDocumentSlotRequest { File = BuildFormFile("bank-statement.pdf", "bank") },
+            TestContext.Current.CancellationToken);
+
+        var controller = new MonthlyPacksController(new MonthlyPackService(db))
+        {
+            ControllerContext = BuildControllerContext(clientUser)
+        };
+        var result = await controller.Submit(pack.Id.ToString(), TestContext.Current.CancellationToken);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("Upload all required documents", JsonSerializer.Serialize(badRequest.Value));
+        Assert.Equal("draft", bankStatement.Status);
+        Assert.Equal("not_started", salesInvoices.Status);
+        Assert.NotEqual("under_review", pack.Status);
+    }
+
+    [Fact]
     public async Task BankStatementCanBeSubmittedWhileInvoicesAreMissing()
     {
         await using var db = BuildDb();

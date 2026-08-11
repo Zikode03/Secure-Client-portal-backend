@@ -9,6 +9,7 @@ public sealed record AutomationRunSummary(
     DateTime RunAtUtc,
     int MonthlyPacksCreated,
     int DocumentSlotsCreated,
+    int DraftSlotsAutoSubmitted,
     int MonthlyPackNotificationsSent,
     int MonthlyPackDeadlineNotificationsSent,
     int OverdueRequestsMarked,

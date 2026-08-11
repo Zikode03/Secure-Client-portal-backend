@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Contracts.Modules.FirmManagement;
 using SecureClientPortal.Backend.Application.Modules.Platform;
 using SecureClientPortal.Backend.Data;
+using SecureClientPortal.Backend.Domain.Modules.Documents.Services;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Domain.Modules.Requests;
 using SecureClientPortal.Backend.Domain.Shared.Modules.MonthlyPacks;
@@ -28,6 +29,7 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
         var now = utcNow?.ToUniversalTime() ?? DateTime.UtcNow;
 
         var packResult = await AutoCreateMonthlyPacksAsync(now, ct);
+        var autoSubmissionResult = await AutoSubmitClosedMonthDraftsAsync(now, ct);
         var monthlyReminderNotifications = await SendMonthlyPackDeadlineRemindersAsync(now, ct);
         var overdueResult = await ProcessOverdueRequestEscalationsAsync(now, ct);
         var complianceResult = await ProcessComplianceDeadlinesAsync(now, ct);
@@ -36,12 +38,122 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
             now,
             packResult.MonthlyPacksCreated,
             packResult.DocumentSlotsCreated,
+            autoSubmissionResult.DraftSlotsSubmitted,
             packResult.NotificationsSent,
             monthlyReminderNotifications,
             overdueResult.OverdueRequestsMarked,
             overdueResult.NotificationsSent,
             complianceResult.ComplianceItemsUpdated,
             complianceResult.NotificationsSent);
+    }
+
+    private async Task<(int DraftSlotsSubmitted, int NotificationsSent)> AutoSubmitClosedMonthDraftsAsync(DateTime now, CancellationToken ct)
+    {
+        var closedMonthPacks = await _db.MonthlyPacks
+            .Where(x =>
+                x.Status != MonthlyPackStatus.Closed.ToStorageValue() &&
+                x.Status != MonthlyPackStatus.Complete.ToStorageValue() &&
+                (x.Year < now.Year || (x.Year == now.Year && x.Month < now.Month)))
+            .ToListAsync(ct);
+        if (closedMonthPacks.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        var packIds = closedMonthPacks.Select(x => x.Id).ToArray();
+        var allSlots = await _db.DocumentSlots
+            .Where(x => packIds.Contains(x.MonthlyPackId))
+            .ToListAsync(ct);
+        var draftSlots = allSlots.Where(x => x.Status == "draft").ToList();
+        if (draftSlots.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        var documentIds = draftSlots
+            .Where(x => x.CurrentDocumentId.HasValue)
+            .Select(x => x.CurrentDocumentId!.Value)
+            .Distinct()
+            .ToArray();
+        var documents = await _db.Documents
+            .Where(x => documentIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+        var currentVersions = await _db.DocumentVersions
+            .Where(x => documentIds.Contains(x.DocumentId) && x.IsCurrentVersion)
+            .ToDictionaryAsync(x => x.DocumentId, ct);
+
+        var submissionService = new DocumentSubmissionDomainService();
+        var submittedSlots = new List<DocumentSlot>();
+        foreach (var slot in draftSlots)
+        {
+            if (!slot.CurrentDocumentId.HasValue ||
+                !documents.TryGetValue(slot.CurrentDocumentId.Value, out var document) ||
+                !currentVersions.TryGetValue(slot.CurrentDocumentId.Value, out var currentVersion))
+            {
+                continue;
+            }
+
+            submissionService.Submit(
+                document,
+                currentVersion,
+                slot,
+                document.UploadedByUserId,
+                now);
+            submittedSlots.Add(slot);
+        }
+
+        if (submittedSlots.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        var changedPackIds = submittedSlots.Select(x => x.MonthlyPackId).Distinct().ToHashSet();
+        var changedPacks = closedMonthPacks.Where(x => changedPackIds.Contains(x.Id)).ToList();
+        foreach (var pack in changedPacks)
+        {
+            pack.RecalculateStatus(allSlots.Where(x => x.MonthlyPackId == pack.Id).ToList());
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        var notificationsSent = 0;
+        foreach (var pack in changedPacks)
+        {
+            var packSlotCount = submittedSlots.Count(x => x.MonthlyPackId == pack.Id);
+            await _db.WriteAuditLogAsync(
+                actorUserId: null,
+                actorRole: SystemActorRole,
+                action: "monthly_packs.drafts_auto_submitted",
+                entityType: "monthly_pack",
+                entityId: pack.Id,
+                clientId: pack.ClientId,
+                metadataJson: JsonSerializer.Serialize(new { pack.Id, pack.Year, pack.Month, DraftSlotsSubmitted = packSlotCount }),
+                ct);
+
+            var monthLabel = new DateTime(pack.Year, pack.Month, 1).ToString("MMMM yyyy");
+            notificationsSent += await SendNotificationIfMissingAsync(
+                pack.ClientId,
+                "accountant",
+                "monthly_pack.drafts_auto_submitted",
+                "Month-end documents submitted",
+                $"{packSlotCount} draft document{(packSlotCount == 1 ? " was" : "s were")} automatically submitted for {monthLabel}.",
+                $"/monthly-packs/{pack.ClientId}",
+                new { monthlyPackId = pack.Id, pack.Year, pack.Month, DraftSlotsSubmitted = packSlotCount },
+                now,
+                ct);
+            notificationsSent += await SendNotificationIfMissingAsync(
+                pack.ClientId,
+                "client",
+                "monthly_pack.drafts_auto_submitted",
+                "Your month-end drafts were submitted",
+                $"{packSlotCount} draft document{(packSlotCount == 1 ? " was" : "s were")} automatically submitted for {monthLabel}.",
+                $"/monthly-packs/{pack.ClientId}",
+                new { monthlyPackId = pack.Id, pack.Year, pack.Month, DraftSlotsSubmitted = packSlotCount },
+                now,
+                ct);
+        }
+
+        return (submittedSlots.Count, notificationsSent);
     }
 
     private async Task<(int MonthlyPacksCreated, int DocumentSlotsCreated, int NotificationsSent)> AutoCreateMonthlyPacksAsync(DateTime now, CancellationToken ct)

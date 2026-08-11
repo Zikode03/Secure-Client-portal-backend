@@ -60,6 +60,28 @@ public class MonthlyPacksController : ControllerBase
         return Created($"/api/monthly-packs/{result.created.ClientId}/{result.created.Year}/{result.created.Month}", Map(result.created));
     }
 
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<MonthlyPackResponse>> Submit(string id, CancellationToken ct)
+    {
+        var result = await _monthlyPackService.SubmitAsync(id, User, ct);
+        if (result.forbidden)
+        {
+            return Forbid();
+        }
+
+        if (result.invalid)
+        {
+            return BadRequest(new { error = result.error });
+        }
+
+        if (result.pack is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(Map(result.pack));
+    }
+
     [HttpPost("{id}/close")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<ActionResult<MonthlyPackResponse>> Close(string id, CancellationToken ct)

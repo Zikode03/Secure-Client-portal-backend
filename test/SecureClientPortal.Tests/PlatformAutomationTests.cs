@@ -77,6 +77,66 @@ public class PlatformAutomationTests
         Assert.Equal(notifications.Count, await db.Notifications.CountAsync(TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task Automation_SubmitsRemainingDrafts_AfterTheirCalendarMonthEnds()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 7, RunAtUtc);
+        var slot = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null, RunAtUtc);
+        var documentId = Guid.NewGuid();
+        slot.MarkDraft(documentId);
+        db.MonthlyPacks.Add(pack);
+        db.DocumentSlots.Add(slot);
+        db.Documents.Add(Document.CreateUploaded(
+            documentId,
+            ClientAlphaId,
+            pack.Id,
+            "Bank Statement.pdf",
+            "bank_statement",
+            slot.Id,
+            "application/pdf",
+            25,
+            "alpha/bank-statement.pdf",
+            ClientUserId));
+        db.DocumentVersions.Add(DocumentVersion.Create(
+            Guid.NewGuid(),
+            documentId,
+            1,
+            "Bank Statement.pdf",
+            "Bank Statement.pdf",
+            "bank-statement.pdf",
+            "application/pdf",
+            25,
+            "alpha/bank-statement.pdf",
+            true,
+            ClientUserId,
+            RunAtUtc));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new AutomationWorkflowService(db);
+        var firstRun = await service.RunAsync(
+            new DateTime(2026, 8, 1, 0, 5, 0, DateTimeKind.Utc),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, firstRun.DraftSlotsAutoSubmitted);
+        Assert.Equal("submitted", slot.Status);
+        Assert.Equal(ClientUserId, slot.SubmittedByUserId);
+        Assert.Equal("partially_submitted", pack.Status);
+        Assert.Contains(await db.Notifications.ToListAsync(TestContext.Current.CancellationToken), x =>
+            x.Type == "monthly_pack.drafts_auto_submitted" && x.UserId == AccountantUserId);
+        Assert.Contains(await db.Notifications.ToListAsync(TestContext.Current.CancellationToken), x =>
+            x.Type == "monthly_pack.drafts_auto_submitted" && x.UserId == ClientUserId);
+
+        var secondRun = await service.RunAsync(
+            new DateTime(2026, 8, 1, 1, 5, 0, DateTimeKind.Utc),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, secondRun.DraftSlotsAutoSubmitted);
+        Assert.Equal("submitted", slot.Status);
+    }
+
     private static PortalDbContext BuildDb()
     {
         var options = new DbContextOptionsBuilder<PortalDbContext>()
