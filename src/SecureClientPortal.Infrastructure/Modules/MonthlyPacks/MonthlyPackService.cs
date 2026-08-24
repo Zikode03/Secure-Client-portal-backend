@@ -127,9 +127,18 @@ public sealed class MonthlyPackService : IMonthlyPackService
         }
 
         var draftSlots = slots.Where(x => x.Status == "draft").ToList();
-        if (draftSlots.Count == 0)
+        var supportingDocuments = await _db.Documents
+            .Where(x =>
+                x.MonthlyPackId == pack.Id &&
+                x.ClientId == pack.ClientId &&
+                x.DocumentSlotId == null &&
+                x.Status == "uploaded")
+            .ToListAsync(ct);
+
+        var alreadySubmittedSlots = slots.Any(x => x.Status is "submitted" or "under_review" or "accepted");
+        if (draftSlots.Count == 0 && supportingDocuments.Count == 0 && !alreadySubmittedSlots)
         {
-            return (false, true, "This monthly pack has no draft documents to submit.", null);
+            return (false, true, "This monthly pack has no documents ready to submit.", null);
         }
 
         var documentIds = draftSlots
@@ -173,6 +182,11 @@ public sealed class MonthlyPackService : IMonthlyPackService
                     submittedAtUtc);
             }
 
+            foreach (var supportingDocument in supportingDocuments)
+            {
+                supportingDocument.MarkUnderReview();
+            }
+
             pack.MarkUnderReview();
         }
         catch (DomainRuleException ex)
@@ -187,7 +201,16 @@ public sealed class MonthlyPackService : IMonthlyPackService
             "monthly_pack",
             pack.Id,
             pack.ClientId,
-            JsonSerializer.Serialize(new { pack.Id, pack.ClientId, pack.Year, pack.Month, pack.Status, SubmittedSlotCount = draftSlots.Count }),
+            JsonSerializer.Serialize(new
+            {
+                pack.Id,
+                pack.ClientId,
+                pack.Year,
+                pack.Month,
+                pack.Status,
+                SubmittedSlotCount = draftSlots.Count,
+                SupportingDocumentCount = supportingDocuments.Count
+            }),
             ct);
 
         var recipients = await _db.ResolveNotificationRecipientsAsync(pack.ClientId, "accountant", ct);
@@ -199,7 +222,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
             "Monthly pack submitted",
             $"The {new DateTime(pack.Year, pack.Month, 1):MMMM yyyy} monthly pack was submitted for review.",
             $"/monthly-packs/{pack.ClientId}",
-            new { pack.Id, pack.Year, pack.Month, pack.Status, SubmittedSlotCount = draftSlots.Count },
+            new { pack.Id, pack.Year, pack.Month, pack.Status, SubmittedSlotCount = draftSlots.Count, SupportingDocumentCount = supportingDocuments.Count },
             ct);
 
         return (false, false, null, pack);
@@ -297,4 +320,3 @@ public sealed class MonthlyPackService : IMonthlyPackService
         };
     }
 }
-
