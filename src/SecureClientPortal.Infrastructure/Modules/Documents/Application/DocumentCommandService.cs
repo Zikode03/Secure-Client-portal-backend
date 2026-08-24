@@ -63,11 +63,33 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<object>.ErrorResult("A valid document slot is required for this document upload.");
         }
 
+        Document? existingDocument = null;
+        if (request.DocumentId.HasValue)
+        {
+            existingDocument = await _documents.Documents.FirstOrDefaultAsync(x => x.Id == request.DocumentId.Value, ct);
+            if (existingDocument is null)
+            {
+                return ServiceResult<object>.NotFoundResult("Requested document could not be found.");
+            }
+
+            if (existingDocument.ClientId != request.ClientId || existingDocument.MonthlyPackId != pack.Id)
+            {
+                return ServiceResult<object>.ForbiddenResult();
+            }
+        }
+
         var packIsLocked = pack.Status is "under_review" or "complete" or "closed";
         var slotAllowsCorrection =
             slot is not null &&
             (slot.Status == "reupload_required" || slot.Status == "rejected");
-        if (packIsLocked && !slotAllowsCorrection)
+        var supportingDocumentAllowsCorrection =
+            slot is null &&
+            existingDocument is not null &&
+            existingDocument.DocumentSlotId is null &&
+            existingDocument.Status == "rejected" &&
+            pack.Status == "under_review";
+
+        if (packIsLocked && !slotAllowsCorrection && !supportingDocumentAllowsCorrection)
         {
             return ServiceResult<object>.ErrorResult(
                 "This monthly pack is already with the accountant or has been completed. New uploads are locked unless a correction was requested.",
@@ -79,7 +101,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
         var now = DateTime.UtcNow;
 
         Document document;
-        var isNewDocument = !request.DocumentId.HasValue;
+        var isNewDocument = existingDocument is null;
         if (isNewDocument)
         {
             document = Document.CreateUploaded(
@@ -97,18 +119,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
         }
         else
         {
-            var existingDocument = await _documents.Documents.FirstOrDefaultAsync(x => x.Id == request.DocumentId!.Value, ct);
-            if (existingDocument is null)
-            {
-                return ServiceResult<object>.NotFoundResult("Requested document could not be found.");
-            }
-
-            document = existingDocument;
-            if (document.ClientId != request.ClientId)
-            {
-                return ServiceResult<object>.ForbiddenResult();
-            }
-
+            document = existingDocument!;
             document.ReplaceUpload(
                 pack.Id,
                 stored.OriginalFileName,
@@ -148,6 +159,11 @@ public sealed class DocumentCommandService : IDocumentCommandService
             var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
             pack.RecalculateStatus(slots);
         }
+        else if (supportingDocumentAllowsCorrection)
+        {
+            // A corrected supporting document returns directly to the accountant because the pack is already in review.
+            document.MarkUnderReview();
+        }
         else if (pack.Status == "not_started")
         {
             pack.MarkInProgress();
@@ -167,6 +183,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 monthlyPackId = pack.Id,
                 documentSlotId = slot?.Id,
                 isSupportingDocument = slot is null,
+                isCorrection = !isNewDocument,
                 versionNumber = document.CurrentVersionNumber,
                 document.StorageKey
             }),
