@@ -64,7 +64,9 @@ public sealed class DocumentCommandService : IDocumentCommandService
         }
 
         var packIsLocked = pack.Status is "under_review" or "complete" or "closed";
-        var slotAllowsCorrection = slot is not null && slot.Status is "reupload_required" or "rejected";
+        var slotAllowsCorrection =
+            slot is not null &&
+            (slot.Status == "reupload_required" || slot.Status == "rejected");
         if (packIsLocked && !slotAllowsCorrection)
         {
             return ServiceResult<object>.ErrorResult(
