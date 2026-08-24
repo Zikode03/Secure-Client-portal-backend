@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Documents;
@@ -56,10 +57,19 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<object>.ErrorResult("A valid monthly pack is required for document upload.");
         }
 
-        var slot = await ResolveSlotAsync(request.ClientId, pack.Id, request.DocumentSlotId, normalizedCategory, ct);
-        if (slot is null)
+        var slot = await ResolveSlotAsync(request.ClientId, pack.Id, request.DocumentSlotId, ct);
+        if (request.DocumentSlotId.HasValue && slot is null)
         {
-            return ServiceResult<object>.ErrorResult("A valid document slot is required for document upload.");
+            return ServiceResult<object>.ErrorResult("A valid document slot is required for this document upload.");
+        }
+
+        var packIsLocked = pack.Status is "under_review" or "complete" or "closed";
+        var slotAllowsCorrection = slot is not null && slot.Status is "reupload_required" or "rejected";
+        if (packIsLocked && !slotAllowsCorrection)
+        {
+            return ServiceResult<object>.ErrorResult(
+                "This monthly pack is already with the accountant or has been completed. New uploads are locked unless a correction was requested.",
+                statusCode: StatusCodes.Status409Conflict);
         }
 
         var stored = await _fileStorage.SaveAsync(request.File, request.ClientId.ToString(), ct);
@@ -76,7 +86,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 pack.Id,
                 stored.OriginalFileName,
                 normalizedCategory,
-                slot.Id,
+                slot?.Id,
                 stored.ContentType,
                 stored.SizeBytes,
                 stored.StorageKey,
@@ -101,7 +111,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 pack.Id,
                 stored.OriginalFileName,
                 normalizedCategory,
-                slot.Id,
+                slot?.Id,
                 stored.ContentType,
                 stored.SizeBytes,
                 stored.StorageKey,
@@ -130,14 +140,21 @@ public sealed class DocumentCommandService : IDocumentCommandService
             actorUserId,
             now));
 
-        slot.MarkDraft(document.Id);
-        var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
-        pack.RecalculateStatus(slots);
+        if (slot is not null)
+        {
+            slot.MarkDraft(document.Id);
+            var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
+            pack.RecalculateStatus(slots);
+        }
+        else if (pack.Status == "not_started")
+        {
+            pack.MarkInProgress();
+        }
 
         await _documents.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             user,
-            "documents.uploaded",
+            slot is null ? "documents.supporting_uploaded" : "documents.uploaded",
             "document",
             document.Id,
             document.ClientId,
@@ -146,7 +163,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 document.Id,
                 document.ClientId,
                 monthlyPackId = pack.Id,
-                documentSlotId = slot.Id,
+                documentSlotId = slot?.Id,
+                isSupportingDocument = slot is null,
                 versionNumber = document.CurrentVersionNumber,
                 document.StorageKey
             }),
@@ -172,7 +190,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
             document.Id,
             document.ClientId,
             monthlyPackId = pack.Id,
-            documentSlotId = slot.Id,
+            documentSlotId = slot?.Id,
+            isSupportingDocument = slot is null,
             documentType = document.Category,
             document.Name,
             document.Status,
@@ -401,14 +420,17 @@ public sealed class DocumentCommandService : IDocumentCommandService
         return null;
     }
 
-    private async Task<DocumentSlot?> ResolveSlotAsync(Guid clientId, Guid monthlyPackId, Guid? documentSlotId, string category, CancellationToken ct)
+    private async Task<DocumentSlot?> ResolveSlotAsync(Guid clientId, Guid monthlyPackId, Guid? documentSlotId, CancellationToken ct)
     {
-        if (documentSlotId.HasValue)
+        if (!documentSlotId.HasValue)
         {
-            return await _documents.DocumentSlots.FirstOrDefaultAsync(x => x.Id == documentSlotId.Value && x.ClientId == clientId && x.MonthlyPackId == monthlyPackId, ct);
+            return null;
         }
 
-        return await _documents.DocumentSlots.FirstOrDefaultAsync(x => x.ClientId == clientId && x.MonthlyPackId == monthlyPackId && x.Category == category, ct);
+        return await _documents.DocumentSlots.FirstOrDefaultAsync(x =>
+            x.Id == documentSlotId.Value &&
+            x.ClientId == clientId &&
+            x.MonthlyPackId == monthlyPackId, ct);
     }
 
     private static string NormalizeDocumentStatus(string rawStatus)
