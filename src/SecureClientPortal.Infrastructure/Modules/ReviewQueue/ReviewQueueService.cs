@@ -61,11 +61,14 @@ public sealed class ReviewQueueService : IReviewQueueService
              join pack in _db.MonthlyPacks on document.MonthlyPackId equals pack.Id
              join slotLeft in _db.DocumentSlots on document.DocumentSlotId equals slotLeft.Id into slotGroup
              from slot in slotGroup.DefaultIfEmpty()
+             let effectiveReviewStatus = slot != null ? slot.Status : document.Status
              where allowedClientIds.Contains(document.ClientId)
                  && (!requestedClientId.HasValue || document.ClientId == requestedClientId.Value)
                  && (normalizedCategory == null || document.Category == normalizedCategory)
-                 && (normalizedStatus == null || slot!.Status == normalizedStatus)
-                 && (slot != null && (slot.Status == "submitted" || slot.Status == "under_review"))
+                 && (normalizedStatus == null || effectiveReviewStatus == normalizedStatus)
+                 && (
+                     (slot != null && (slot.Status == "submitted" || slot.Status == "under_review")) ||
+                     (slot == null && document.Status == "under_review"))
              select new PendingReviewProjection(
                  document.Id,
                  client.Id,
@@ -73,16 +76,16 @@ public sealed class ReviewQueueService : IReviewQueueService
                  pack.Id,
                  pack.Year,
                  pack.Month,
-                 slot!.Id,
-                 slot.Label,
+                 slot != null ? slot.Id : null,
+                 slot != null ? slot.Label : "Supporting document",
                  document.Name,
                  document.Category,
                  document.Status,
-                 slot.Status,
+                 effectiveReviewStatus,
                  document.CurrentVersionNumber,
                  document.UploadedAtUtc,
-                 slot.SubmittedAtUtc,
-                 slot.RejectionReason))
+                 slot != null ? slot.SubmittedAtUtc : document.UpdatedAtUtc,
+                 slot != null ? slot.RejectionReason : null))
             .ToListAsync(ct);
 
         var now = DateTime.UtcNow;
@@ -156,14 +159,14 @@ public sealed class ReviewQueueService : IReviewQueueService
                  pack.Year,
                  pack.Month,
                  slot != null ? slot.Id : null,
-                 slot != null ? slot.Label : null,
+                 slot != null ? slot.Label : "Supporting document",
                  document.Name,
                  document.Category,
                  document.Status,
-                 slot != null ? slot.Status : null,
+                 slot != null ? slot.Status : document.Status,
                  document.CurrentVersionNumber,
                  document.UploadedAtUtc,
-                 slot != null ? slot.SubmittedAtUtc : null,
+                 slot != null ? slot.SubmittedAtUtc : document.UpdatedAtUtc,
                  slot != null ? slot.RejectionReason : null))
             .FirstOrDefaultAsync(ct);
 
