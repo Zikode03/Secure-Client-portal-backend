@@ -2,12 +2,14 @@ namespace SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
 
 // Describes one recurring requirement in a client's monthly-pack profile.
 // Source tells the UI whether the item came from the firm template or was tailored for this client.
+// DefaultDueDayOfMonth lets future packs recreate a recurring deadline without storing a fixed date.
 public record ClientMonthlyPackProfileItemDto(
     Guid Id,
     string Category,
     string Label,
     bool IsRequired,
-    string Source);
+    string Source,
+    int? DefaultDueDayOfMonth);
 
 // Lightweight template option used by Accountant/Admin when choosing the starting point for a client.
 public record ClientMonthlyPackTemplateOptionDto(
@@ -23,7 +25,8 @@ public record PendingRecurringPackItemDto(
     string Label,
     bool IsRequired,
     DateTime RequestedAtUtc,
-    Guid RequestedByUserId);
+    Guid RequestedByUserId,
+    int? DefaultDueDayOfMonth);
 
 // Current pack items include source metadata that DocumentSlot itself intentionally does not store.
 public record ClientMonthlyPackCurrentItemDto(
@@ -52,7 +55,8 @@ public record UpdateClientMonthlyPackProfileRequest(
 public record ClientMonthlyPackProfileItemInput(
     string Category,
     string Label,
-    bool IsRequired);
+    bool IsRequired,
+    int? DefaultDueDayOfMonth = null);
 
 // Recurrence accepts "this_month" or "every_month".
 // Clients may request recurring items, while accountants/admins can add recurring items immediately.
