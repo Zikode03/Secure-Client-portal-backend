@@ -17,6 +17,13 @@ public sealed class MonthlyPackService : IMonthlyPackService
     private readonly PortalDbContext _db;
     private readonly IClientMonthlyPackProfileService _profileService;
 
+    // Keep the original one-argument constructor for focused unit tests and utility callers.
+    // Production dependency injection uses the two-argument constructor below.
+    public MonthlyPackService(PortalDbContext db)
+        : this(db, new ClientMonthlyPackProfileService(db))
+    {
+    }
+
     public MonthlyPackService(PortalDbContext db, IClientMonthlyPackProfileService profileService)
     {
         _db = db;
@@ -84,7 +91,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
         await _db.SaveChangesAsync(ct);
 
         // A newly created month inherits the client's effective profile immediately.
-        // This is where firm defaults and approved client-specific recurring items become real slots.
+        // Firm defaults and approved client-specific recurring items become real document slots here.
         await _profileService.ApplyProfileToPackAsync(pack.ClientId, pack.Id, ct);
 
         await _db.WriteAuditLogAsync(
@@ -189,7 +196,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
                     submittedAtUtc);
             }
 
-            // Slotless supporting documents travel with the month and enter the same accountant review stage.
+            // Supporting documents are not checklist blockers, but they travel with the month into review.
             foreach (var supportingDocument in supportingDocuments)
             {
                 supportingDocument.MarkUnderReview();
