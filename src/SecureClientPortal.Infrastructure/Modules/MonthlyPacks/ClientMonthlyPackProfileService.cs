@@ -13,9 +13,9 @@ using System.Text.Json;
 namespace SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 
 /// <summary>
-/// Builds a monthly-pack profile for each client without introducing a second checklist model.
-/// The profile itself is JSON in AppSystemSettings; actual monthly work is still represented by
-/// DocumentSlot entities so the existing upload/review/completion workflow remains authoritative.
+/// Builds a monthly-pack profile for each client without creating a competing checklist model.
+/// The profile is persisted as JSON in AppSystemSettings, while actual monthly work remains
+/// DocumentSlot data. This keeps the existing upload, completion and review lifecycle intact.
 /// </summary>
 public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileService
 {
@@ -59,7 +59,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 ct);
             if (!templateExists)
             {
-                return ServiceResult<ClientMonthlyPackProfileDto>.ErrorResult("The selected monthly-pack template was not found or is inactive.");
+                return ServiceResult<ClientMonthlyPackProfileDto>.ErrorResult(
+                    "The selected monthly-pack template was not found or is inactive.");
             }
         }
 
@@ -79,8 +80,14 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         state.UpdatedAtUtc = DateTime.UtcNow;
 
         await SaveStateAsync(clientId, state, ct);
-        await _db.WriteAuditLogAsync(user, "monthly_pack_profile.updated", "client", clientId, clientId,
-            JsonSerializer.Serialize(new { state.TemplateId, recurringCount = state.RecurringItems.Count }), ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "monthly_pack_profile.updated",
+            "client",
+            clientId,
+            clientId,
+            JsonSerializer.Serialize(new { state.TemplateId, recurringCount = state.RecurringItems.Count }),
+            ct);
 
         return ServiceResult<ClientMonthlyPackProfileDto>.Success(await BuildDtoAsync(clientId, ct));
     }
@@ -106,10 +113,11 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var recurrence = NormalizeRecurrence(request.Recurrence);
         if (recurrence is null)
         {
-            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult("Recurrence must be 'this_month' or 'every_month'.");
+            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult(
+                "Recurrence must be 'this_month' or 'every_month'.");
         }
 
-        // Add client items only to the latest active pack. Closed/review packs remain immutable.
+        // New client-defined items belong to the latest active month. Once review begins, that month is frozen.
         var pack = await _db.MonthlyPacks
             .Where(x => x.ClientId == clientId)
             .OrderByDescending(x => x.Year)
@@ -126,12 +134,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 statusCode: 409);
         }
 
-        // DocumentSlot has a unique (pack, category) constraint. A client may add another item whose
-        // category already exists, so one-off slots get a harmless unique suffix while retaining the label.
+        // DocumentSlot has a unique (pack, category) constraint. Client-added items may reuse a business
+        // category such as invoices, so only the storage category receives a short unique suffix.
         var slotCategory = category;
         if (await _db.DocumentSlots.AnyAsync(x => x.MonthlyPackId == pack.Id && x.Category == slotCategory, ct))
         {
-            slotCategory = $"{category}_client_{Guid.NewGuid():N}"[..Math.Min(80, category.Length + 14)];
+            slotCategory = BuildUniqueSlotCategory(category);
         }
 
         var slot = DocumentSlot.Create(
@@ -145,14 +153,17 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             DateTime.UtcNow);
         slot.MarkNotStarted();
         _db.DocumentSlots.Add(slot);
-        pack.MarkInProgress();
+        if (pack.Status == "not_started")
+        {
+            pack.MarkInProgress();
+        }
 
         var state = await LoadStateAsync(clientId, ct);
         var actorUserId = user.GetUserId() ?? Guid.Empty;
         var source = user.IsAdmin() || user.IsAccountant() ? "client_specific" : "client_added";
         Guid? recurringRequestId = null;
 
-        // Source metadata is stored outside DocumentSlot so the core domain remains backwards compatible.
+        // Source metadata lives in the profile store so DocumentSlot remains backwards compatible.
         state.OneOffItems.RemoveAll(x => x.SlotId == slot.Id);
         state.OneOffItems.Add(new OneOffItemState { SlotId = slot.Id, Source = source });
 
@@ -160,10 +171,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         {
             if (user.IsAdmin() || user.IsAccountant())
             {
+                // A professional user can approve the recurring rule at the same time they add it.
                 AddOrReplaceRecurringItem(state, category, label, request.IsRequired);
             }
             else
             {
+                // A client may request recurring behavior but cannot silently redefine the firm's future checklist.
                 recurringRequestId = Guid.NewGuid();
                 state.PendingRecurringItems.Add(new PendingRecurringState
                 {
@@ -180,8 +193,14 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         state.UpdatedAtUtc = DateTime.UtcNow;
         await SaveStateAsync(clientId, state, ct);
         await _db.SaveChangesAsync(ct);
-        await _db.WriteAuditLogAsync(user, "monthly_pack_profile.item_added", "document_slot", slot.Id, clientId,
-            JsonSerializer.Serialize(new { slot.Id, pack.Id, recurrence, source, recurringRequestId }), ct);
+        await _db.WriteAuditLogAsync(
+            user,
+            "monthly_pack_profile.item_added",
+            "document_slot",
+            slot.Id,
+            clientId,
+            JsonSerializer.Serialize(new { slot.Id, pack.Id, recurrence, source, recurringRequestId }),
+            ct);
 
         return ServiceResult<AddClientMonthlyPackItemResponse>.Success(new AddClientMonthlyPackItemResponse(
             slot.Id,
@@ -207,7 +226,9 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
     public async Task ApplyProfileToPackAsync(Guid clientId, Guid monthlyPackId, CancellationToken ct = default)
     {
-        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == monthlyPackId && x.ClientId == clientId, ct);
+        var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(
+            x => x.Id == monthlyPackId && x.ClientId == clientId,
+            ct);
         if (pack is null) return;
 
         var state = await LoadStateAsync(clientId, ct);
@@ -218,6 +239,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             .ToListAsync(ct))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Firm-template requirements are the baseline for this client.
         if (template is not null)
         {
             var templateRequirements = await
@@ -233,19 +255,37 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 var category = DocumentDomainValues.NormalizeCategory(requirement.DocumentCategory);
                 if (!existingCategories.Add(category)) continue;
 
-                _db.DocumentSlots.Add(DocumentSlot.Create(
-                    Guid.NewGuid(), monthlyPackId, clientId, category, requirement.Name, requirement.IsRequired,
-                    BuildDueDate(pack.Year, pack.Month, requirement.DefaultDueDayOfMonth), DateTime.UtcNow));
+                var slot = DocumentSlot.Create(
+                    Guid.NewGuid(),
+                    monthlyPackId,
+                    clientId,
+                    category,
+                    requirement.Name,
+                    requirement.IsRequired,
+                    BuildDueDate(pack.Year, pack.Month, requirement.DefaultDueDayOfMonth),
+                    DateTime.UtcNow);
+                slot.MarkNotStarted();
+                _db.DocumentSlots.Add(slot);
             }
         }
 
+        // Approved client-specific recurring items are added after the baseline template.
         foreach (var item in state.RecurringItems)
         {
             var category = DocumentDomainValues.NormalizeCategory(item.Category);
             if (!existingCategories.Add(category)) continue;
 
-            _db.DocumentSlots.Add(DocumentSlot.Create(
-                Guid.NewGuid(), monthlyPackId, clientId, category, item.Label, item.IsRequired, null, DateTime.UtcNow));
+            var slot = DocumentSlot.Create(
+                Guid.NewGuid(),
+                monthlyPackId,
+                clientId,
+                category,
+                item.Label,
+                item.IsRequired,
+                null,
+                DateTime.UtcNow);
+            slot.MarkNotStarted();
+            _db.DocumentSlots.Add(slot);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -271,7 +311,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var pending = state.PendingRecurringItems.FirstOrDefault(x => x.Id == requestId);
         if (pending is null)
         {
-            return ServiceResult<ClientMonthlyPackProfileDto>.NotFoundResult("Recurring monthly-pack request was not found.");
+            return ServiceResult<ClientMonthlyPackProfileDto>.NotFoundResult(
+                "Recurring monthly-pack request was not found.");
         }
 
         if (approve)
@@ -281,9 +322,14 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         state.PendingRecurringItems.RemoveAll(x => x.Id == requestId);
         state.UpdatedAtUtc = DateTime.UtcNow;
         await SaveStateAsync(clientId, state, ct);
-        await _db.WriteAuditLogAsync(user,
+        await _db.WriteAuditLogAsync(
+            user,
             approve ? "monthly_pack_profile.recurring_approved" : "monthly_pack_profile.recurring_declined",
-            "client", clientId, clientId, JsonSerializer.Serialize(new { requestId, pending.Label }), ct);
+            "client",
+            clientId,
+            clientId,
+            JsonSerializer.Serialize(new { requestId, pending.Label }),
+            ct);
 
         return ServiceResult<ClientMonthlyPackProfileDto>.Success(await BuildDtoAsync(clientId, ct));
     }
@@ -293,6 +339,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var state = await LoadStateAsync(clientId, ct);
         var template = await ResolveTemplateAsync(state.TemplateId, ct);
         var recurring = new List<ClientMonthlyPackProfileItemDto>();
+
+        var availableTemplates = await _db.MonthlyPackTemplates
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new ClientMonthlyPackTemplateOptionDto(x.Id, x.Name, x.Description))
+            .ToListAsync(ct);
 
         if (template is not null)
         {
@@ -304,28 +356,50 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                  select requirement)
                 .ToListAsync(ct);
             recurring.AddRange(templateItems.Select(x => new ClientMonthlyPackProfileItemDto(
-                x.Id, x.DocumentCategory, x.Name, x.IsRequired, "firm_default")));
+                x.Id,
+                x.DocumentCategory,
+                x.Name,
+                x.IsRequired,
+                "firm_default")));
         }
 
         recurring.AddRange(state.RecurringItems.Select(x => new ClientMonthlyPackProfileItemDto(
-            x.Id, x.Category, x.Label, x.IsRequired, x.Source)));
+            x.Id,
+            x.Category,
+            x.Label,
+            x.IsRequired,
+            x.Source)));
 
         var currentPack = await _db.MonthlyPacks
             .Where(x => x.ClientId == clientId)
-            .OrderByDescending(x => x.Year).ThenByDescending(x => x.Month)
+            .OrderByDescending(x => x.Year)
+            .ThenByDescending(x => x.Month)
             .FirstOrDefaultAsync(ct);
+
         var currentItems = new List<ClientMonthlyPackCurrentItemDto>();
         if (currentPack is not null)
         {
-            var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == currentPack.Id).OrderByDescending(x => x.IsRequired).ThenBy(x => x.Label).ToListAsync(ct);
+            var slots = await _db.DocumentSlots
+                .Where(x => x.MonthlyPackId == currentPack.Id)
+                .OrderByDescending(x => x.IsRequired)
+                .ThenBy(x => x.Label)
+                .ToListAsync(ct);
+
             foreach (var slot in slots)
             {
                 var source = state.OneOffItems.FirstOrDefault(x => x.SlotId == slot.Id)?.Source
                     ?? (state.RecurringItems.Any(x => string.Equals(x.Category, slot.Category, StringComparison.OrdinalIgnoreCase))
                         ? "client_specific"
                         : "firm_default");
+
                 currentItems.Add(new ClientMonthlyPackCurrentItemDto(
-                    slot.Id, slot.Category, slot.Label, slot.IsRequired, slot.Status, source, slot.DueDateUtc));
+                    slot.Id,
+                    slot.Category,
+                    slot.Label,
+                    slot.IsRequired,
+                    slot.Status,
+                    source,
+                    slot.DueDateUtc));
             }
         }
 
@@ -333,16 +407,26 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             clientId,
             template?.Id,
             template?.Name,
+            availableTemplates,
             recurring,
             state.PendingRecurringItems.Select(x => new PendingRecurringPackItemDto(
-                x.Id, x.Category, x.Label, x.IsRequired, x.RequestedAtUtc, x.RequestedByUserId)).ToList(),
+                x.Id,
+                x.Category,
+                x.Label,
+                x.IsRequired,
+                x.RequestedAtUtc,
+                x.RequestedByUserId)).ToList(),
             currentItems,
             state.UpdatedAtUtc);
     }
 
     private async Task<bool> CanAccessClientAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct)
     {
-        if (user.IsAdmin()) return await _db.Clients.AnyAsync(x => x.Id == clientId, ct);
+        if (user.IsAdmin())
+        {
+            return await _db.Clients.AnyAsync(x => x.Id == clientId, ct);
+        }
+
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         return allowedClientIds.Contains(clientId);
     }
@@ -351,18 +435,26 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
     {
         if (selectedTemplateId.HasValue)
         {
-            var selected = await _db.MonthlyPackTemplates.FirstOrDefaultAsync(x => x.Id == selectedTemplateId.Value && x.IsActive, ct);
+            var selected = await _db.MonthlyPackTemplates.FirstOrDefaultAsync(
+                x => x.Id == selectedTemplateId.Value && x.IsActive,
+                ct);
             if (selected is not null) return selected;
         }
 
-        // First active template is the firm's fallback when a client has not been explicitly configured.
-        return await _db.MonthlyPackTemplates.Where(x => x.IsActive).OrderBy(x => x.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        // The oldest active template acts as the firm's safe fallback until a client is explicitly configured.
+        return await _db.MonthlyPackTemplates
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
     }
 
     private async Task<ProfileState> LoadStateAsync(Guid clientId, CancellationToken ct)
     {
         var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == ProfileKey(clientId), ct);
-        if (setting is null) return new ProfileState { UpdatedAtUtc = DateTime.UtcNow };
+        if (setting is null)
+        {
+            return new ProfileState { UpdatedAtUtc = DateTime.UtcNow };
+        }
 
         try
         {
@@ -371,8 +463,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         }
         catch (JsonException)
         {
-            // A malformed profile should not break monthly-pack access. Return a clean profile and allow
-            // the next successful edit to replace the bad JSON.
+            // Bad JSON should never prevent a client from opening their pack. A later successful edit
+            // will replace the malformed profile with a valid state.
             return new ProfileState { UpdatedAtUtc = setting.UpdatedAtUtc };
         }
     }
@@ -390,6 +482,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         {
             setting.UpdateValue(json);
         }
+
         await _db.SaveChangesAsync(ct);
     }
 
@@ -414,6 +507,14 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         return new DateTime(year, month, day, 23, 59, 59, DateTimeKind.Utc);
     }
 
+    private static string BuildUniqueSlotCategory(string category)
+    {
+        var suffix = $"_client_{Guid.NewGuid():N}"[..15];
+        var baseLength = Math.Max(1, 80 - suffix.Length);
+        var safeBase = category.Length > baseLength ? category[..baseLength] : category;
+        return safeBase + suffix;
+    }
+
     private static string? NormalizeRecurrence(string? value)
     {
         var normalized = value?.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
@@ -422,6 +523,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
     private static string ProfileKey(Guid clientId) => $"monthly-pack-profile:{clientId:N}";
 
+    // These classes are persistence shapes only. They stay private so JSON storage does not leak
+    // into the public API contract.
     private sealed class ProfileState
     {
         public Guid? TemplateId { get; set; }
