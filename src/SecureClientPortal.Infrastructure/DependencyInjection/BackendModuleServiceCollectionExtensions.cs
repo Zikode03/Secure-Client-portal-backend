@@ -92,7 +92,10 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddMonthlyPacksModule(this IServiceCollection services)
     {
+        // Monthly packs have two layers: the pack workflow itself and a client-specific profile
+        // that determines which recurring slots should exist for each client.
         services.AddScoped<IDocumentSlotService, DocumentSlotService>();
+        services.AddScoped<IClientMonthlyPackProfileService, ClientMonthlyPackProfileService>();
         services.AddScoped<IMonthlyPackService, MonthlyPackService>();
         return services;
     }
