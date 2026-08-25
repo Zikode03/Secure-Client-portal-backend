@@ -3,6 +3,7 @@ using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 using SecureClientPortal.Backend.Models;
 using System.Security.Claims;
 
@@ -160,6 +161,71 @@ public class ClientMonthlyPackProfileTests
 
         Assert.Contains(slots, slot => slot.Label == "Bank Statement" && slot.IsRequired);
         Assert.Contains(slots, slot => slot.Label == "Fuel Statement" && slot.IsRequired);
+    }
+
+    [Fact]
+    public async Task AutomaticMonthCreation_UsesOnlyTheClientsEffectiveProfile()
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId));
+
+        var transportTemplate = MonthlyPackTemplate.Create(
+            Guid.NewGuid(),
+            "Transport Client",
+            "Transport baseline.",
+            1);
+        var retailTemplate = MonthlyPackTemplate.Create(
+            Guid.NewGuid(),
+            "Retail Client",
+            "Retail baseline.",
+            1);
+        var bankRequirement = RequiredDocumentTemplate.Create(
+            Guid.NewGuid(),
+            "Bank Statement",
+            "Monthly bank statement.",
+            "bank_statement",
+            true,
+            5);
+        var posRequirement = RequiredDocumentTemplate.Create(
+            Guid.NewGuid(),
+            "POS Report",
+            "Retail point-of-sale report.",
+            "pos_report",
+            true,
+            5);
+
+        db.MonthlyPackTemplates.AddRange(transportTemplate, retailTemplate);
+        db.RequiredDocumentTemplates.AddRange(bankRequirement, posRequirement);
+        db.MonthlyPackTemplateItems.AddRange(
+            MonthlyPackTemplateItem.Create(Guid.NewGuid(), transportTemplate.Id, bankRequirement.Id, 1),
+            MonthlyPackTemplateItem.Create(Guid.NewGuid(), retailTemplate.Id, posRequirement.Id, 1));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var profileService = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        await profileService.UpdateAsync(
+            clientId,
+            new UpdateClientMonthlyPackProfileRequest(transportTemplate.Id, []),
+            admin,
+            TestContext.Current.CancellationToken);
+
+        // The legacy automation would add both active templates. The profile-aware production
+        // wrapper reconciles only slots created by this run and rebuilds from the selected profile.
+        var automation = new ProfileAwareAutomationWorkflowService(db, profileService);
+        await automation.RunAsync(
+            new DateTime(2026, 11, 10, 8, 0, 0, DateTimeKind.Utc),
+            TestContext.Current.CancellationToken);
+
+        var pack = await db.MonthlyPacks.SingleAsync(
+            x => x.ClientId == clientId && x.Year == 2026 && x.Month == 11,
+            TestContext.Current.CancellationToken);
+        var slots = await db.DocumentSlots
+            .Where(x => x.MonthlyPackId == pack.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(slots, slot => slot.Label == "Bank Statement");
+        Assert.DoesNotContain(slots, slot => slot.Label == "POS Report");
     }
 
     private static PortalDbContext BuildDb()
