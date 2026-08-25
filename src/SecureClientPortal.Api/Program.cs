@@ -227,6 +227,9 @@ app.UseAuthorization();
 app.MapControllers();
 
 await SeedData.InitializeAsync(app.Services);
+// Seed practical starter templates after the original generic seed. This is idempotent and gives
+// company-aware monthly-pack recommendations useful options in every environment.
+await BusinessMonthlyPackSeedData.InitializeAsync(app.Services);
 
 app.Run();
 
@@ -250,12 +253,3 @@ static string PartitionKey(HttpContext httpContext)
     var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     return $"{path}:{remoteIp}";
 }
-
-
-
-
-
-
-
-
-
