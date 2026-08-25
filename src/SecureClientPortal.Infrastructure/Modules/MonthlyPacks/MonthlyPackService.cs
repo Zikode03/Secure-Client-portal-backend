@@ -15,10 +15,12 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 public sealed class MonthlyPackService : IMonthlyPackService
 {
     private readonly PortalDbContext _db;
+    private readonly IClientMonthlyPackProfileService _profileService;
 
-    public MonthlyPackService(PortalDbContext db)
+    public MonthlyPackService(PortalDbContext db, IClientMonthlyPackProfileService profileService)
     {
         _db = db;
+        _profileService = profileService;
     }
 
     public async Task<(bool forbidden, IReadOnlyList<MonthlyPack> items)> GetAllAsync(ClaimsPrincipal user, string? clientId = null, CancellationToken ct = default)
@@ -80,6 +82,11 @@ public sealed class MonthlyPackService : IMonthlyPackService
 
         _db.MonthlyPacks.Add(pack);
         await _db.SaveChangesAsync(ct);
+
+        // A newly created month inherits the client's effective profile immediately.
+        // This is where firm defaults and approved client-specific recurring items become real slots.
+        await _profileService.ApplyProfileToPackAsync(pack.ClientId, pack.Id, ct);
+
         await _db.WriteAuditLogAsync(
             user,
             "monthly_packs.created",
@@ -182,6 +189,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
                     submittedAtUtc);
             }
 
+            // Slotless supporting documents travel with the month and enter the same accountant review stage.
             foreach (var supportingDocument in supportingDocuments)
             {
                 supportingDocument.MarkUnderReview();
