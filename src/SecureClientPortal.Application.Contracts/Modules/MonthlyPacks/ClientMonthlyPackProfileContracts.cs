@@ -9,6 +9,12 @@ public record ClientMonthlyPackProfileItemDto(
     bool IsRequired,
     string Source);
 
+// Lightweight template option used by Accountant/Admin when choosing the starting point for a client.
+public record ClientMonthlyPackTemplateOptionDto(
+    Guid Id,
+    string Name,
+    string Description);
+
 // A recurring request created by the client must be reviewed by the accountant/admin before
 // it becomes part of future monthly packs. The item is still available in the current month.
 public record PendingRecurringPackItemDto(
@@ -33,6 +39,7 @@ public record ClientMonthlyPackProfileDto(
     Guid ClientId,
     Guid? TemplateId,
     string? TemplateName,
+    IReadOnlyList<ClientMonthlyPackTemplateOptionDto> AvailableTemplates,
     IReadOnlyList<ClientMonthlyPackProfileItemDto> RecurringItems,
     IReadOnlyList<PendingRecurringPackItemDto> PendingRecurringItems,
     IReadOnlyList<ClientMonthlyPackCurrentItemDto> CurrentPackItems,
