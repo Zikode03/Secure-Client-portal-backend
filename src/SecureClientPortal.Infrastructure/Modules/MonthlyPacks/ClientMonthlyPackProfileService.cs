@@ -209,7 +209,15 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             "document_slot",
             slot.Id,
             clientId,
-            JsonSerializer.Serialize(new { slot.Id, pack.Id, recurrence, source, recurringRequestId, recurringDueDay }),
+            JsonSerializer.Serialize(new
+            {
+                SlotId = slot.Id,
+                PackId = pack.Id,
+                recurrence,
+                source,
+                recurringRequestId,
+                recurringDueDay
+            }),
             ct);
 
         return ServiceResult<AddClientMonthlyPackItemResponse>.Success(new AddClientMonthlyPackItemResponse(
