@@ -64,6 +64,13 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             }
         }
 
+        var invalidDueDay = request.RecurringItems.FirstOrDefault(x => x.DefaultDueDayOfMonth is < 1 or > 31);
+        if (invalidDueDay is not null)
+        {
+            return ServiceResult<ClientMonthlyPackProfileDto>.ErrorResult(
+                $"The recurring due day for '{invalidDueDay.Label}' must be between 1 and 31.");
+        }
+
         var state = await LoadStateAsync(clientId, ct);
         state.TemplateId = request.TemplateId;
         state.RecurringItems = request.RecurringItems
@@ -74,6 +81,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 Category = DocumentDomainValues.NormalizeCategory(x.Category),
                 Label = x.Label.Trim(),
                 IsRequired = x.IsRequired,
+                DefaultDueDayOfMonth = NormalizeDueDay(x.DefaultDueDayOfMonth),
                 Source = "client_specific"
             })
             .ToList();
@@ -162,6 +170,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var actorUserId = user.GetUserId() ?? Guid.Empty;
         var source = user.IsAdmin() || user.IsAccountant() ? "client_specific" : "client_added";
         Guid? recurringRequestId = null;
+        var recurringDueDay = recurrence == "every_month" ? request.DueDateUtc?.Day : null;
 
         // Source metadata lives in the profile store so DocumentSlot remains backwards compatible.
         state.OneOffItems.RemoveAll(x => x.SlotId == slot.Id);
@@ -172,7 +181,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             if (user.IsAdmin() || user.IsAccountant())
             {
                 // A professional user can approve the recurring rule at the same time they add it.
-                AddOrReplaceRecurringItem(state, category, label, request.IsRequired);
+                AddOrReplaceRecurringItem(state, category, label, request.IsRequired, recurringDueDay);
             }
             else
             {
@@ -184,6 +193,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                     Category = category,
                     Label = label,
                     IsRequired = request.IsRequired,
+                    DefaultDueDayOfMonth = recurringDueDay,
                     RequestedAtUtc = DateTime.UtcNow,
                     RequestedByUserId = actorUserId
                 });
@@ -199,7 +209,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             "document_slot",
             slot.Id,
             clientId,
-            JsonSerializer.Serialize(new { slot.Id, pack.Id, recurrence, source, recurringRequestId }),
+            JsonSerializer.Serialize(new { slot.Id, pack.Id, recurrence, source, recurringRequestId, recurringDueDay }),
             ct);
 
         return ServiceResult<AddClientMonthlyPackItemResponse>.Success(new AddClientMonthlyPackItemResponse(
@@ -282,7 +292,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 category,
                 item.Label,
                 item.IsRequired,
-                null,
+                BuildDueDate(pack.Year, pack.Month, item.DefaultDueDayOfMonth),
                 DateTime.UtcNow);
             slot.MarkNotStarted();
             _db.DocumentSlots.Add(slot);
@@ -317,7 +327,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
         if (approve)
         {
-            AddOrReplaceRecurringItem(state, pending.Category, pending.Label, pending.IsRequired);
+            AddOrReplaceRecurringItem(
+                state,
+                pending.Category,
+                pending.Label,
+                pending.IsRequired,
+                pending.DefaultDueDayOfMonth);
         }
         state.PendingRecurringItems.RemoveAll(x => x.Id == requestId);
         state.UpdatedAtUtc = DateTime.UtcNow;
@@ -328,7 +343,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             "client",
             clientId,
             clientId,
-            JsonSerializer.Serialize(new { requestId, pending.Label }),
+            JsonSerializer.Serialize(new { requestId, pending.Label, pending.DefaultDueDayOfMonth }),
             ct);
 
         return ServiceResult<ClientMonthlyPackProfileDto>.Success(await BuildDtoAsync(clientId, ct));
@@ -360,7 +375,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 x.DocumentCategory,
                 x.Name,
                 x.IsRequired,
-                "firm_default")));
+                "firm_default",
+                x.DefaultDueDayOfMonth)));
         }
 
         recurring.AddRange(state.RecurringItems.Select(x => new ClientMonthlyPackProfileItemDto(
@@ -368,7 +384,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             x.Category,
             x.Label,
             x.IsRequired,
-            x.Source)));
+            x.Source,
+            x.DefaultDueDayOfMonth)));
 
         var currentPack = await _db.MonthlyPacks
             .Where(x => x.ClientId == clientId)
@@ -415,7 +432,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 x.Label,
                 x.IsRequired,
                 x.RequestedAtUtc,
-                x.RequestedByUserId)).ToList(),
+                x.RequestedByUserId,
+                x.DefaultDueDayOfMonth)).ToList(),
             currentItems,
             state.UpdatedAtUtc);
     }
@@ -486,7 +504,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         await _db.SaveChangesAsync(ct);
     }
 
-    private static void AddOrReplaceRecurringItem(ProfileState state, string category, string label, bool isRequired)
+    private static void AddOrReplaceRecurringItem(
+        ProfileState state,
+        string category,
+        string label,
+        bool isRequired,
+        int? defaultDueDayOfMonth)
     {
         var normalized = DocumentDomainValues.NormalizeCategory(category);
         state.RecurringItems.RemoveAll(x => string.Equals(x.Category, normalized, StringComparison.OrdinalIgnoreCase));
@@ -496,6 +519,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             Category = normalized,
             Label = label.Trim(),
             IsRequired = isRequired,
+            DefaultDueDayOfMonth = NormalizeDueDay(defaultDueDayOfMonth),
             Source = "client_specific"
         });
     }
@@ -505,6 +529,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         if (!dueDay.HasValue) return null;
         var day = Math.Min(dueDay.Value, DateTime.DaysInMonth(year, month));
         return new DateTime(year, month, day, 23, 59, 59, DateTimeKind.Utc);
+    }
+
+    private static int? NormalizeDueDay(int? dueDay)
+    {
+        if (!dueDay.HasValue) return null;
+        return Math.Clamp(dueDay.Value, 1, 31);
     }
 
     private static string BuildUniqueSlotCategory(string category)
@@ -540,6 +570,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         public string Category { get; set; } = string.Empty;
         public string Label { get; set; } = string.Empty;
         public bool IsRequired { get; set; }
+        public int? DefaultDueDayOfMonth { get; set; }
         public string Source { get; set; } = "client_specific";
     }
 
@@ -549,6 +580,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         public string Category { get; set; } = string.Empty;
         public string Label { get; set; } = string.Empty;
         public bool IsRequired { get; set; }
+        public int? DefaultDueDayOfMonth { get; set; }
         public DateTime RequestedAtUtc { get; set; }
         public Guid RequestedByUserId { get; set; }
     }
