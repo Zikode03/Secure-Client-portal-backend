@@ -37,7 +37,31 @@ public sealed class ClientMonthlyPackProfilesController : ControllerBase
         Guid clientId,
         [FromBody] UpdateClientMonthlyPackProfileRequest request,
         CancellationToken ct)
-        => FromResult(await _profiles.UpdateAsync(clientId, request, User, ct));
+    {
+        // Older UI payloads did not know about recurring due-day metadata. Preserve the currently
+        // saved due day when the same logical recurring requirement is sent back without that field.
+        var current = await _profiles.GetAsync(clientId, User, ct);
+        if (current.Forbidden) return Forbid();
+
+        if (current.Value is not null)
+        {
+            var enrichedItems = request.RecurringItems.Select(item =>
+            {
+                if (item.DefaultDueDayOfMonth.HasValue) return item;
+
+                var existing = current.Value.RecurringItems.FirstOrDefault(candidate =>
+                    candidate.Source == "client_specific" &&
+                    (string.Equals(candidate.Category, item.Category, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(candidate.Label, item.Label, StringComparison.OrdinalIgnoreCase)));
+
+                return item with { DefaultDueDayOfMonth = existing?.DefaultDueDayOfMonth };
+            }).ToArray();
+
+            request = request with { RecurringItems = enrichedItems };
+        }
+
+        return FromResult(await _profiles.UpdateAsync(clientId, request, User, ct));
+    }
 
     [HttpPost("{clientId:guid}/items")]
     public async Task<IActionResult> AddItem(
