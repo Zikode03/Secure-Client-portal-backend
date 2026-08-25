@@ -48,7 +48,9 @@ public static class BackendModuleServiceCollectionExtensions
     {
         services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
         services.AddScoped<IHealthService, HealthService>();
-        services.AddScoped<IAutomationWorkflowService, AutomationWorkflowService>();
+        // Production automation is wrapped so automatic month creation respects each client's
+        // selected monthly-pack profile instead of applying every active firm template to everyone.
+        services.AddScoped<IAutomationWorkflowService, ProfileAwareAutomationWorkflowService>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddScoped<IIntegrationEventDispatcher, IntegrationEventDispatcher>();
         services.AddHostedService<AutomationBackgroundService>();
