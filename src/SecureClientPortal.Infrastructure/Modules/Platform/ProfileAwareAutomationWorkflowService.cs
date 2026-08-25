@@ -29,8 +29,12 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
     {
         var now = utcNow?.ToUniversalTime() ?? DateTime.UtcNow;
 
-        // Snapshot slot ids before automation. Anything not in this set afterwards was created by
-        // this run, so it is safe to reconcile without touching client uploads or previous work.
+        // Snapshot packs and slots before automation. Anything new after the inner run can be
+        // reconciled safely without modifying client work that already existed.
+        var packIdsBeforeRun = (await _db.MonthlyPacks
+            .Select(x => x.Id)
+            .ToListAsync(ct))
+            .ToHashSet();
         var slotIdsBeforeRun = (await _db.DocumentSlots
             .Select(x => x.Id)
             .ToListAsync(ct))
@@ -42,20 +46,31 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
         var automationSlots = await _db.DocumentSlots
             .Where(x => !slotIdsBeforeRun.Contains(x.Id))
             .ToListAsync(ct);
+        var newPackIds = (await _db.MonthlyPacks
+            .Where(x => !packIdsBeforeRun.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToListAsync(ct))
+            .ToHashSet();
 
-        if (automationSlots.Count == 0)
+        // A newly created pack may have zero legacy-template slots. Include new packs explicitly so
+        // approved custom recurring requirements are still materialised for that month.
+        var affectedPackIds = automationSlots
+            .Select(x => x.MonthlyPackId)
+            .Concat(newPackIds)
+            .Distinct()
+            .ToList();
+
+        if (affectedPackIds.Count == 0)
         {
             return summary;
         }
 
-        var affectedPackIds = automationSlots
-            .Select(x => x.MonthlyPackId)
-            .Distinct()
-            .ToList();
-
         // Remove only the broad legacy-template slots produced by this run.
-        _db.DocumentSlots.RemoveRange(automationSlots);
-        await _db.SaveChangesAsync(ct);
+        if (automationSlots.Count > 0)
+        {
+            _db.DocumentSlots.RemoveRange(automationSlots);
+            await _db.SaveChangesAsync(ct);
+        }
 
         var correctedSlotCount = 0;
         foreach (var packId in affectedPackIds)
