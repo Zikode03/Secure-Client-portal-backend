@@ -228,6 +228,128 @@ public class ClientMonthlyPackProfileTests
         Assert.DoesNotContain(slots, slot => slot.Label == "POS Report");
     }
 
+    [Fact]
+    public async Task OperatingFacts_AddApplicableModules_AndExcludeConfirmedNonApplicableItems()
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId));
+
+        var template = MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Lean baseline.", 1);
+        var bank = RequiredDocumentTemplate.Create(Guid.NewGuid(), "Bank Statement", "Banking records.", "bank_statement", true, 5);
+        var inventory = RequiredDocumentTemplate.Create(Guid.NewGuid(), "Inventory Report", "Stock records.", "inventory_report", true, 5);
+        db.MonthlyPackTemplates.Add(template);
+        db.RequiredDocumentTemplates.AddRange(bank, inventory);
+        db.MonthlyPackTemplateItems.AddRange(
+            MonthlyPackTemplateItem.Create(Guid.NewGuid(), template.Id, bank.Id, 1),
+            MonthlyPackTemplateItem.Create(Guid.NewGuid(), template.Id, inventory.Id, 2));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        await service.UpdateAsync(
+            clientId,
+            new UpdateClientMonthlyPackProfileRequest(
+                template.Id,
+                [],
+                new ClientOperatingProfileInput(
+                    VatRegistered: false,
+                    HasEmployees: true,
+                    HoldsInventory: false,
+                    OperatesFleet: false)),
+            admin,
+            TestContext.Current.CancellationToken);
+
+        var pack = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 9);
+        db.MonthlyPacks.Add(pack);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await service.ApplyProfileToPackAsync(clientId, pack.Id, TestContext.Current.CancellationToken);
+
+        var slots = await db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(slots, x => x.Category == "bank_statement");
+        Assert.Contains(slots, x => x.Category == "payroll_document" && x.IsRequired);
+        Assert.DoesNotContain(slots, x => x.Category == "inventory_report");
+        Assert.DoesNotContain(slots, x => x.Category == "tax_document");
+        Assert.DoesNotContain(slots, x => x.Category == "fuel_statement");
+    }
+
+    [Fact]
+    public async Task Reconciliation_RemovesEmptyPollution_ButPreservesUploadedEvidenceAsOptional()
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId));
+        var template = MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Lean baseline.", 1);
+        var bank = RequiredDocumentTemplate.Create(Guid.NewGuid(), "Bank Statement", "Banking records.", "bank_statement", true, 5);
+        db.MonthlyPackTemplates.Add(template);
+        db.RequiredDocumentTemplates.Add(bank);
+        db.MonthlyPackTemplateItems.Add(MonthlyPackTemplateItem.Create(Guid.NewGuid(), template.Id, bank.Id, 1));
+
+        var pack = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 9);
+        var pollutedPos = DocumentSlot.Create(Guid.NewGuid(), pack.Id, clientId, "merchant_statement", "POS Statements", true, null);
+        var fuelWithEvidence = DocumentSlot.Create(Guid.NewGuid(), pack.Id, clientId, "fuel_statement", "Fuel Statements", true, null);
+        fuelWithEvidence.MarkDraft(Guid.NewGuid());
+        db.MonthlyPacks.Add(pack);
+        db.DocumentSlots.AddRange(pollutedPos, fuelWithEvidence);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        await service.UpdateAsync(
+            clientId,
+            new UpdateClientMonthlyPackProfileRequest(
+                template.Id,
+                [],
+                new ClientOperatingProfileInput(UsesPos: false, OperatesFleet: false)),
+            admin,
+            TestContext.Current.CancellationToken);
+
+        var result = await service.ReconcileCurrentPackAsync(clientId, admin, TestContext.Current.CancellationToken);
+        var slots = await db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.Value!.Removed);
+        Assert.Equal(1, result.Value.PreservedWithEvidence);
+        Assert.DoesNotContain(slots, x => x.Id == pollutedPos.Id);
+        Assert.Contains(slots, x => x.Id == fuelWithEvidence.Id && !x.IsRequired && x.CurrentDocumentId.HasValue);
+        Assert.Contains(slots, x => x.Category == "bank_statement" && x.IsRequired);
+    }
+
+    [Fact]
+    public async Task RecurringRequirements_RespectTheirConfiguredCadence()
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId));
+        var template = MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Lean baseline.", 1);
+        db.MonthlyPackTemplates.Add(template);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        await service.UpdateAsync(
+            clientId,
+            new UpdateClientMonthlyPackProfileRequest(
+                template.Id,
+                [new ClientMonthlyPackProfileItemInput(
+                    "management_accounts",
+                    "Quarterly Management Accounts",
+                    true,
+                    Cadence: "quarterly",
+                    EffectiveFromUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc))]),
+            admin,
+            TestContext.Current.CancellationToken);
+
+        var february = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 2);
+        var april = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 4);
+        db.MonthlyPacks.AddRange(february, april);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await service.ApplyProfileToPackAsync(clientId, february.Id, TestContext.Current.CancellationToken);
+        await service.ApplyProfileToPackAsync(clientId, april.Id, TestContext.Current.CancellationToken);
+
+        Assert.False(await db.DocumentSlots.AnyAsync(x => x.MonthlyPackId == february.Id && x.Category == "management_accounts", TestContext.Current.CancellationToken));
+        Assert.True(await db.DocumentSlots.AnyAsync(x => x.MonthlyPackId == april.Id && x.Category == "management_accounts", TestContext.Current.CancellationToken));
+    }
+
     private static PortalDbContext BuildDb()
     {
         var options = new DbContextOptionsBuilder<PortalDbContext>()

@@ -9,7 +9,11 @@ public record ClientMonthlyPackProfileItemDto(
     string Label,
     bool IsRequired,
     string Source,
-    int? DefaultDueDayOfMonth);
+    int? DefaultDueDayOfMonth,
+    string Cadence = "monthly",
+    DateTime? EffectiveFromUtc = null,
+    DateTime? EffectiveToUtc = null,
+    string? Reason = null);
 
 // Lightweight template option used by Accountant/Admin when choosing the starting point for a client.
 public record ClientMonthlyPackTemplateOptionDto(
@@ -36,7 +40,65 @@ public record ClientMonthlyPackCurrentItemDto(
     bool IsRequired,
     string Status,
     string Source,
-    DateTime? DueDateUtc);
+    DateTime? DueDateUtc,
+    string? Reason = null);
+
+// Nullable operating answers represent facts that have not yet been confirmed. Unknown answers
+// never create compulsory upload slots; they are returned as recommendations for professional review.
+public record ClientOperatingProfileDto(
+    DateTime EffectiveFromUtc,
+    bool? VatRegistered,
+    int VatCycleMonths,
+    int VatAnchorMonth,
+    bool? HasEmployees,
+    bool? HoldsInventory,
+    bool? UsesSupplierAccounts,
+    bool? UsesPos,
+    bool? OperatesFleet,
+    bool? UsesSubcontractors,
+    bool? UsesPaymentCertificates,
+    bool? TracksProjectCosts,
+    bool? UsesBookingPlatforms,
+    bool? UsesFoodSuppliers,
+    bool? ManufacturesGoods,
+    bool BankFeedConnected,
+    bool SalesInvoicesSynced,
+    bool PurchaseInvoicesSynced,
+    bool IsComplete);
+
+public record ClientOperatingProfileInput(
+    bool? VatRegistered = null,
+    int VatCycleMonths = 2,
+    int VatAnchorMonth = 1,
+    bool? HasEmployees = null,
+    bool? HoldsInventory = null,
+    bool? UsesSupplierAccounts = null,
+    bool? UsesPos = null,
+    bool? OperatesFleet = null,
+    bool? UsesSubcontractors = null,
+    bool? UsesPaymentCertificates = null,
+    bool? TracksProjectCosts = null,
+    bool? UsesBookingPlatforms = null,
+    bool? UsesFoodSuppliers = null,
+    bool? ManufacturesGoods = null,
+    bool BankFeedConnected = false,
+    bool SalesInvoicesSynced = false,
+    bool PurchaseInvoicesSynced = false);
+
+public record MonthlyPackRequirementRecommendationDto(
+    string Category,
+    string Label,
+    bool IsRequired,
+    string Cadence,
+    string Decision,
+    string Reason);
+
+public record MonthlyPackReconciliationResultDto(
+    Guid MonthlyPackId,
+    int Added,
+    int Removed,
+    int PreservedWithEvidence,
+    int Updated);
 
 public record ClientMonthlyPackProfileDto(
     Guid ClientId,
@@ -46,17 +108,27 @@ public record ClientMonthlyPackProfileDto(
     IReadOnlyList<ClientMonthlyPackProfileItemDto> RecurringItems,
     IReadOnlyList<PendingRecurringPackItemDto> PendingRecurringItems,
     IReadOnlyList<ClientMonthlyPackCurrentItemDto> CurrentPackItems,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    ClientOperatingProfileDto? OperatingProfile = null,
+    IReadOnlyList<MonthlyPackRequirementRecommendationDto>? Recommendations = null,
+    Guid? RecommendedTemplateId = null,
+    string? RecommendedTemplateReason = null);
 
 public record UpdateClientMonthlyPackProfileRequest(
     Guid? TemplateId,
-    ClientMonthlyPackProfileItemInput[] RecurringItems);
+    ClientMonthlyPackProfileItemInput[] RecurringItems,
+    ClientOperatingProfileInput? OperatingProfile = null,
+    DateTime? EffectiveFromUtc = null,
+    bool ReconcileCurrentPack = false);
 
 public record ClientMonthlyPackProfileItemInput(
     string Category,
     string Label,
     bool IsRequired,
-    int? DefaultDueDayOfMonth = null);
+    int? DefaultDueDayOfMonth = null,
+    string Cadence = "monthly",
+    DateTime? EffectiveFromUtc = null,
+    DateTime? EffectiveToUtc = null);
 
 // Recurrence accepts "this_month" or "every_month".
 // Clients may request recurring items, while accountants/admins can add recurring items immediately.

@@ -63,6 +63,11 @@ public sealed class ClientMonthlyPackProfilesController : ControllerBase
         return FromResult(await _profiles.UpdateAsync(clientId, request, User, ct));
     }
 
+    [HttpPost("{clientId:guid}/reconcile-current-pack")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> ReconcileCurrentPack(Guid clientId, CancellationToken ct)
+        => FromResult(await _profiles.ReconcileCurrentPackAsync(clientId, User, ct));
+
     [HttpPost("{clientId:guid}/items")]
     public async Task<IActionResult> AddItem(
         Guid clientId,

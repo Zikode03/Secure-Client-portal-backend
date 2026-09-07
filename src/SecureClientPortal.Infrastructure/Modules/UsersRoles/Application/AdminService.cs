@@ -143,7 +143,21 @@ public sealed class AdminService : IAdminService
             return ServiceResult<object>.ErrorResult("Role does not exist or is inactive.");
         }
 
+        var previousRole = user.Role;
+        if (string.Equals(previousRole, roleName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ServiceResult<object>.Success(new { user.Id, user.Role });
+        }
+
         user.AssignRole(IdentityDomainValues.ToUserRole(roleName));
+        var activeSessions = await _db.UserSessions
+            .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
+            .ToListAsync(ct);
+        foreach (var session in activeSessions)
+        {
+            session.Revoke("role_changed");
+        }
+
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor,
@@ -151,10 +165,10 @@ public sealed class AdminService : IAdminService
             "user",
             user.Id,
             null,
-            JsonSerializer.Serialize(new { user.Email, user.Role }),
+            JsonSerializer.Serialize(new { user.Email, previousRole, user.Role, revokedSessions = activeSessions.Count }),
             ct);
 
-        return ServiceResult<object>.Success(new { user.Id, user.Role });
+        return ServiceResult<object>.Success(new { user.Id, user.Role, revokedSessions = activeSessions.Count });
     }
 
     public async Task<ServiceResult<object>> UpdateUserStatusAsync(string id, AdminUpdateStatusRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)

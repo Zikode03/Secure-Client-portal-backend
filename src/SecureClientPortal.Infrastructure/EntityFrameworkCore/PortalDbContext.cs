@@ -363,7 +363,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.HasIndex(x => x.ClientId);
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_AppAuditLogs_ActorRole", "ActorRole IN ('admin','accountant','client','unknown')");
+                table.HasCheckConstraint("CK_AppAuditLogs_ActorRole", "ActorRole IN ('admin','accountant','client','system','unknown')");
             });
         });
 

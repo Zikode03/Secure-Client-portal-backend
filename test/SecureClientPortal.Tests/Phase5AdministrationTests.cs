@@ -46,6 +46,35 @@ public class Phase5AdministrationTests
     }
 
     [Fact]
+    public async Task ChangingUserRoleRevokesActiveSessions()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+
+        var activeSession = UserSession.Start(
+            Guid.NewGuid(),
+            AccountantUserId,
+            Guid.NewGuid(),
+            DateTime.UtcNow.AddHours(1),
+            null,
+            "test");
+        db.UserSessions.Add(activeSession);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var admin = BuildAdminController(db);
+        var response = await admin.UpdateUserRole(
+            AccountantUserId.ToString(),
+            new AdminUpdateRoleRequest("client"),
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response);
+        var updatedUser = await db.Users.FirstAsync(x => x.Id == AccountantUserId, TestContext.Current.CancellationToken);
+        Assert.Equal("client", updatedUser.Role);
+        Assert.NotNull(activeSession.RevokedAtUtc);
+        Assert.Equal("role_changed", activeSession.RevokedReason);
+    }
+
+    [Fact]
     public async Task AdminCanManageAssignmentsIncludingReassignAndPrimary()
     {
         await using var db = BuildDb();

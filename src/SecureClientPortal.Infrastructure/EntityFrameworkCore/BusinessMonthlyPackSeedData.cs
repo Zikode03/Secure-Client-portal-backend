@@ -18,7 +18,7 @@ public static class BusinessMonthlyPackSeedData
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
 
-        var requirements = new[]
+        var requirementDefinitions = new[]
         {
             Requirement("business_bank_statement", "Bank Statement", "Monthly business bank statement.", "bank_statement", true, 5),
             Requirement("sales_invoices", "Sales Invoices", "Sales invoice support for the month.", "sales_invoices", true, 5),
@@ -40,9 +40,10 @@ public static class BusinessMonthlyPackSeedData
             Requirement("production_report", "Production Report", "Monthly production or manufacturing activity summary.", "production_report", false, 7),
         };
 
-        foreach (var requirement in requirements)
+        var requirements = new Dictionary<string, RequiredDocumentTemplate>();
+        foreach (var (key, requirement) in requirementDefinitions)
         {
-            await UpsertRequirement(db, requirement);
+            requirements[key] = await UpsertRequirement(db, requirement);
         }
 
         await UpsertTemplate(db, Template(
@@ -90,20 +91,20 @@ public static class BusinessMonthlyPackSeedData
         await db.SaveChangesAsync();
     }
 
-    private static RequiredDocumentTemplate Requirement(
+    private static (string key, RequiredDocumentTemplate requirement) Requirement(
         string key,
         string name,
         string description,
         string category,
         bool required,
         int? dueDay) =>
-        RequiredDocumentTemplate.Create(Id($"business_requirement:{key}"), name, description, category, required, dueDay, true);
+        (key, RequiredDocumentTemplate.Create(Id($"business_requirement:{key}"), name, description, category, required, dueDay, true));
 
     private static (MonthlyPackTemplate template, List<MonthlyPackTemplateItem> items) Template(
         string key,
         string name,
         string description,
-        IReadOnlyCollection<RequiredDocumentTemplate> requirements,
+        IReadOnlyDictionary<string, RequiredDocumentTemplate> requirements,
         params string[] requirementKeys)
     {
         var templateId = Id($"business_template:{key}");
@@ -112,24 +113,30 @@ public static class BusinessMonthlyPackSeedData
 
         for (var index = 0; index < requirementKeys.Length; index++)
         {
-            var requirementId = Id($"business_requirement:{requirementKeys[index]}");
-            if (requirements.All(x => x.Id != requirementId)) continue;
+            if (!requirements.TryGetValue(requirementKeys[index], out var requirement)) continue;
             items.Add(MonthlyPackTemplateItem.Create(
                 Id($"business_template_item:{key}:{requirementKeys[index]}"),
                 templateId,
-                requirementId,
+                requirement.Id,
                 index + 1));
         }
 
         return (template, items);
     }
 
-    private static async Task UpsertRequirement(PortalDbContext db, RequiredDocumentTemplate requirement)
+    private static async Task<RequiredDocumentTemplate> UpsertRequirement(
+        PortalDbContext db,
+        RequiredDocumentTemplate requirement)
     {
-        if (!await db.RequiredDocumentTemplates.AnyAsync(x => x.Id == requirement.Id))
+        var existing = await db.RequiredDocumentTemplates.FirstOrDefaultAsync(x =>
+            x.Id == requirement.Id || x.Name == requirement.Name);
+        if (existing is not null)
         {
-            db.RequiredDocumentTemplates.Add(requirement);
+            return existing;
         }
+
+        db.RequiredDocumentTemplates.Add(requirement);
+        return requirement;
     }
 
     private static async Task UpsertTemplate(

@@ -11,6 +11,7 @@ public interface IClientMonthlyPackProfileService
     Task<ServiceResult<AddClientMonthlyPackItemResponse>> AddItemAsync(Guid clientId, AddClientMonthlyPackItemRequest request, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<ClientMonthlyPackProfileDto>> ApproveRecurringAsync(Guid clientId, Guid requestId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<ClientMonthlyPackProfileDto>> DeclineRecurringAsync(Guid clientId, Guid requestId, ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<MonthlyPackReconciliationResultDto>> ReconcileCurrentPackAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct = default);
 
     // Applies the effective recurring profile (firm template + client-specific items) to a pack.
     // MonthlyPackService calls this immediately after creating a new monthly pack.
