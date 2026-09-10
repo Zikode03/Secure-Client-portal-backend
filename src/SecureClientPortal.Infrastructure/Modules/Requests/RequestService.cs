@@ -14,6 +14,8 @@ using SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application;
 using SecureClientPortal.Backend.Infrastructure.Modules.Requests.Application.Events;
 using SecureClientPortal.Backend.Infrastructure.Modules.ReviewQueue;
+using SecureClientPortal.Backend.Auth;
+using Microsoft.EntityFrameworkCore;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Requests;
 
@@ -23,15 +25,18 @@ public sealed class RequestService : IRequestService
     private readonly IRequestCommandService _commands;
     private readonly IDocumentWorkflowService? _documentWorkflowService;
     private readonly IDocumentSlotService? _documentSlotService;
+    private readonly PortalDbContext _db;
 
     public RequestService(
         IRequestQueryService queries,
         IRequestCommandService commands,
+        PortalDbContext db,
         IDocumentWorkflowService? documentWorkflowService = null,
         IDocumentSlotService? documentSlotService = null)
     {
         _queries = queries;
         _commands = commands;
+        _db = db;
         _documentWorkflowService = documentWorkflowService;
         _documentSlotService = documentSlotService;
     }
@@ -45,6 +50,7 @@ public sealed class RequestService : IRequestService
         return new RequestService(
             new RequestQueryService(db, db),
             new RequestCommandService(db, db, new CurrentUserContextFactory(), CreateStandaloneDispatcher(db)),
+            db,
             documentWorkflowService,
             documentSlotService);
     }
@@ -81,6 +87,65 @@ public sealed class RequestService : IRequestService
 
     public Task<ServiceResult<RequestWorkspaceResponse>> GetWorkspaceAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default) =>
         _queries.GetWorkspaceAsync(id, user, ct);
+
+    public async Task<ServiceResult<IReadOnlyList<RequestReadStateResponse>>> GetReadStatesAsync(System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            return ServiceResult<IReadOnlyList<RequestReadStateResponse>>.UnauthorizedResult("Authenticated user id is required.");
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        var states = await _db.RequestReadStates
+            .Where(x => x.UserId == userId.Value && allowedClientIds.Contains(x.ClientId))
+            .OrderByDescending(x => x.LastReadAtUtc)
+            .Select(x => new RequestReadStateResponse(x.RequestId, x.LastReadAtUtc))
+            .ToListAsync(ct);
+
+        return ServiceResult<IReadOnlyList<RequestReadStateResponse>>.Success(states);
+    }
+
+    public async Task<ServiceResult<RequestReadStateResponse>> MarkReadAsync(string id, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(id, out var requestId))
+        {
+            return ServiceResult<RequestReadStateResponse>.NotFoundResult();
+        }
+
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            return ServiceResult<RequestReadStateResponse>.UnauthorizedResult("Authenticated user id is required.");
+        }
+
+        var request = await _db.Requests.FirstOrDefaultAsync(x => x.Id == requestId, ct);
+        if (request is null)
+        {
+            return ServiceResult<RequestReadStateResponse>.NotFoundResult();
+        }
+
+        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!allowedClientIds.Contains(request.ClientId))
+        {
+            return ServiceResult<RequestReadStateResponse>.ForbiddenResult();
+        }
+
+        var state = await _db.RequestReadStates
+            .FirstOrDefaultAsync(x => x.RequestId == requestId && x.UserId == userId.Value, ct);
+        if (state is null)
+        {
+            state = RequestReadState.Create(requestId, request.ClientId, userId.Value);
+            _db.RequestReadStates.Add(state);
+        }
+        else
+        {
+            state.MarkRead();
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return ServiceResult<RequestReadStateResponse>.Success(new RequestReadStateResponse(state.RequestId, state.LastReadAtUtc));
+    }
 
     public async Task<ServiceResult<RequestDocumentUploadResponse>> UploadDocumentAsync(string id, UploadRequestDocumentRequest request, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
     {

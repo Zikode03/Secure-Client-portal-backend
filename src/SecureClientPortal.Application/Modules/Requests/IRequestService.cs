@@ -19,4 +19,6 @@ public interface IRequestService
     Task<(bool forbidden, bool deleted)> DeleteAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<RequestWorkspaceResponse>> GetWorkspaceAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
     Task<ServiceResult<RequestDocumentUploadResponse>> UploadDocumentAsync(string id, UploadRequestDocumentRequest request, ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<IReadOnlyList<RequestReadStateResponse>>> GetReadStatesAsync(ClaimsPrincipal user, CancellationToken ct = default);
+    Task<ServiceResult<RequestReadStateResponse>> MarkReadAsync(string id, ClaimsPrincipal user, CancellationToken ct = default);
 }

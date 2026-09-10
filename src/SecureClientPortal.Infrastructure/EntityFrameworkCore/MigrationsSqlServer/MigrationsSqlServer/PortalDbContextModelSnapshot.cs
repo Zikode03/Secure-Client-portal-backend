@@ -1362,6 +1362,36 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         });
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.RequestReadState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LastReadAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RequestId", "UserId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "LastReadAtUtc");
+
+                    b.ToTable("AppRequestReadStates");
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.RequestTemplate", b =>
                 {
                     b.Property<Guid>("Id")

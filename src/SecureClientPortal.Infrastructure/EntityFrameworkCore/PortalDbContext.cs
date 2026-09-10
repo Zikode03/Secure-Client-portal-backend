@@ -19,6 +19,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<FilingRule> FilingRules => Set<FilingRule>();
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<RequestItem> Requests => Set<RequestItem>();
+    public DbSet<RequestReadState> RequestReadStates => Set<RequestReadState>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<ClientAssignment> ClientAssignments => Set<ClientAssignment>();
     public DbSet<MonthlyPack> MonthlyPacks => Set<MonthlyPack>();
@@ -420,6 +421,18 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.UserAgent).HasMaxLength(500);
             entity.HasIndex(x => x.JwtId).IsUnique();
             entity.HasIndex(x => new { x.UserId, x.RevokedAtUtc, x.ExpiresAtUtc });
+        });
+
+        modelBuilder.Entity<RequestReadState>(entity =>
+        {
+            entity.ToTable("AppRequestReadStates");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.RequestId).IsRequired();
+            entity.Property(x => x.ClientId).IsRequired();
+            entity.Property(x => x.UserId).IsRequired();
+            entity.Property(x => x.LastReadAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+            entity.HasIndex(x => new { x.RequestId, x.UserId }).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.LastReadAtUtc });
         });
 
         modelBuilder.Entity<NotificationPreference>(entity =>

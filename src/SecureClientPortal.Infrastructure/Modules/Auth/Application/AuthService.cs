@@ -49,6 +49,11 @@ public sealed class AuthService : IAuthService
             return AuthFailure("INVALID_CREDENTIALS", "The email or password is incorrect.");
         }
 
+        if (PasswordHasher.NeedsRehash(user.PasswordHash))
+        {
+            user.UpgradePasswordHash(PasswordHasher.Hash(request.Password));
+        }
+
         var securityStatus = UserSecurityProfile.GetStatus(user.SecurityJson);
         if (securityStatus is "invited" or "reset_pending")
         {
@@ -66,7 +71,7 @@ public sealed class AuthService : IAuthService
         }
 
         user.RecordActivity();
-        var authSession = await IssueAuthResponseAsync(user, null, httpContext, ct);
+        var authSession = await IssueAuthResponseAsync(user, null, httpContext, request.RememberMe, ct);
         await _db.WriteAuditLogAsync(
             user.Id,
             user.Role,
@@ -122,7 +127,7 @@ public sealed class AuthService : IAuthService
         await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "superseded", ct, exceptTokenId: accessToken.Id);
         await RevokeSessionsAsync(user.Id, "setup_completed", ct);
 
-        var authSession = await IssueAuthResponseAsync(user, null, httpContext, ct);
+        var authSession = await IssueAuthResponseAsync(user, null, httpContext, true, ct);
         await _db.WriteAuditLogAsync(
             user.Id,
             user.Role,
@@ -193,9 +198,12 @@ public sealed class AuthService : IAuthService
 
     public async Task<ServiceResult<object>> RefreshAsync(RefreshTokenRequest request, HttpContext httpContext, CancellationToken ct = default)
     {
-        IdentityValidators.ValidateRefresh(request);
+        var rawRefreshToken = string.IsNullOrWhiteSpace(request.RefreshToken)
+            ? AuthCookies.ReadRefreshToken(httpContext)
+            : request.RefreshToken;
+        IdentityValidators.ValidateRefresh(new RefreshTokenRequest(rawRefreshToken));
 
-        var refreshToken = await FindActiveAccessTokenAsync(request.RefreshToken, ["refresh"], ct);
+        var refreshToken = await FindActiveAccessTokenAsync(rawRefreshToken!, ["refresh"], ct);
         if (refreshToken is null || !refreshToken.SessionId.HasValue)
         {
             return AuthFailure("REFRESH_TOKEN_INVALID", "The refresh token is invalid or expired.");
@@ -220,7 +228,7 @@ public sealed class AuthService : IAuthService
         }
 
         refreshToken.Consume();
-        var authSession = await IssueAuthResponseAsync(user, session, httpContext, ct);
+        var authSession = await IssueAuthResponseAsync(user, session, httpContext, AuthCookies.IsPersistent(httpContext), ct);
         await _db.WriteAuditLogAsync(
             user.Id,
             user.Role,
@@ -274,7 +282,7 @@ public sealed class AuthService : IAuthService
         await RevokeOtherSessionsAsync(user.Id, currentSession.Id, "password_changed", ct);
         await InvalidateRefreshTokensForSessionAsync(currentSession.Id, "rotated", ct);
 
-        var authSession = await IssueAuthResponseAsync(user, currentSession, httpContext, ct);
+        var authSession = await IssueAuthResponseAsync(user, currentSession, httpContext, AuthCookies.IsPersistent(httpContext), ct);
         await _db.WriteAuditLogAsync(
             user.Id,
             user.Role,
@@ -492,7 +500,12 @@ public sealed class AuthService : IAuthService
         return ServiceResult<object>.Success(new SessionRevocationResponse(sessions.Count));
     }
 
-    private async Task<(object Response, UserSession Session)> IssueAuthResponseAsync(User user, UserSession? existingSession, HttpContext httpContext, CancellationToken ct)
+    private async Task<(object Response, UserSession Session)> IssueAuthResponseAsync(
+        User user,
+        UserSession? existingSession,
+        HttpContext httpContext,
+        bool persistent,
+        CancellationToken ct)
     {
         var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == user.Role, ct);
         if (role is null || !role.IsActive)
@@ -596,11 +609,17 @@ public sealed class AuthService : IAuthService
         _db.UserAccessTokens.Add(refreshToken);
         await _db.SaveChangesAsync(ct);
 
+        AuthCookies.Write(
+            httpContext,
+            new JwtSecurityTokenHandler().WriteToken(token),
+            expires,
+            refreshTokenValue,
+            refreshToken.ExpiresAtUtc,
+            persistent);
+
         return (
             new
             {
-                token = new JwtSecurityTokenHandler().WriteToken(token),
-                refreshToken = refreshTokenValue,
                 expiresAtUtc = expires,
                 refreshExpiresAtUtc = refreshToken.ExpiresAtUtc,
                 user = new { user.Id, user.FullName, user.Email, user.Role, roleScope = scope },

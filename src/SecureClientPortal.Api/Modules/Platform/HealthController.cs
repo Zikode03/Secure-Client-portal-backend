@@ -26,6 +26,6 @@ public class HealthController : ControllerBase
             return Ok(new { ok = result.ok, database = result.database });
         }
 
-        return StatusCode(503, new { ok = result.ok, database = result.database, error = result.error });
+        return StatusCode(503, new { ok = false, error = "Database health check failed." });
     }
 }

@@ -13,6 +13,7 @@
 .env
 
 # Local storage and generated files
-storage/
+/storage/
+**/App_Data/
 artifacts/
 .tmp/

@@ -22,9 +22,9 @@ public sealed class HealthService : IHealthService
             await _db.Database.ExecuteSqlRawAsync("SELECT 1", ct);
             return (true, "sqlserver", null);
         }
-        catch (Exception ex)
+        catch (Exception) when (!ct.IsCancellationRequested)
         {
-            return (false, "sqlserver", ex.Message);
+            return (false, "sqlserver", "Database health check failed.");
         }
     }
 }

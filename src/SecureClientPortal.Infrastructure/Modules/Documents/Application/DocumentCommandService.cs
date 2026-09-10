@@ -415,8 +415,16 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<bool>.ForbiddenResult();
         }
 
+        var storageKeys = await _documents.DocumentVersions
+            .Where(x => x.DocumentId == documentId && x.StorageKey != null)
+            .Select(x => x.StorageKey!)
+            .ToListAsync(ct);
         _documents.Documents.Remove(item);
         await _documents.SaveChangesAsync(ct);
+        foreach (var storageKey in storageKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            await _fileStorage.DeleteAsync(storageKey, ct);
+        }
         return ServiceResult<bool>.Success(true);
     }
 

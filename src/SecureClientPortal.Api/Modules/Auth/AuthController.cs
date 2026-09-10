@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Auth;
 using SecureClientPortal.Backend.Application.Modules.Auth;
+using SecureClientPortal.Backend.Auth;
 
 namespace SecureClientPortal.Backend.Api.Modules.Auth;
 
@@ -64,6 +65,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
         await _service.LogoutAsync(User, ct);
+        AuthCookies.Clear(HttpContext);
         return NoContent();
     }
 

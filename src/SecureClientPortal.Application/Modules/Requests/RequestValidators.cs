@@ -6,6 +6,12 @@ namespace SecureClientPortal.Backend.Application.Modules.Requests;
 
 public static class RequestValidators
 {
+    private const long MaxRequestUploadBytes = 25 * 1024 * 1024;
+    private static readonly HashSet<string> AllowedRequestUploadExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt"
+    };
+
     public static void ValidateCreate(CreateRequestRequest request)
     {
         if (request.ClientId == Guid.Empty) throw new AppValidationException("Client is required.");
@@ -51,5 +57,12 @@ public static class RequestValidators
     {
         if (request.File is null) throw new AppValidationException("File is required.");
         if (request.File.Length <= 0) throw new AppValidationException("File is required.");
+        if (request.File.Length > MaxRequestUploadBytes) throw new AppValidationException("Attachments must be 25 MB or smaller.");
+
+        var extension = Path.GetExtension(request.File.FileName);
+        if (string.IsNullOrWhiteSpace(extension) || !AllowedRequestUploadExtensions.Contains(extension))
+        {
+            throw new AppValidationException("Use a PDF, image, Word, Excel, CSV or text file.");
+        }
     }
 }

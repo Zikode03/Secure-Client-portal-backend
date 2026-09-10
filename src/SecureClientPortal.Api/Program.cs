@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
@@ -22,10 +23,14 @@ using SecureClientPortal.Backend.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using System.Threading.RateLimiting;
+using SecureClientPortal.Backend.Api.Configuration;
+using SecureClientPortal.Backend.Api.Security;
+using Microsoft.AspNetCore.Antiforgery;
 
 var builder = WebApplication.CreateBuilder(args);
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+var connectionString = builder.Configuration["DB_CONNECTION_STRING"];
+if (string.IsNullOrWhiteSpace(connectionString))
+    connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 if (string.IsNullOrWhiteSpace(connectionString))
 {
@@ -37,12 +42,26 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<PortalLinksOptions>(builder.Configuration.GetSection(PortalLinksOptions.Section));
 builder.Services.Configure<AccessEmailOptions>(builder.Configuration.GetSection(AccessEmailOptions.Section));
 builder.Services.Configure<AutomationOptions>(builder.Configuration.GetSection(AutomationOptions.Section));
+var configuredStorage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
+var keyRingPath = Path.GetFullPath(
+    Path.IsPathRooted(configuredStorage.KeyRingPath)
+        ? configuredStorage.KeyRingPath
+        : Path.Combine(builder.Environment.ContentRootPath, configuredStorage.KeyRingPath));
 var jwt = builder.Configuration.GetSection(JwtOptions.Section).Get<JwtOptions>() ?? new JwtOptions();
 var jwtSigningKeyFromEnv = Environment.GetEnvironmentVariable("JWT_SIGNING_KEY");
 if (!string.IsNullOrWhiteSpace(jwtSigningKeyFromEnv))
 {
     jwt.SigningKey = jwtSigningKeyFromEnv;
+    builder.Services.PostConfigure<JwtOptions>(options => options.SigningKey = jwtSigningKeyFromEnv);
 }
+ProductionConfiguration.Validate(builder.Configuration, builder.Environment, connectionString, jwt);
+builder.Services.AddPortalTransportSecurity(builder.Configuration, builder.Environment);
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+Directory.CreateDirectory(keyRingPath);
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName("SecureClientPortal")
+    .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 var defaultCorsOrigins = new[]
 {
@@ -52,10 +71,14 @@ var defaultCorsOrigins = new[]
     "http://127.0.0.1:4173"
 };
 var corsOrigins = configuredCorsOrigins
-    .Concat(defaultCorsOrigins)
+    .Concat(builder.Environment.IsDevelopment() ? defaultCorsOrigins : [])
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
+if (corsOrigins.Length == 0)
+{
+    throw new InvalidOperationException("At least one Cors:AllowedOrigins entry is required.");
+}
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -66,7 +89,8 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(corsOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod()
+            .AllowCredentials());
 });
 builder.Services.AddRateLimiter(options =>
 {
@@ -157,6 +181,16 @@ builder.Services
         };
         options.Events = new JwtBearerEvents
         {
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrWhiteSpace(context.Token) &&
+                    context.Request.Cookies.TryGetValue(AuthCookies.AccessTokenName, out var cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
+
+                return Task.CompletedTask;
+            },
             OnTokenValidated = async context =>
             {
                 var principal = context.Principal;
@@ -213,20 +247,39 @@ builder.Services.AddAuthorization(options =>
 var app = builder.Build();
 
 await ApplyDatabaseMigrationsAsync(app.Services, app.Logger);
+if (!app.Environment.IsDevelopment())
+    await SeedData.EnsureNoDemoDataAsync(app.Services);
 
+app.UseForwardedHeaders();
+app.UseMiddleware<ApiExceptionMiddleware>();
+app.UseMiddleware<ApiSecurityHeadersMiddleware>();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
+app.UseRouting();
 app.UseCors("Frontend");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<CsrfProtectionMiddleware>((object)corsOrigins);
+app.MapGet("/api/auth/csrf", (HttpContext context, IAntiforgery antiforgery) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(context);
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { requestToken = tokens.RequestToken });
+}).AllowAnonymous();
 app.MapControllers();
 
 await SeedData.InitializeAsync(app.Services);
+if (app.Environment.IsDevelopment())
+    await SeedData.InitializeDevelopmentAsync(app.Services, app.Environment);
 // Seed practical starter templates after the original generic seed. This is idempotent and gives
 // company-aware monthly-pack recommendations useful options in every environment.
 await BusinessMonthlyPackSeedData.InitializeAsync(app.Services);

@@ -73,6 +73,7 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddDocumentModule(this IServiceCollection services)
     {
+        services.AddSingleton<IFileSecurityScanner, FileSecurityScanner>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IDocumentModuleDbContext>(sp => sp.GetRequiredService<PortalDbContext>());
         services.AddScoped<IDocumentQueryService, DocumentQueryService>();

@@ -27,6 +27,18 @@ public class RequestsController : ControllerBase
         return result.forbidden ? Forbid() : Ok(result.results);
     }
 
+    [HttpGet("read-state")]
+    public async Task<IActionResult> GetReadState(CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _requests.GetReadStatesAsync(User, ct)));
+    }
+
+    [HttpPost("{id}/read")]
+    public async Task<IActionResult> MarkRead(string id, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => FromResult(await _requests.MarkReadAsync(id, User, ct)));
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateRequestRequest request, CancellationToken ct)
     {
@@ -114,7 +126,7 @@ public class RequestsController : ControllerBase
     }
 
     [HttpPost("{id}/upload")]
-    [RequestSizeLimit(100_000_000)]
+    [RequestSizeLimit(26_214_400)]
     public async Task<IActionResult> UploadDocument(string id, [FromForm] UploadRequestDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _requests.UploadDocumentAsync(id, request, User, ct)));

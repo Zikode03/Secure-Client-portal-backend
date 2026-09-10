@@ -73,6 +73,13 @@ public class User
         Touch();
     }
 
+    public void UpgradePasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash)) throw new DomainRuleException("Password hash is required.");
+        PasswordHash = passwordHash;
+        Touch();
+    }
+
     public void SetRecoveryEmail(string? recoveryEmail)
     {
         string? normalizedEmail = string.IsNullOrWhiteSpace(recoveryEmail)

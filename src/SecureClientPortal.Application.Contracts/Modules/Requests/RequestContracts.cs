@@ -24,6 +24,7 @@ public record AddRequestCommentRequest(string Message, bool IsInternal = false);
 public record UpdateRequestStatusRequest(string Status);
 public record ResolveRequestRequest(string? ResolutionNote);
 public record EscalateRequestRequest(string? Reason, string? EscalateToRole);
+public record RequestReadStateResponse(Guid RequestId, DateTime LastReadAtUtc);
 
 public class UploadRequestDocumentRequest
 {

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Domain.Modules.Documents;
 using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
@@ -17,18 +18,7 @@ public static class SeedData
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
 
-        await db.Database.MigrateAsync();
         await UpsertDefaultRoles(db);
-
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_admin_001"), "System Admin", "admin@secureportal.local", UserRole.Admin, SerializeClientIds()));
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_acc_001"), "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, SerializeClientIds()));
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_client_001"), "Default Client", "client@secureportal.local", UserRole.Client, SerializeClientIds(SeedGuid("c_001"))));
-
-        var client = await db.Clients.FirstOrDefaultAsync(x => x.Id == SeedGuid("c_001"));
-        if (client is null)
-        {
-            db.Clients.Add(CreateSeedClient());
-        }
 
         await UpsertFilingRule(db, FilingRule.Create(
             SeedGuid("filing_bank_statement"),
@@ -75,15 +65,6 @@ public static class SeedData
             "debit_notes",
             "Debit note support eligible for auto-filing.",
             true));
-
-        await UpsertClientAssignment(db, ClientAssignment.Create(
-            SeedGuid("ca_u_acc_001_c_001"),
-            SeedGuid("u_acc_001"),
-            SeedGuid("c_001")));
-
-        await UpsertMonthlyPack(db, CreateSeedMonthlyPack());
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_bank_statement"), "bank_statement", "Bank Statement"));
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_invoices"), "invoices", "Invoices"));
 
         await UpsertRequiredDocumentTemplate(db, RequiredDocumentTemplate.Create(
             SeedGuid("rdt_bank_statement"),
@@ -218,6 +199,37 @@ public static class SeedData
             "Privacy controls, processing evidence, and consent obligations.",
             "POPIA",
             true));
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task InitializeDevelopmentAsync(IServiceProvider services, IHostEnvironment environment)
+    {
+        if (!environment.IsDevelopment())
+            throw new InvalidOperationException("Demo data can only be seeded in Development.");
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_admin_001"), "System Admin", "admin@secureportal.local", UserRole.Admin, SerializeClientIds()));
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_acc_001"), "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, SerializeClientIds()));
+        await UpsertUser(db, CreateSeedUser(SeedGuid("u_client_001"), "Default Client", "client@secureportal.local", UserRole.Client, SerializeClientIds(SeedGuid("c_001"))));
+        if (!await db.Clients.AnyAsync(x => x.Id == SeedGuid("c_001"))) db.Clients.Add(CreateSeedClient());
+        await db.SaveChangesAsync();
+        await UpsertClientAssignment(db, ClientAssignment.Create(SeedGuid("ca_u_acc_001_c_001"), SeedGuid("u_acc_001"), SeedGuid("c_001")));
+        await UpsertMonthlyPack(db, CreateSeedMonthlyPack());
+        await db.SaveChangesAsync();
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_bank_statement"), "bank_statement", "Bank Statement"));
+        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_invoices"), "invoices", "Invoices"));
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task EnsureNoDemoDataAsync(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
+        var ids = new[] { SeedGuid("u_admin_001"), SeedGuid("u_acc_001"), SeedGuid("u_client_001") };
+        var emails = new[] { "admin@secureportal.local", "accountant@secureportal.local", "client@secureportal.local" };
+        if (await db.Users.AnyAsync(x => ids.Contains(x.Id) || emails.Contains(x.Email.ToLower())) ||
+            await db.Clients.AnyAsync(x => x.Id == SeedGuid("c_001")))
+            throw new InvalidOperationException("Development demo records exist in this database. Use a clean production database or explicitly retire the demo records before deployment. No records have been deleted.");
     }
 
     private static User CreateSeedUser(Guid id, string fullName, string email, UserRole role, string clientIdsJson)
@@ -269,13 +281,7 @@ public static class SeedData
             return;
         }
 
-        byId.SetFullName(expected.FullName);
-        byId.SetEmail(expected.Email);
-        byId.SetPasswordHash(expected.PasswordHash);
-        byId.AssignRole(IdentityDomainValues.ToUserRole(expected.Role));
-        byId.SetClientIdsJson(expected.ClientIdsJson);
-        byId.SetProfileJson(expected.ProfileJson);
-        byId.SetSecurityStatus(SecurityStatus.Active);
+        // Existing development accounts keep their password and access status.
     }
 
     private static async Task UpsertDefaultRoles(PortalDbContext db)
@@ -298,12 +304,8 @@ public static class SeedData
             }
             else
             {
-                existing.UpdateDefinition(
-                    defaultRole.DisplayName,
-                    defaultRole.Scope,
-                    RolePermissions.SerializePermissions(normalizedPermissions),
-                    true);
-                existing.SetActivation(true);
+                // Administrators own existing role definitions and activation state.
+                continue;
             }
 
             await UpsertPermissionsAsync(db, normalizedPermissions, true);
@@ -312,16 +314,6 @@ public static class SeedData
             {
                 activeSystemPermissions.Add(permissionKey);
             }
-        }
-
-        var systemPermissions = await db.Permissions.Where(x => x.IsSystemPermission).ToListAsync();
-        foreach (var permission in systemPermissions)
-        {
-            permission.UpdateDetails(
-                permission.Name,
-                permission.Description,
-                permission.IsSystemPermission,
-                activeSystemPermissions.Contains(permission.Key));
         }
 
         await db.SaveChangesAsync();
