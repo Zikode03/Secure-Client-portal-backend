@@ -2,6 +2,8 @@ namespace SecureClientPortal.Backend.Models;
 
 public class UserSession
 {
+    public bool MfaVerified { get; private set; }
+    public void MarkMfaVerified() => MfaVerified = true;
     public Guid Id { get; private set; }
     public Guid UserId { get; private set; }
     public Guid JwtId { get; private set; }

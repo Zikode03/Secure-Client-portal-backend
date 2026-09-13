@@ -20,3 +20,4 @@ public record SecuritySettingsResponse(
     string? RecoveryEmail,
     IReadOnlyCollection<SecuritySessionResponse> Sessions);
 public record SessionRevocationResponse(int RevokedCount);
+public record MfaVerifyRequest(string ChallengeToken, string Code, bool UseRecoveryCode = false);

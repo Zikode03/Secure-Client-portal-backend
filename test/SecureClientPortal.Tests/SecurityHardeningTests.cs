@@ -45,7 +45,7 @@ public sealed class SecurityHardeningTests
                 ContentType = "application/pdf"
             };
             await Assert.ThrowsAsync<SecureClientPortal.Backend.Application.Common.AppValidationException>(() =>
-                storage.SaveAsync(spoofed, "client-1", TestContext.Current.CancellationToken));
+                storage.SaveAsync(spoofed, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", TestContext.Current.CancellationToken));
 
             var content = "%PDF-1.7\nconfidential-client-data\n%%EOF"u8.ToArray();
             await using var validStream = new MemoryStream(content);
@@ -54,7 +54,7 @@ public sealed class SecurityHardeningTests
                 Headers = new HeaderDictionary(),
                 ContentType = "application/pdf"
             };
-            var stored = await storage.SaveAsync(valid, "client-1", TestContext.Current.CancellationToken);
+            var stored = await storage.SaveAsync(valid, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", TestContext.Current.CancellationToken);
             var physicalPath = Path.Combine(root, stored.StorageKey.Replace('/', Path.DirectorySeparatorChar));
             var bytesAtRest = await File.ReadAllBytesAsync(physicalPath, TestContext.Current.CancellationToken);
 
@@ -63,6 +63,7 @@ public sealed class SecurityHardeningTests
             Assert.NotNull(reopened);
             using var reader = new StreamReader(reopened!.Stream, Encoding.UTF8);
             Assert.Equal(Encoding.UTF8.GetString(content), await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+            reader.Dispose();
             await storage.DeleteAsync(stored.StorageKey, TestContext.Current.CancellationToken);
             Assert.False(File.Exists(physicalPath));
         }
@@ -85,13 +86,13 @@ public sealed class SecurityHardeningTests
                 Options.Create(new StorageOptions { RootPath = root }),
                 new EphemeralDataProtectionProvider(),
                 new FileSecurityScanner());
-            var clientPath = Path.Combine(root, "client-1");
+            var clientPath = Path.Combine(root, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
             Directory.CreateDirectory(clientPath);
             var physicalPath = Path.Combine(clientPath, "legacy.pdf");
             var content = "%PDF-1.7\nlegacy-confidential-data\n%%EOF"u8.ToArray();
             await File.WriteAllBytesAsync(physicalPath, content, TestContext.Current.CancellationToken);
 
-            var reopened = await storage.OpenReadAsync("client-1/legacy.pdf", TestContext.Current.CancellationToken);
+            var reopened = await storage.OpenReadAsync("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/legacy.pdf", TestContext.Current.CancellationToken);
 
             Assert.NotNull(reopened);
             using var reader = new StreamReader(reopened!.Stream, Encoding.UTF8);

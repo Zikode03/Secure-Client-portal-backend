@@ -100,13 +100,13 @@ public sealed class UserService : IUserService
         }
 
         var inviteToken = AccessTokenCodec.GenerateToken();
-        var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
+        var inviteExpiresAtUtc = DateTime.UtcNow.AddHours(24);
         var user = User.CreateInvited(
             Guid.NewGuid(),
             request.FullName,
             email,
             IdentityDomainValues.ToUserRole(normalizedRole),
-            PasswordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "ChangeMe123!" : request.Password),
+            PasswordHasher.Hash(AccessTokenCodec.GenerateToken()),
             JsonSerializer.Serialize(clientIds),
             string.IsNullOrWhiteSpace(request.Company)
                 ? null
@@ -147,8 +147,7 @@ public sealed class UserService : IUserService
             permissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, user.Role, ct),
             invite = new
             {
-                expiresAtUtc = inviteExpiresAtUtc,
-                setupUrl
+                expiresAtUtc = inviteExpiresAtUtc
             },
             delivery = dispatch.DeliveryMode
         });

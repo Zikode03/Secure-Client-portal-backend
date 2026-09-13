@@ -59,6 +59,7 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddAuthModule(this IServiceCollection services)
     {
+        services.AddHttpClient<SecureClientPortal.Backend.Auth.PasswordPolicy>(client => client.Timeout = TimeSpan.FromSeconds(8));
         services.AddScoped<IAuthService, AuthService>();
         return services;
     }
@@ -73,7 +74,10 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddDocumentModule(this IServiceCollection services)
     {
-        services.AddSingleton<IFileSecurityScanner, FileSecurityScanner>();
+        services.AddSingleton<IFileSecurityScanner>(sp =>
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<StorageOptions>>().Value.Scanner == "baseline"
+                ? new FileSecurityScanner()
+                : new ClamAvScanner(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<StorageOptions>>()));
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IDocumentModuleDbContext>(sp => sp.GetRequiredService<PortalDbContext>());
         services.AddScoped<IDocumentQueryService, DocumentQueryService>();

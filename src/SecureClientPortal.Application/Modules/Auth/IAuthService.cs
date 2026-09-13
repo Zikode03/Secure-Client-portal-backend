@@ -6,6 +6,7 @@ namespace SecureClientPortal.Backend.Application.Modules.Auth;
 
 public interface IAuthService
 {
+    Task<ServiceResult<object>> VerifyMfaAsync(MfaVerifyRequest request, HttpContext httpContext, CancellationToken ct = default);
     Task<ServiceResult<object>> LoginAsync(LoginRequest request, HttpContext httpContext, CancellationToken ct = default);
     Task<ServiceResult<object>> CompleteInviteAsync(CompleteInviteRequest request, HttpContext httpContext, CancellationToken ct = default);
     Task<ServiceResult<object>> ForgotPasswordAsync(ForgotPasswordRequest request, HttpContext httpContext, CancellationToken ct = default);

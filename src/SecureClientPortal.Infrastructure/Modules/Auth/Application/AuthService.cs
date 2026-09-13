@@ -17,10 +17,12 @@ using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Auth.Application;
 
-public sealed class AuthService : IAuthService
+public sealed partial class AuthService : IAuthService
 {
     private static readonly string[] SetupTokenPurposes = ["invite", "password_reset"];
 
+    private readonly PasswordPolicy? _passwordPolicy;
+    private readonly Microsoft.AspNetCore.DataProtection.IDataProtectionProvider? _dataProtection;
     private readonly PortalDbContext _db;
     private readonly JwtOptions _jwtOptions;
     private readonly IAccessEmailSender _accessEmailSender;
@@ -30,9 +32,13 @@ public sealed class AuthService : IAuthService
         PortalDbContext db,
         IOptions<JwtOptions> jwtOptions,
         IAccessEmailSender accessEmailSender,
-        IAccessLinkBuilder accessLinkBuilder)
+        IAccessLinkBuilder accessLinkBuilder,
+        PasswordPolicy? passwordPolicy = null,
+        Microsoft.AspNetCore.DataProtection.IDataProtectionProvider? dataProtection = null)
     {
         _db = db;
+        _passwordPolicy = passwordPolicy;
+        _dataProtection = dataProtection;
         _jwtOptions = jwtOptions.Value;
         _accessEmailSender = accessEmailSender;
         _accessLinkBuilder = accessLinkBuilder;
@@ -43,9 +49,15 @@ public sealed class AuthService : IAuthService
         IdentityValidators.ValidateLogin(request);
 
         var email = request.Email.Trim().ToLowerInvariant();
+        await using var gate = await AccountAttemptLock.AcquireAsync(_db, email, ct);
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email, ct);
-        if (user is null || !PasswordHasher.Verify(request.Password, user.PasswordHash))
+        var security = user is null ? null : await SecurityAsync(user.Id, ct);
+        if (security?.LockedUntilUtc > DateTime.UtcNow)
+            return ServiceResult<object>.ErrorResult("Too many attempts. Try again in 15 minutes.", "ACCOUNT_THROTTLED", 429);
+        var validPassword = PasswordHasher.Verify(request.Password, user?.PasswordHash ?? DummyPasswordHash);
+        if (user is null || !validPassword)
         {
+            if (security is not null) { security.Fail(DateTime.UtcNow); await _db.SaveChangesAsync(ct); }
             return AuthFailure("INVALID_CREDENTIALS", "The email or password is incorrect.");
         }
 
@@ -70,6 +82,11 @@ public sealed class AuthService : IAuthService
             return AuthFailure("ACCOUNT_DISABLED", "This account is disabled.");
         }
 
+        if (request.Password.EnumerateRunes().Count() < 15 && security!.MfaSecret is null)
+            return AuthFailure("PASSWORD_RESET_REQUIRED", "Reset your password to a passphrase of at least 15 characters before signing in.");
+        if (user.Role is "admin" or "accountant" || security!.MfaSecret is not null)
+            return await BeginMfaAsync(user, request.RememberMe, ct);
+        security!.Succeed();
         user.RecordActivity();
         var authSession = await IssueAuthResponseAsync(user, null, httpContext, request.RememberMe, ct);
         await _db.WriteAuditLogAsync(
@@ -88,6 +105,7 @@ public sealed class AuthService : IAuthService
     public async Task<ServiceResult<object>> CompleteInviteAsync(CompleteInviteRequest request, HttpContext httpContext, CancellationToken ct = default)
     {
         IdentityValidators.ValidateCompleteInvite(request);
+        await using var gate = await AccountAttemptLock.AcquireAsync(_db, request.Email, ct);
 
         var email = request.Email.Trim().ToLowerInvariant();
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email, ct);
@@ -108,7 +126,7 @@ public sealed class AuthService : IAuthService
             return AuthFailure("TOKEN_INVALID", "The setup link is invalid or has expired.");
         }
 
-        if (securityStatus is not ("invited" or "reset_pending" or "password_reset_required"))
+        if (securityStatus is not ("active" or "invited" or "reset_pending" or "password_reset_required"))
         {
             return ServiceResult<object>.ErrorResult("This account does not have a pending setup request.", "SETUP_NOT_PENDING", StatusCodes.Status409Conflict);
         }
@@ -121,12 +139,18 @@ public sealed class AuthService : IAuthService
             return ServiceResult<object>.ErrorResult("A full name is required to finish account setup.", "INVALID_INVITE_PAYLOAD");
         }
 
-        user.CompleteSetup(resolvedFullName, PasswordHasher.Hash(request.Password.Trim()));
+        await (_passwordPolicy ?? throw new InvalidOperationException("Password screening unavailable.")).ValidateAsync(request.Password, ct);
+        user.CompleteSetup(resolvedFullName, PasswordHasher.Hash(request.Password));
 
         accessToken.Consume();
         await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "superseded", ct, exceptTokenId: accessToken.Id);
         await RevokeSessionsAsync(user.Id, "setup_completed", ct);
 
+        var security = await SecurityAsync(user.Id, ct);
+        security.Succeed();
+        security.ChallengeHash = null;
+        if (user.Role is "admin" or "accountant" || security.MfaSecret is not null)
+            return await BeginMfaAsync(user, true, ct);
         var authSession = await IssueAuthResponseAsync(user, null, httpContext, true, ct);
         await _db.WriteAuditLogAsync(
             user.Id,
@@ -144,6 +168,7 @@ public sealed class AuthService : IAuthService
     public async Task<ServiceResult<object>> ForgotPasswordAsync(ForgotPasswordRequest request, HttpContext httpContext, CancellationToken ct = default)
     {
         IdentityValidators.ValidateForgotPassword(request);
+        await using var gate = await AccountAttemptLock.AcquireAsync(_db, request.Email, ct);
 
         var email = request.Email.Trim().ToLowerInvariant();
         var silentSuccess = new { ok = true, delivery = "silent", message = "If the account exists, reset instructions will be sent." };
@@ -166,11 +191,15 @@ public sealed class AuthService : IAuthService
             return ServiceResult<object>.Success(silentSuccess);
         }
 
+        var security = await SecurityAsync(user.Id, ct);
+        if (security.LastResetRequestUtc > DateTime.UtcNow.AddMinutes(-5)) return ServiceResult<object>.Success(silentSuccess);
+        security.LastResetRequestUtc = DateTime.UtcNow;
+        security.Version = Guid.NewGuid();
         var resetToken = AccessTokenCodec.GenerateToken();
-        var resetExpiresAtUtc = DateTime.UtcNow.AddHours(4);
-        user.SetSecurityStatus(SecurityStatus.PasswordResetRequired, "self_service_reset");
+        var resetExpiresAtUtc = DateTime.UtcNow.AddMinutes(30);
+        // An unauthenticated reset request must not disable a valid account.
         await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "superseded", ct);
-        await RevokeSessionsAsync(user.Id, "password_reset_requested", ct);
+
 
         var accessToken = UserAccessToken.Create(
             Guid.NewGuid(),
@@ -182,7 +211,9 @@ public sealed class AuthService : IAuthService
         _db.UserAccessTokens.Add(accessToken);
         await _db.SaveChangesAsync(ct);
 
-        var dispatch = await _accessEmailSender.SendPasswordResetAsync(user.Email, user.FullName, setupUrl, resetExpiresAtUtc, ct);
+        AccessEmailDispatchResult dispatch;
+        try { dispatch = await _accessEmailSender.SendPasswordResetAsync(user.Email, user.FullName, setupUrl, resetExpiresAtUtc, ct); }
+        catch (Exception) when (!ct.IsCancellationRequested) { dispatch = new AccessEmailDispatchResult("failed", ""); }
         await _db.WriteAuditLogAsync(
             user.Id,
             user.Role,
@@ -193,7 +224,7 @@ public sealed class AuthService : IAuthService
             JsonSerializer.Serialize(new { user.Email, resetExpiresAtUtc, dispatch.DeliveryMode }),
             ct);
 
-        return ServiceResult<object>.Success(new { ok = true, delivery = dispatch.DeliveryMode, message = "If the account exists, reset instructions will be sent." });
+        return ServiceResult<object>.Success(silentSuccess);
     }
 
     public async Task<ServiceResult<object>> RefreshAsync(RefreshTokenRequest request, HttpContext httpContext, CancellationToken ct = default)
@@ -227,6 +258,9 @@ public sealed class AuthService : IAuthService
             return AuthFailure("SESSION_INACTIVE", "The account is no longer active.");
         }
 
+        var security = await SecurityAsync(user.Id, ct);
+        if ((user.Role is "admin" or "accountant" || security.MfaSecret is not null) && !session.MfaVerified)
+            return AuthFailure("MFA_REQUIRED", "Sign in again to verify your authenticator.");
         refreshToken.Consume();
         var authSession = await IssueAuthResponseAsync(user, session, httpContext, AuthCookies.IsPersistent(httpContext), ct);
         await _db.WriteAuditLogAsync(
@@ -277,7 +311,11 @@ public sealed class AuthService : IAuthService
             return AuthFailure("SESSION_EXPIRED", "Your session has expired.");
         }
 
-        user.SetPasswordHash(PasswordHasher.Hash(request.NextPassword.Trim()));
+        await (_passwordPolicy ?? throw new InvalidOperationException("Password screening unavailable.")).ValidateAsync(request.NextPassword, ct);
+        user.SetPasswordHash(PasswordHasher.Hash(request.NextPassword));
+        await InvalidateAccessTokensAsync(user.Id, SetupTokenPurposes, "password_changed", ct);
+        var security = await SecurityAsync(user.Id, ct);
+        security.ChallengeHash = null; security.PendingSecret = null; security.Version = Guid.NewGuid();
 
         await RevokeOtherSessionsAsync(user.Id, currentSession.Id, "password_changed", ct);
         await InvalidateRefreshTokensForSessionAsync(currentSession.Id, "rotated", ct);
@@ -368,7 +406,7 @@ public sealed class AuthService : IAuthService
         }
 
         var sessions = await GetActiveSessionsAsync(identity.User!.Id, identity.JwtId, ct);
-        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions));
+        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions, (await SecurityAsync(identity.User.Id, ct)).MfaSecret is not null));
     }
 
     public async Task<ServiceResult<object>> UpdateSecuritySettingsAsync(
@@ -402,7 +440,7 @@ public sealed class AuthService : IAuthService
             ct);
 
         var sessions = await GetActiveSessionsAsync(identity.User.Id, identity.JwtId, ct);
-        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions));
+        return ServiceResult<object>.Success(MapSecuritySettings(identity.User, sessions, (await SecurityAsync(identity.User.Id, ct)).MfaSecret is not null));
     }
 
     public async Task<ServiceResult<object>> GetSessionsAsync(ClaimsPrincipal actor, CancellationToken ct = default)
@@ -596,6 +634,7 @@ public sealed class AuthService : IAuthService
                 httpContext.Request.Headers.UserAgent.ToString());
         }
 
+        if (httpContext.Items["mfa_verified"] is true) session.MarkMfaVerified();
         await InvalidateRefreshTokensForSessionAsync(session.Id, "rotated", ct);
         var refreshTokenValue = AccessTokenCodec.GenerateToken();
         var refreshToken = UserAccessToken.Create(
@@ -735,11 +774,11 @@ public sealed class AuthService : IAuthService
 
     private static SecuritySettingsResponse MapSecuritySettings(
         User user,
-        IReadOnlyCollection<SecuritySessionResponse> sessions)
+        IReadOnlyCollection<SecuritySessionResponse> sessions, bool mfaEnabled)
     {
         return new SecuritySettingsResponse(
-            false,
-            false,
+            true,
+            mfaEnabled,
             UserSecurityProfile.GetPasswordLastChangedAtUtc(user.SecurityJson),
             UserSecurityProfile.GetRecoveryEmail(user.SecurityJson),
             sessions);

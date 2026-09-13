@@ -459,6 +459,60 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         });
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.AccountSecurity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ChallengeExpiresUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ChallengeHash")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastResetRequestUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("LastTotpStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("LockedUntilUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MfaSecret")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PendingSecret")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("Persistent")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RecoveryHashesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("SmtpProbeExpiresUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SmtpProbeHash")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("SmtpVerifiedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AppAccountSecurity", (string)null);
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1389,7 +1443,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
 
                     b.HasIndex("UserId", "LastReadAtUtc");
 
-                    b.ToTable("AppRequestReadStates");
+                    b.ToTable("AppRequestReadStates", (string)null);
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.RequestTemplate", b =>
@@ -1692,6 +1746,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("SecurityJson")
+                        .IsConcurrencyToken()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
@@ -1717,6 +1772,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ConsumedAtUtc")
+                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAtUtc")
@@ -1729,6 +1785,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("InvalidatedAtUtc")
+                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<string>("InvalidatedReason")
@@ -1785,6 +1842,9 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.Property<Guid>("JwtId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("MfaVerified")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime?>("RevokedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -1807,6 +1867,15 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.HasIndex("UserId", "RevokedAtUtc", "ExpiresAtUtc");
 
                     b.ToTable("AppUserSessions", (string)null);
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.AccountSecurity", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Models.User", null)
+                        .WithOne()
+                        .HasForeignKey("SecureClientPortal.Backend.Models.AccountSecurity", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceEvidenceVersion", b =>

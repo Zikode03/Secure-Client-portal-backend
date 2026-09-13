@@ -234,6 +234,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<Document>.ForbiddenResult();
         }
 
+        if (!string.IsNullOrWhiteSpace(request.StorageKey))
+            return ServiceResult<Document>.ErrorResult("Files must be uploaded through the scanned upload endpoint.");
         var pack = await _documents.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == request.MonthlyPackId && x.ClientId == request.ClientId, ct);
         if (pack is null)
         {
@@ -332,12 +334,14 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<Document>.ForbiddenResult();
         }
 
+        if (!string.IsNullOrWhiteSpace(request.StorageKey) && request.StorageKey != item.StorageKey)
+            return ServiceResult<Document>.ErrorResult("Replace files through the scanned upload endpoint.");
         item.UpdateMetadata(
             request.Name,
             DocumentDomainValues.NormalizeCategory(request.Category),
             DocumentDomainValues.ToDocumentStatus(NormalizeDocumentStatus(request.Status)),
-            request.SizeBytes,
-            request.StorageKey);
+            item.SizeBytes,
+            item.StorageKey);
 
         await _documents.SaveChangesAsync(ct);
         return ServiceResult<Document>.Success(item);

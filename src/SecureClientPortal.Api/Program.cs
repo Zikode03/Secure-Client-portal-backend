@@ -57,11 +57,7 @@ if (!string.IsNullOrWhiteSpace(jwtSigningKeyFromEnv))
 ProductionConfiguration.Validate(builder.Configuration, builder.Environment, connectionString, jwt);
 builder.Services.AddPortalTransportSecurity(builder.Configuration, builder.Environment);
 builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
-Directory.CreateDirectory(keyRingPath);
-builder.Services
-    .AddDataProtection()
-    .SetApplicationName("SecureClientPortal")
-    .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+DocumentInfrastructure.Configure(builder.Services, configuredStorage, builder.Environment);
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 var defaultCorsOrigins = new[]
 {
@@ -99,9 +95,12 @@ builder.Services.AddRateLimiter(options =>
     {
         context.HttpContext.Response.ContentType = "application/json";
         return new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
-            new { code = "RATE_LIMITED", message = "Too many authentication attempts. Please wait and try again." },
+            new { code = "RATE_LIMITED", message = "Too many requests. Please wait and try again." },
             cancellationToken));
     };
+    options.AddPolicy("document-download", context =>
+        RateLimitPartition.GetFixedWindowLimiter(context.User.GetUserId()?.ToString() ?? PartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = configuredStorage.DownloadsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("auth-login", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             PartitionKey(httpContext),
@@ -146,7 +145,8 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddDbContext<PortalDbContext>(options =>
     options.UseSqlServer(connectionString));
-builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender, AccessEmailSender>();
+builder.Services.AddScoped<AccessEmailSender>();
+builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender>(sp => sp.GetRequiredService<AccessEmailSender>());
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
 builder.Services
     .AddPlatformModule()
@@ -224,8 +224,10 @@ builder.Services
                     return;
                 }
 
+                var mfa = await db.AccountSecurities.FindAsync([user.Id], context.HttpContext.RequestAborted);
                 var session = await db.UserSessions.FirstOrDefaultAsync(x => x.JwtId == jwtId, context.HttpContext.RequestAborted);
-                if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= DateTime.UtcNow)
+                if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= DateTime.UtcNow ||
+                    ((user.Role is "admin" or "accountant" || mfa?.MfaSecret is not null) && !session.MfaVerified))
                 {
                     context.Fail("Session has expired.");
                 }
@@ -265,8 +267,8 @@ if (app.Environment.IsDevelopment())
 }
 app.UseRouting();
 app.UseCors("Frontend");
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.UseMiddleware<CsrfProtectionMiddleware>((object)corsOrigins);
 app.MapGet("/api/auth/csrf", (HttpContext context, IAntiforgery antiforgery) =>

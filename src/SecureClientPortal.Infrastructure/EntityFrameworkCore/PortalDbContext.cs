@@ -33,6 +33,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<RoleDefinition> RoleDefinitions => Set<RoleDefinition>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<AccountSecurity> AccountSecurities => Set<AccountSecurity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserAccessToken> UserAccessTokens => Set<UserAccessToken>();
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
@@ -50,6 +51,13 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AccountSecurity>(entity =>
+        {
+            entity.ToTable("AppAccountSecurity");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasOne<User>().WithOne().HasForeignKey<AccountSecurity>(x => x.Id).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<User>(entity =>
         {
             entity.ToTable("AppUsers");
@@ -62,7 +70,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired();
             entity.Property(x => x.ClientIdsJson).HasColumnType("nvarchar(max)").IsRequired();
             entity.Property(x => x.ProfileJson).HasColumnType("nvarchar(max)");
-            entity.Property(x => x.SecurityJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.SecurityJson).HasColumnType("nvarchar(max)").IsConcurrencyToken();
             entity.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.ToTable(table =>
@@ -457,6 +465,8 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.UserId).IsRequired();
             entity.Property(x => x.Purpose).HasMaxLength(40).IsRequired();
             entity.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.ConsumedAtUtc).IsConcurrencyToken();
+            entity.Property(x => x.InvalidatedAtUtc).IsConcurrencyToken();
             entity.Property(x => x.SessionId);
             entity.Property(x => x.CreatedByUserId);
             entity.Property(x => x.InvalidatedReason).HasMaxLength(200);

@@ -6,6 +6,12 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
 public interface IFileSecurityScanner
 {
     Task ValidateAsync(string fileName, string? declaredContentType, ReadOnlyMemory<byte> content, CancellationToken ct = default);
+    async Task ValidateStreamAsync(string fileName, string? contentType, Stream stream, CancellationToken ct = default)
+    {
+        var prefix = new byte[16 * 1024];
+        var count = await stream.ReadAtLeastAsync(prefix, prefix.Length, throwOnEndOfStream: false, cancellationToken: ct);
+        await ValidateAsync(fileName, contentType, prefix.AsMemory(0, count), ct);
+    }
 }
 
 public sealed class FileSecurityScanner : IFileSecurityScanner

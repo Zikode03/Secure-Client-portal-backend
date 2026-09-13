@@ -290,7 +290,7 @@ public class AuthorizationScopeTests
             actor,
             TestContext.Current.CancellationToken);
         var settings = Assert.IsType<SecuritySettingsResponse>(updateResult.Value);
-        Assert.False(settings.MfaSupported);
+        Assert.True(settings.MfaSupported);
         Assert.False(settings.MfaEnabled);
         Assert.Equal("recovery@alpha.test", settings.RecoveryEmail);
         Assert.NotNull(settings.PasswordLastChangedAtUtc);

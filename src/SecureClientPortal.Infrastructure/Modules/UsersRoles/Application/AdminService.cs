@@ -60,13 +60,13 @@ public sealed class AdminService : IAdminService
         }
 
         var inviteToken = AccessTokenCodec.GenerateToken();
-        var inviteExpiresAtUtc = DateTime.UtcNow.AddDays(7);
+        var inviteExpiresAtUtc = DateTime.UtcNow.AddHours(24);
         var user = User.CreateInvited(
             Guid.NewGuid(),
             request.FullName,
             email,
             IdentityDomainValues.ToUserRole(roleName),
-            PasswordHasher.Hash("ChangeMe123!"),
+            PasswordHasher.Hash(AccessTokenCodec.GenerateToken()),
             "[]",
             string.IsNullOrWhiteSpace(request.Company) ? null : JsonSerializer.Serialize(new { company = request.Company.Trim() }));
 
@@ -90,10 +90,10 @@ public sealed class AdminService : IAdminService
         {
             dispatch = await _accessEmailSender.SendInviteAsync(user.Email, user.FullName, setupUrl, inviteExpiresAtUtc, ct);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             dispatch = new AccessEmailDispatchResult("failed", setupUrl);
-            deliveryError = exception.Message;
+            deliveryError = "Email delivery failed. Check the mail service and resend.";
         }
 
         await _db.WriteAuditLogAsync(
@@ -113,8 +113,7 @@ public sealed class AdminService : IAdminService
             user.Role,
             invite = new
             {
-                expiresAtUtc = inviteExpiresAtUtc,
-                setupUrl
+                expiresAtUtc = inviteExpiresAtUtc
             },
             delivery = dispatch.DeliveryMode,
             deliveryError
@@ -229,7 +228,7 @@ public sealed class AdminService : IAdminService
         }
 
         var resetToken = AccessTokenCodec.GenerateToken();
-        var resetExpiresAtUtc = DateTime.UtcNow.AddDays(7);
+        var resetExpiresAtUtc = DateTime.UtcNow.AddMinutes(30);
         user.SetSecurityStatus(SecurityStatus.PasswordResetRequired, request.Reason);
 
         var activeSessions = await _db.UserSessions
@@ -266,10 +265,10 @@ public sealed class AdminService : IAdminService
         {
             dispatch = await _accessEmailSender.SendPasswordResetAsync(user.Email, user.FullName, setupUrl, resetExpiresAtUtc, ct);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             dispatch = new AccessEmailDispatchResult("failed", setupUrl);
-            deliveryError = exception.Message;
+            deliveryError = "Email delivery failed. Check the mail service and resend.";
         }
 
         await _db.WriteAuditLogAsync(
@@ -287,57 +286,18 @@ public sealed class AdminService : IAdminService
             reset = true,
             invite = new
             {
-                expiresAtUtc = resetExpiresAtUtc,
-                setupUrl
+                expiresAtUtc = resetExpiresAtUtc
             },
             delivery = dispatch.DeliveryMode,
             deliveryError
         });
     }
 
-    public async Task<ServiceResult<object>> ResetPasswordAsync(string id, AdminResetPasswordRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
+    public Task<ServiceResult<object>> ResetPasswordAsync(string id, AdminResetPasswordRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
         IdentityValidators.ValidateAdminResetPassword(request);
-
-        if (!Guid.TryParse(id, out var userId))
-        {
-            return ServiceResult<object>.NotFoundResult();
-        }
-
-        var user = await _db.Users.FindAsync([userId], ct);
-        if (user is null)
-        {
-            return ServiceResult<object>.NotFoundResult();
-        }
-
-        var temporaryPassword = string.IsNullOrWhiteSpace(request.NewPassword)
-            ? $"Tmp!{Guid.NewGuid():N}"[..12]
-            : request.NewPassword.Trim();
-
-        user.SetPasswordHash(PasswordHasher.Hash(temporaryPassword));
-        user.SetSecurityStatus(
-            SecurityStatus.PasswordResetRequired,
-            string.IsNullOrWhiteSpace(request.Reason) ? "admin_reset" : request.Reason.Trim());
-
-        var activeSessions = await _db.UserSessions
-            .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
-            .ToListAsync(ct);
-        foreach (var session in activeSessions)
-        {
-            session.Revoke("password_reset");
-        }
-
-        await _db.SaveChangesAsync(ct);
-        await _db.WriteAuditLogAsync(
-            actor,
-            "users.password_reset",
-            "user",
-            user.Id,
-            null,
-            JsonSerializer.Serialize(new { user.Email }),
-            ct);
-
-        return ServiceResult<object>.Success(new { user.Id, temporaryPassword, reset = true });
+        return ResetUserAccessAsync(id, new AdminResetAccessRequest(
+            string.IsNullOrWhiteSpace(request.Reason) ? "admin_password_reset" : request.Reason), actor, ct);
     }
 
     public async Task<object> GetSettingAsync(string key, CancellationToken ct = default)

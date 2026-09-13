@@ -60,6 +60,11 @@ public class AccessEmailSender : IAccessEmailSender
             ct);
     }
 
+    public Task<AccessEmailDispatchResult> SendVerificationAsync(string email, string name, string code, CancellationToken ct) =>
+        SendAsync(email, name, "Verify portal email delivery",
+            "Enter this one-time code in the portal SMTP verification screen within 10 minutes: " + code,
+            "<p>Enter this one-time code in the portal SMTP verification screen within 10 minutes:</p><p>" + WebUtility.HtmlEncode(code) + "</p>", "", ct);
+
     private async Task<AccessEmailDispatchResult> SendAsync(
         string recipientEmail,
         string recipientName,
@@ -72,18 +77,15 @@ public class AccessEmailSender : IAccessEmailSender
         if (!_options.Enabled || !string.Equals(_options.DeliveryMode, "smtp", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation(
-                "Access email not sent via SMTP. Mode={Mode}; To={Email}; Subject={Subject}; PreviewUrl={PreviewUrl}",
+                "Access email not sent via SMTP. Mode={Mode}; Subject={Subject}",
                 _options.DeliveryMode,
-                recipientEmail,
-                subject,
-                previewUrl);
+                subject);
             return new AccessEmailDispatchResult(_options.DeliveryMode, previewUrl);
         }
 
         if (string.IsNullOrWhiteSpace(_options.SmtpHost))
         {
-            _logger.LogWarning("AccessEmail is enabled for SMTP but SmtpHost is missing. Falling back to log mode.");
-            return new AccessEmailDispatchResult("log", previewUrl);
+            throw new InvalidOperationException("SMTP host is missing.");
         }
 
         using var message = new MailMessage

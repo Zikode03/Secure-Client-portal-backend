@@ -62,9 +62,9 @@ public static class IdentityValidators
 
     public static void ValidateAdminResetPassword(AdminResetPasswordRequest request)
     {
-        if (!string.IsNullOrWhiteSpace(request.NewPassword) && request.NewPassword.Trim().Length < 8)
+        if (!string.IsNullOrWhiteSpace(request.NewPassword) && request.NewPassword.Length > 0)
         {
-            throw new AppValidationException("Temporary password must be at least 8 characters long.");
+            throw new AppValidationException("Temporary passwords are not supported. Send a reset email instead.");
         }
     }
 
@@ -80,7 +80,7 @@ public static class IdentityValidators
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains("@")) errors.Add("A valid email address is required.");
-        if (string.IsNullOrWhiteSpace(request.Password)) errors.Add("Password is required.");
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length > 1024) errors.Add("Enter a password of at most 1024 characters.");
         ThrowIfAny(errors);
     }
 
@@ -89,7 +89,7 @@ public static class IdentityValidators
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains("@")) errors.Add("A valid invite email is required.");
         if (string.IsNullOrWhiteSpace(request.Token)) errors.Add("A setup token is required.");
-        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Trim().Length < 8) errors.Add("Password must be at least 8 characters long.");
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 15 || request.Password.Length > 1024) errors.Add("Password must be at least 15 characters long.");
         ThrowIfAny(errors);
     }
 
@@ -113,8 +113,8 @@ public static class IdentityValidators
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(request.CurrentPassword)) errors.Add("Your current password is required.");
-        if (string.IsNullOrWhiteSpace(request.NextPassword) || request.NextPassword.Trim().Length < 8) errors.Add("Password must be at least 8 characters long.");
-        if (!string.IsNullOrWhiteSpace(request.CurrentPassword) && request.CurrentPassword.Trim() == request.NextPassword.Trim()) errors.Add("Choose a new password that is different from the current one.");
+        if (string.IsNullOrWhiteSpace(request.NextPassword) || request.NextPassword.Length < 15 || request.NextPassword.Length > 1024) errors.Add("Password must be at least 15 characters long.");
+        if (!string.IsNullOrWhiteSpace(request.CurrentPassword) && request.CurrentPassword == request.NextPassword) errors.Add("Choose a new password that is different from the current one.");
         ThrowIfAny(errors);
     }
 

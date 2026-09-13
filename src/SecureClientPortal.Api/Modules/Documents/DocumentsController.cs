@@ -45,7 +45,23 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPost("upload")]
-    [RequestSizeLimit(100_000_000)]
+    [RequestSizeLimit(100_100_000)]
+    [SecureClientPortal.Backend.Api.Security.StreamingMultipart]
+    public async Task<IActionResult> UploadStream(CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => {
+            var (fields, file) = await SecureClientPortal.Backend.Api.Security.StreamingMultipart.ReadAsync(Request, ct);
+            Guid? Parse(string key) => fields.TryGetValue(key, out var value) && Guid.TryParse(value, out var id) ? id : null;
+            var request = new UploadDocumentRequest {
+                ClientId = Parse("ClientId") ?? Guid.Empty, MonthlyPackId = Parse("MonthlyPackId"),
+                DocumentSlotId = Parse("DocumentSlotId"), DocumentId = Parse("DocumentId"),
+                DocumentType = fields.GetValueOrDefault("DocumentType", ""), File = file
+            };
+            return await Upload(request, ct);
+        });
+    }
+
+    [NonAction]
     public async Task<IActionResult> Upload([FromForm] UploadDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>
@@ -89,6 +105,7 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("{id}/download")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("document-download")]
     public async Task<IActionResult> Download(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>

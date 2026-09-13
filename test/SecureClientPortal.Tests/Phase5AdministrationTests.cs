@@ -42,7 +42,9 @@ public class Phase5AdministrationTests
 
         var auditActions = await db.AuditLogs.Select(x => x.Action).ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains("users.status_changed", auditActions);
-        Assert.Contains("users.password_reset", auditActions);
+        Assert.Contains("users.reset_access_requested", auditActions);
+        Assert.DoesNotContain("temporaryPassword", resetJson);
+        Assert.DoesNotContain("setupUrl", resetJson);
     }
 
     [Fact]

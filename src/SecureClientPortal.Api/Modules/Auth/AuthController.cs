@@ -20,6 +20,12 @@ public class AuthController : ControllerBase
         _service = service;
     }
 
+    [HttpPost("mfa/verify")]
+    [AllowAnonymous]
+    [EnableRateLimiting("auth-login")]
+    public Task<IActionResult> VerifyMfa(MfaVerifyRequest request, CancellationToken ct) =>
+        ExecuteAsync(async () => FromResult(await _service.VerifyMfaAsync(request, HttpContext, ct)));
+
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting("auth-login")]

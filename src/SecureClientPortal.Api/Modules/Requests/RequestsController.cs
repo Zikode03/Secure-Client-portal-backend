@@ -127,6 +127,15 @@ public class RequestsController : ControllerBase
 
     [HttpPost("{id}/upload")]
     [RequestSizeLimit(26_214_400)]
+    [SecureClientPortal.Backend.Api.Security.StreamingMultipart]
+    public async Task<IActionResult> UploadStream(string id, CancellationToken ct)
+    {
+        return await ExecuteAsync(async () => {
+            var (fields, file) = await SecureClientPortal.Backend.Api.Security.StreamingMultipart.ReadAsync(Request, ct);
+            return await UploadDocument(id, new UploadRequestDocumentRequest { File = file, Message = fields.GetValueOrDefault("message") }, ct);
+        });
+    }
+    [NonAction]
     public async Task<IActionResult> UploadDocument(string id, [FromForm] UploadRequestDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _requests.UploadDocumentAsync(id, request, User, ct)));
