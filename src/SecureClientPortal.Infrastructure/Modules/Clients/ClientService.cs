@@ -76,6 +76,23 @@ public sealed class ClientService : IClientService
             FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
         created.AssignAccountant(normalizedAssignedAccountantId);
         created.UpdateComplianceHealth(request.ComplianceHealth);
+        // Keep legal entity type separate from the operating industry supplied by the client record.
+        // Persist the full business profile at creation so downstream monthly-pack recommendations
+        // receive the real Industry value instead of falling back to EntityType.
+        created.UpdateBusinessProfile(
+            request.Name,
+            request.TradingName,
+            request.RegistrationNumber,
+            request.TaxNumber,
+            request.VatNumber,
+            request.PrimaryContact,
+            request.Email,
+            request.Phone,
+            request.AddressLine,
+            request.City,
+            request.Country,
+            request.Industry,
+            request.PrimaryContactJobTitle);
 
         _db.Clients.Add(created);
         _db.ClientAssignments.Add(ClientAssignment.Create(
@@ -103,6 +120,20 @@ public sealed class ClientService : IClientService
         if (existing is null) return (false, null);
 
         existing.UpdateDetails(request.Name, request.EntityType, request.PrimaryContact, request.Email);
+        existing.UpdateBusinessProfile(
+            request.Name,
+            request.TradingName,
+            request.RegistrationNumber,
+            request.TaxNumber,
+            request.VatNumber,
+            request.PrimaryContact,
+            request.Email,
+            request.Phone,
+            request.AddressLine,
+            request.City,
+            request.Country,
+            request.Industry,
+            request.PrimaryContactJobTitle);
         existing.ChangeStatus(FirmManagementDomainValues.ToClientStatus(NormalizeStatus(request.Status)));
         existing.UpdateComplianceHealth(request.ComplianceHealth);
         existing.AssignAccountant(request.AssignedAccountantId);
