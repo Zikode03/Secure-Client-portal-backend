@@ -350,6 +350,50 @@ public class ClientMonthlyPackProfileTests
         Assert.True(await db.DocumentSlots.AnyAsync(x => x.MonthlyPackId == april.Id && x.Category == "management_accounts", TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    [InlineData("Transport & Logistics", "Transport")]
+    [InlineData("Retail & Wholesale", "Retail")]
+    [InlineData("Construction Contractor", "Construction")]
+    [InlineData("Hospitality Restaurant", "Hospitality")]
+    public async Task TemplateRecommendation_UsesRecordedIndustry(string industry, string expectedKeyword)
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId, "Private Company", industry));
+        var expected = MonthlyPackTemplate.Create(Guid.NewGuid(), $"{expectedKeyword} Starter", "Industry baseline.", 1);
+        var professional = MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Service baseline.", 1);
+        db.MonthlyPackTemplates.AddRange(expected, professional);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected.Id, profile.Value!.RecommendedTemplateId);
+    }
+
+    [Fact]
+    public async Task TemplateRecommendation_DoesNotUseLegalEntityTypeAsIndustry()
+    {
+        await using var db = BuildDb();
+        var clientId = Guid.NewGuid();
+        // The words "Transport" and "Retail" are deliberately placed in the legal entity type.
+        // Without a recorded industry or operating facts, this must not create a recommendation.
+        db.Clients.Add(BuildClient(clientId, "Transport Retail Private Company", industry: ""));
+        db.MonthlyPackTemplates.AddRange(
+            MonthlyPackTemplate.Create(Guid.NewGuid(), "Transport Starter", "Transport baseline.", 1),
+            MonthlyPackTemplate.Create(Guid.NewGuid(), "Retail Starter", "Retail baseline.", 1),
+            MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Service baseline.", 1));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var service = new ClientMonthlyPackProfileService(db);
+        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
+
+        Assert.Null(profile.Value!.RecommendedTemplateId);
+        Assert.Null(profile.Value.RecommendedTemplateReason);
+    }
+
     private static PortalDbContext BuildDb()
     {
         var options = new DbContextOptionsBuilder<PortalDbContext>()
@@ -358,14 +402,36 @@ public class ClientMonthlyPackProfileTests
         return new PortalDbContext(options);
     }
 
-    private static Client BuildClient(Guid id) =>
-        Client.Create(
+    private static Client BuildClient(Guid id, string entityType = "Private Company", string industry = "")
+    {
+        var client = Client.Create(
             id,
             "Profile Test Client",
-            "Private Company",
+            entityType,
             "Finance Contact",
             $"finance-{id:N}@example.test",
             ClientStatus.Active);
+
+        if (!string.IsNullOrWhiteSpace(industry))
+        {
+            client.UpdateBusinessProfile(
+                client.Name,
+                "",
+                "",
+                "",
+                "",
+                client.PrimaryContact,
+                client.Email,
+                "",
+                "",
+                "",
+                "",
+                industry,
+                "");
+        }
+
+        return client;
+    }
 
     private static ClaimsPrincipal BuildUser(Guid userId, string role, Guid? clientId = null)
     {
