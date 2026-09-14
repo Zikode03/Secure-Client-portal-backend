@@ -36,6 +36,9 @@ public record ClientComplianceProfileDto(
     bool? ProvisionalTaxpayer,
     bool? CompanyTaxRegistered,
     bool? CipcRegistered,
+    bool? GovernmentSupplier,
+    bool? CsdRegistered,
+    string? CsdSupplierNumber,
     int FinancialYearEndMonth,
     DateTime UpdatedAtUtc);
 
@@ -49,6 +52,9 @@ public record UpdateClientComplianceProfileRequest(
     bool? ProvisionalTaxpayer = null,
     bool? CompanyTaxRegistered = null,
     bool? CipcRegistered = null,
+    bool? GovernmentSupplier = null,
+    bool? CsdRegistered = null,
+    string? CsdSupplierNumber = null,
     int FinancialYearEndMonth = 2);
 
 public record ComplianceObligationDto(
