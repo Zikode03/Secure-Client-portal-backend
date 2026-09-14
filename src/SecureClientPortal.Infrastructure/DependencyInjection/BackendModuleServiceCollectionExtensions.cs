@@ -99,14 +99,10 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddMonthlyPacksModule(this IServiceCollection services)
     {
-        // Keep the concrete profile service available for the industry-aware decorator. The public
-        // interface returns the decorated service so legal EntityType never drives recommendations.
+        // Monthly packs have two layers: the pack workflow itself and a client-specific profile
+        // that determines which recurring slots should exist for each client.
         services.AddScoped<IDocumentSlotService, DocumentSlotService>();
-        services.AddScoped<ClientMonthlyPackProfileService>();
-        services.AddScoped<IClientMonthlyPackProfileService>(sp =>
-            new IndustryAwareClientMonthlyPackProfileService(
-                sp.GetRequiredService<ClientMonthlyPackProfileService>(),
-                sp.GetRequiredService<PortalDbContext>()));
+        services.AddScoped<IClientMonthlyPackProfileService, ClientMonthlyPackProfileService>();
         services.AddScoped<IMonthlyPackService, MonthlyPackService>();
         return services;
     }
