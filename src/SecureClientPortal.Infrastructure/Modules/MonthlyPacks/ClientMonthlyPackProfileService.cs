@@ -761,36 +761,44 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
         string keyword;
         string reason;
-        var businessText = $"{client.Industry} {client.EntityType}".ToLowerInvariant();
-        if (profile?.ManufacturesGoods == true || businessText.Contains("manufactur") || businessText.Contains("production"))
+        // Industry describes what the business does. EntityType is only the legal form (for example,
+        // Private Company or Close Corporation) and must never drive an operating-template recommendation.
+        var industryText = client.Industry?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (profile?.ManufacturesGoods == true || industryText.Contains("manufactur") || industryText.Contains("production"))
         {
             keyword = "Manufacturing";
             reason = "Recommended because the business manufactures or produces goods.";
         }
-        else if (profile?.UsesBookingPlatforms == true || profile?.UsesFoodSuppliers == true || businessText.Contains("hospital") || businessText.Contains("restaurant"))
+        else if (profile?.UsesBookingPlatforms == true || profile?.UsesFoodSuppliers == true || industryText.Contains("hospital") || industryText.Contains("restaurant"))
         {
             keyword = "Hospitality";
             reason = "Recommended because the business operates in hospitality or food service.";
         }
-        else if (profile?.UsesSubcontractors == true || profile?.UsesPaymentCertificates == true || profile?.TracksProjectCosts == true || businessText.Contains("construct") || businessText.Contains("contractor"))
+        else if (profile?.UsesSubcontractors == true || profile?.UsesPaymentCertificates == true || profile?.TracksProjectCosts == true || industryText.Contains("construct") || industryText.Contains("contractor"))
         {
             keyword = "Construction";
             reason = "Recommended because the business uses project, contractor, or payment-certificate workflows.";
         }
-        else if (profile?.OperatesFleet == true || businessText.Contains("transport") || businessText.Contains("logistic") || businessText.Contains("fleet"))
+        else if (profile?.OperatesFleet == true || industryText.Contains("transport") || industryText.Contains("logistic") || industryText.Contains("fleet"))
         {
             keyword = "Transport";
             reason = "Recommended because the business operates vehicles, logistics, or a fleet.";
         }
-        else if (profile?.UsesPos == true || profile?.HoldsInventory == true || businessText.Contains("retail") || businessText.Contains("trading") || businessText.Contains("wholesale"))
+        else if (profile?.UsesPos == true || profile?.HoldsInventory == true || industryText.Contains("retail") || industryText.Contains("trading") || industryText.Contains("wholesale"))
         {
             keyword = "Retail";
             reason = "Recommended because the business uses POS settlements or holds inventory.";
         }
-        else
+        else if (!string.IsNullOrWhiteSpace(industryText))
         {
             keyword = "Professional";
-            reason = "Recommended as the lean service-business baseline until more operating facts are confirmed.";
+            reason = "Recommended as the lean service-business baseline for the recorded industry.";
+        }
+        else
+        {
+            // Do not invent a business classification from the legal entity type. Accountants can
+            // record the industry or confirm operating facts before a template is recommended.
+            return (null, null);
         }
 
         var template = await _db.MonthlyPackTemplates
@@ -800,124 +808,194 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         return (template, template is null ? null : reason);
     }
 
-    private static OperatingProfileState? ResolveOperatingProfile(ProfileState state, int year, int month)
+    private static bool IsConditionalCategory(string category)
     {
-        var period = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
-        return state.OperatingProfiles
-            .Where(x => x.EffectiveFromUtc <= period)
-            .OrderByDescending(x => x.EffectiveFromUtc)
-            .FirstOrDefault();
+        var value = DocumentDomainValues.NormalizeCategory(category);
+        return value is
+            "payroll_document" or
+            "inventory_report" or
+            "supplier_statements" or
+            "merchant_statement" or
+            "fuel_statement" or
+            "vehicle_finance" or
+            "toll_tracking" or
+            "subcontractor_invoices" or
+            "payment_certificates" or
+            "project_expenses" or
+            "booking_statement" or
+            "food_supplier_statement" or
+            "production_report" or
+            "tax_document";
     }
 
-    private static bool IsConditionalCategory(string category) =>
-        DocumentDomainValues.NormalizeCategory(category) is
-            "payroll_document" or "inventory_report" or "supplier_statements" or
-            "merchant_statement" or "fuel_statement" or "vehicle_finance" or "toll_tracking" or
-            "subcontractor_invoices" or "payment_certificates" or "project_expenses" or
-            "booking_statement" or "food_supplier_statement" or "production_report" or "tax_document";
-
-    private static int? DefaultDueDay(string category) =>
-        DocumentDomainValues.NormalizeCategory(category) is
-            "bank_statement" or "sales_invoices" or "purchase_invoices" or "merchant_statement" or "fuel_statement" ? 5 : 7;
+    private static int? DefaultDueDay(string category)
+    {
+        var value = DocumentDomainValues.NormalizeCategory(category);
+        return value is "bank_statement" or "fuel_statement" or "vehicle_finance" or "toll_tracking" ? 5 : 7;
+    }
 
     private static bool IsVatPeriodDue(OperatingProfileState profile, int year, int month)
     {
-        var cycle = Math.Clamp(profile.VatCycleMonths, 1, 12);
+        if (profile.VatCycleMonths <= 1) return true;
         var anchor = Math.Clamp(profile.VatAnchorMonth, 1, 12);
-        var absoluteMonth = year * 12 + month - 1;
-        var anchorAbsoluteMonth = year * 12 + anchor - 1;
-        return Math.Abs(absoluteMonth - anchorAbsoluteMonth) % cycle == 0;
+        var absolute = (year * 12) + (month - 1);
+        var anchorAbsolute = (year * 12) + (anchor - 1);
+        var delta = absolute - anchorAbsolute;
+        return ((delta % profile.VatCycleMonths) + profile.VatCycleMonths) % profile.VatCycleMonths == 0;
     }
 
-    private static bool IsEffectiveForPeriod(DateTime effectiveFrom, DateTime? effectiveTo, int year, int month)
+    private async Task<MonthlyPackTemplate?> ResolveTemplateAsync(Guid? templateId, CancellationToken ct)
     {
-        var period = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
-        return effectiveFrom <= period && (!effectiveTo.HasValue || effectiveTo.Value >= period);
-    }
-
-    private static bool IsCadenceDue(string cadence, DateTime effectiveFrom, int year, int month)
-    {
-        var normalized = NormalizeCadence(cadence);
-        if (normalized == "event_based") return false;
-        var interval = normalized switch { "quarterly" => 3, "annual" => 12, _ => 1 };
-        var periodIndex = year * 12 + month;
-        var startIndex = effectiveFrom.Year * 12 + effectiveFrom.Month;
-        return periodIndex >= startIndex && (periodIndex - startIndex) % interval == 0;
-    }
-
-    private sealed record EffectiveRequirement(
-        string Category,
-        string Label,
-        bool IsRequired,
-        int? DefaultDueDayOfMonth,
-        string Source,
-        string Reason);
-
-    private async Task<bool> CanAccessClientAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct)
-    {
-        if (user.IsAdmin())
-        {
-            return await _db.Clients.AnyAsync(x => x.Id == clientId, ct);
-        }
-
-        var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        return allowedClientIds.Contains(clientId);
-    }
-
-    private async Task<MonthlyPackTemplate?> ResolveTemplateAsync(Guid? selectedTemplateId, CancellationToken ct)
-    {
-        if (selectedTemplateId.HasValue)
+        if (templateId.HasValue)
         {
             var selected = await _db.MonthlyPackTemplates.FirstOrDefaultAsync(
-                x => x.Id == selectedTemplateId.Value && x.IsActive,
+                x => x.Id == templateId.Value && x.IsActive,
                 ct);
             if (selected is not null) return selected;
         }
 
-        // The oldest active template acts as the firm's safe fallback until a client is explicitly configured.
         return await _db.MonthlyPackTemplates
             .Where(x => x.IsActive)
-            .OrderBy(x => x.CreatedAtUtc)
+            .OrderBy(x => x.Name)
             .FirstOrDefaultAsync(ct);
     }
 
     private async Task<ProfileState> LoadStateAsync(Guid clientId, CancellationToken ct)
     {
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == ProfileKey(clientId), ct);
-        if (setting is null)
-        {
-            return new ProfileState { UpdatedAtUtc = DateTime.UtcNow };
-        }
+        var key = BuildSettingKey(clientId);
+        var setting = await _db.AppSystemSettings.FirstOrDefaultAsync(x => x.Key == key, ct);
+        if (setting is null) return new ProfileState();
 
         try
         {
-            return JsonSerializer.Deserialize<ProfileState>(setting.ValueJson, JsonOptions)
-                ?? new ProfileState { UpdatedAtUtc = setting.UpdatedAtUtc };
+            var state = JsonSerializer.Deserialize<ProfileState>(setting.ValueJson, JsonOptions) ?? new ProfileState();
+            state.RecurringItems ??= [];
+            state.PendingRecurringItems ??= [];
+            state.OneOffItems ??= [];
+            state.OperatingProfiles ??= [];
+            foreach (var item in state.RecurringItems)
+            {
+                item.Cadence = NormalizeCadence(item.Cadence);
+                item.EffectiveFromUtc = NormalizeEffectiveDate(item.EffectiveFromUtc) ?? NormalizeEffectiveDate(DateTime.UtcNow)!.Value;
+                item.EffectiveToUtc = NormalizeEffectiveDate(item.EffectiveToUtc);
+            }
+            foreach (var operating in state.OperatingProfiles)
+            {
+                operating.Normalize();
+            }
+            return state;
         }
-        catch (JsonException)
+        catch
         {
-            // Bad JSON should never prevent a client from opening their pack. A later successful edit
-            // will replace the malformed profile with a valid state.
-            return new ProfileState { UpdatedAtUtc = setting.UpdatedAtUtc };
+            return new ProfileState();
         }
     }
 
     private async Task SaveStateAsync(Guid clientId, ProfileState state, CancellationToken ct)
     {
-        var key = ProfileKey(clientId);
+        var key = BuildSettingKey(clientId);
         var json = JsonSerializer.Serialize(state, JsonOptions);
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == key, ct);
+        var setting = await _db.AppSystemSettings.FirstOrDefaultAsync(x => x.Key == key, ct);
         if (setting is null)
         {
-            _db.SystemSettings.Add(SystemSetting.Create(key, json));
+            _db.AppSystemSettings.Add(new AppSystemSetting
+            {
+                Key = key,
+                ValueJson = json,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
         }
         else
         {
-            setting.UpdateValue(json);
+            setting.ValueJson = json;
+            setting.UpdatedAtUtc = DateTime.UtcNow;
         }
-
         await _db.SaveChangesAsync(ct);
     }
+
+    private async Task<bool> CanAccessClientAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (user.IsAdmin()) return true;
+        var userId = user.GetUserId();
+        if (!userId.HasValue) return false;
+        if (user.IsClient())
+        {
+            var claimClientId = user.FindFirst("client_id")?.Value;
+            return Guid.TryParse(claimClientId, out var parsed) && parsed == clientId;
+        }
+        if (user.IsAccountant())
+        {
+            return await _db.ClientAccountantAssignments.AnyAsync(
+                x => x.ClientId == clientId && x.AccountantUserId == userId.Value,
+                ct)
+                || await _db.Clients.AnyAsync(x => x.Id == clientId && x.AssignedAccountantId == userId.Value, ct);
+        }
+        return false;
+    }
+
+    private static string BuildSettingKey(Guid clientId) => $"monthly_pack_profile:{clientId:N}";
+
+    private static string? NormalizeRecurrence(string value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "this_month" or "every_month" ? normalized : null;
+    }
+
+    private static string NormalizeCadence(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "quarterly" => "quarterly",
+            "annual" => "annual",
+            "annually" => "annual",
+            "yearly" => "annual",
+            _ => "monthly"
+        };
+    }
+
+    private static DateTime? NormalizeEffectiveDate(DateTime? value)
+    {
+        if (!value.HasValue) return null;
+        var utc = value.Value.Kind == DateTimeKind.Utc
+            ? value.Value
+            : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc);
+        return new DateTime(utc.Year, utc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+    }
+
+    private static bool IsEffectiveForPeriod(DateTime effectiveFromUtc, DateTime? effectiveToUtc, int year, int month)
+    {
+        var period = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
+        if (period < effectiveFromUtc) return false;
+        return !effectiveToUtc.HasValue || period <= effectiveToUtc.Value;
+    }
+
+    private static bool IsCadenceDue(string cadence, DateTime effectiveFromUtc, int year, int month)
+    {
+        var months = cadence switch
+        {
+            "quarterly" => 3,
+            "annual" => 12,
+            _ => 1
+        };
+        if (months == 1) return true;
+        var start = (effectiveFromUtc.Year * 12) + (effectiveFromUtc.Month - 1);
+        var current = (year * 12) + (month - 1);
+        var delta = current - start;
+        return delta >= 0 && delta % months == 0;
+    }
+
+    private static int? NormalizeDueDay(int? value) => value is >= 1 and <= 31 ? value : null;
+
+    private static DateTime? BuildDueDate(int year, int month, int? day)
+    {
+        if (!day.HasValue) return null;
+        var safeDay = Math.Min(day.Value, DateTime.DaysInMonth(year, month));
+        return new DateTime(year, month, safeDay, 23, 59, 59, DateTimeKind.Utc);
+    }
+
+    private static string BuildUniqueSlotCategory(string category) =>
+        $"{category}_{Guid.NewGuid():N}"[..Math.Min(category.Length + 9, category.Length + 33)];
 
     private static void AddOrReplaceRecurringItem(
         ProfileState state,
@@ -926,75 +1004,28 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         bool isRequired,
         int? defaultDueDayOfMonth)
     {
-        var normalized = DocumentDomainValues.NormalizeCategory(category);
-        state.RecurringItems.RemoveAll(x => string.Equals(x.Category, normalized, StringComparison.OrdinalIgnoreCase));
+        state.RecurringItems.RemoveAll(x => string.Equals(x.Category, category, StringComparison.OrdinalIgnoreCase));
         state.RecurringItems.Add(new RecurringItemState
         {
             Id = Guid.NewGuid(),
-            Category = normalized,
-            Label = label.Trim(),
+            Category = category,
+            Label = label,
             IsRequired = isRequired,
             DefaultDueDayOfMonth = NormalizeDueDay(defaultDueDayOfMonth),
             Cadence = "monthly",
             EffectiveFromUtc = NormalizeEffectiveDate(DateTime.UtcNow)!.Value,
+            EffectiveToUtc = null,
             Source = "client_specific"
         });
     }
 
-    private static DateTime? BuildDueDate(int year, int month, int? dueDay)
-    {
-        if (!dueDay.HasValue) return null;
-        var day = Math.Min(dueDay.Value, DateTime.DaysInMonth(year, month));
-        return new DateTime(year, month, day, 23, 59, 59, DateTimeKind.Utc);
-    }
-
-    private static int? NormalizeDueDay(int? dueDay)
-    {
-        if (!dueDay.HasValue) return null;
-        return Math.Clamp(dueDay.Value, 1, 31);
-    }
-
-    private static DateTime? NormalizeEffectiveDate(DateTime? value)
-    {
-        if (!value.HasValue) return null;
-        var utc = value.Value.Kind == DateTimeKind.Utc ? value.Value : value.Value.ToUniversalTime();
-        return new DateTime(utc.Year, utc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-    }
-
-    private static string NormalizeCadence(string? cadence) =>
-        cadence?.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_') switch
-        {
-            "quarterly" => "quarterly",
-            "annual" or "annually" or "yearly" => "annual",
-            "event" or "event_based" => "event_based",
-            _ => "monthly"
-        };
-
-    private static string BuildUniqueSlotCategory(string category)
-    {
-        var suffix = $"_client_{Guid.NewGuid():N}"[..15];
-        var baseLength = Math.Max(1, 80 - suffix.Length);
-        var safeBase = category.Length > baseLength ? category[..baseLength] : category;
-        return safeBase + suffix;
-    }
-
-    private static string? NormalizeRecurrence(string? value)
-    {
-        var normalized = value?.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
-        return normalized is "this_month" or "every_month" ? normalized : null;
-    }
-
-    private static string ProfileKey(Guid clientId) => $"monthly-pack-profile:{clientId:N}";
-
-    // These classes are persistence shapes only. They stay private so JSON storage does not leak
-    // into the public API contract.
     private sealed class ProfileState
     {
         public Guid? TemplateId { get; set; }
-        public List<OperatingProfileState> OperatingProfiles { get; set; } = [];
         public List<RecurringItemState> RecurringItems { get; set; } = [];
         public List<PendingRecurringState> PendingRecurringItems { get; set; } = [];
         public List<OneOffItemState> OneOffItems { get; set; } = [];
+        public List<OperatingProfileState> OperatingProfiles { get; set; } = [];
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     }
 
@@ -1006,14 +1037,31 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         public bool IsRequired { get; set; }
         public int? DefaultDueDayOfMonth { get; set; }
         public string Cadence { get; set; } = "monthly";
-        public DateTime EffectiveFromUtc { get; set; } = DateTime.MinValue;
+        public DateTime EffectiveFromUtc { get; set; } = NormalizeEffectiveDate(DateTime.UtcNow)!.Value;
         public DateTime? EffectiveToUtc { get; set; }
         public string Source { get; set; } = "client_specific";
     }
 
+    private sealed class PendingRecurringState
+    {
+        public Guid Id { get; set; }
+        public string Category { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public bool IsRequired { get; set; }
+        public int? DefaultDueDayOfMonth { get; set; }
+        public DateTime RequestedAtUtc { get; set; }
+        public Guid RequestedByUserId { get; set; }
+    }
+
+    private sealed class OneOffItemState
+    {
+        public Guid SlotId { get; set; }
+        public string Source { get; set; } = "client_added";
+    }
+
     private sealed class OperatingProfileState
     {
-        public DateTime EffectiveFromUtc { get; set; }
+        public DateTime EffectiveFromUtc { get; set; } = NormalizeEffectiveDate(DateTime.UtcNow)!.Value;
         public bool? VatRegistered { get; set; }
         public int VatCycleMonths { get; set; } = 2;
         public int VatAnchorMonth { get; set; } = 1;
@@ -1032,8 +1080,9 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         public bool SalesInvoicesSynced { get; set; }
         public bool PurchaseInvoicesSynced { get; set; }
 
-        public static OperatingProfileState FromInput(ClientOperatingProfileInput input, DateTime effectiveFromUtc) =>
-            new()
+        public static OperatingProfileState FromInput(ClientOperatingProfileInput input, DateTime effectiveFromUtc)
+        {
+            var state = new OperatingProfileState
             {
                 EffectiveFromUtc = effectiveFromUtc,
                 VatRegistered = input.VatRegistered,
@@ -1054,51 +1103,49 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 SalesInvoicesSynced = input.SalesInvoicesSynced,
                 PurchaseInvoicesSynced = input.PurchaseInvoicesSynced
             };
+            state.Normalize();
+            return state;
+        }
 
-        public ClientOperatingProfileDto ToDto() =>
-            new(
-                EffectiveFromUtc,
-                VatRegistered,
-                VatCycleMonths,
-                VatAnchorMonth,
-                HasEmployees,
-                HoldsInventory,
-                UsesSupplierAccounts,
-                UsesPos,
-                OperatesFleet,
-                UsesSubcontractors,
-                UsesPaymentCertificates,
-                TracksProjectCosts,
-                UsesBookingPlatforms,
-                UsesFoodSuppliers,
-                ManufacturesGoods,
-                BankFeedConnected,
-                SalesInvoicesSynced,
-                PurchaseInvoicesSynced,
-                IsComplete());
+        public void Normalize()
+        {
+            EffectiveFromUtc = NormalizeEffectiveDate(EffectiveFromUtc)!.Value;
+            VatCycleMonths = Math.Clamp(VatCycleMonths, 1, 12);
+            VatAnchorMonth = Math.Clamp(VatAnchorMonth, 1, 12);
+        }
 
-        private bool IsComplete() =>
-            VatRegistered.HasValue && HasEmployees.HasValue && HoldsInventory.HasValue &&
-            UsesSupplierAccounts.HasValue && UsesPos.HasValue && OperatesFleet.HasValue &&
-            UsesSubcontractors.HasValue && UsesPaymentCertificates.HasValue &&
-            TracksProjectCosts.HasValue && UsesBookingPlatforms.HasValue &&
-            UsesFoodSuppliers.HasValue && ManufacturesGoods.HasValue;
+        public ClientOperatingProfileDto ToDto() => new(
+            EffectiveFromUtc,
+            VatRegistered,
+            VatCycleMonths,
+            VatAnchorMonth,
+            HasEmployees,
+            HoldsInventory,
+            UsesSupplierAccounts,
+            UsesPos,
+            OperatesFleet,
+            UsesSubcontractors,
+            UsesPaymentCertificates,
+            TracksProjectCosts,
+            UsesBookingPlatforms,
+            UsesFoodSuppliers,
+            ManufacturesGoods,
+            BankFeedConnected,
+            SalesInvoicesSynced,
+            PurchaseInvoicesSynced,
+            new bool?[]
+            {
+                VatRegistered, HasEmployees, HoldsInventory, UsesSupplierAccounts, UsesPos, OperatesFleet,
+                UsesSubcontractors, UsesPaymentCertificates, TracksProjectCosts, UsesBookingPlatforms,
+                UsesFoodSuppliers, ManufacturesGoods
+            }.All(x => x.HasValue));
     }
 
-    private sealed class PendingRecurringState
-    {
-        public Guid Id { get; set; }
-        public string Category { get; set; } = string.Empty;
-        public string Label { get; set; } = string.Empty;
-        public bool IsRequired { get; set; }
-        public int? DefaultDueDayOfMonth { get; set; }
-        public DateTime RequestedAtUtc { get; set; }
-        public Guid RequestedByUserId { get; set; }
-    }
-
-    private sealed class OneOffItemState
-    {
-        public Guid SlotId { get; set; }
-        public string Source { get; set; } = "client_added";
-    }
+    private sealed record EffectiveRequirement(
+        string Category,
+        string Label,
+        bool IsRequired,
+        int? DefaultDueDayOfMonth,
+        string Source,
+        string Reason);
 }
