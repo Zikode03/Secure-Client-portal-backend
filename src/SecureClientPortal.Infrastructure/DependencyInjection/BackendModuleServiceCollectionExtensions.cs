@@ -144,6 +144,7 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddComplianceModule(this IServiceCollection services)
     {
         services.AddScoped<IComplianceService, ComplianceService>();
+        services.AddScoped<IComplianceMonitoringService, ComplianceMonitoringService>();
         return services;
     }
 

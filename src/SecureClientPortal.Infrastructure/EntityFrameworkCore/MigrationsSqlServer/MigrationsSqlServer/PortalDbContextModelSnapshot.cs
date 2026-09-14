@@ -750,6 +750,30 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.ToTable("AppComplianceCategories", (string)null);
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceCheckSetting", b =>
+                {
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CheckCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Applicability")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("ClientId", "CheckCode");
+
+                    b.ToTable("AppComplianceCheckSettings", (string)null);
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceEvidenceVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -875,6 +899,28 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         });
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceMonitoringProfile", b =>
+                {
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CsdSupplierNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("ClientId");
+
+                    b.ToTable("AppComplianceMonitoringProfiles", (string)null);
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceReminder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -921,6 +967,59 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         {
                             t.HasCheckConstraint("CK_AppComplianceReminders_Status", "Status IN ('pending','sent','dismissed')");
                         });
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceVerification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CheckCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CheckedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EvidenceReference")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("IdentifierFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ReviewAfterUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "CheckCode", "RecordedAtUtc");
+
+                    b.ToTable("AppComplianceVerifications", (string)null);
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.DeadlineRule", b =>
@@ -1878,11 +1977,38 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceCheckSetting", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Models.ComplianceMonitoringProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceEvidenceVersion", b =>
                 {
                     b.HasOne("SecureClientPortal.Backend.Models.ComplianceItem", null)
                         .WithMany()
                         .HasForeignKey("ComplianceItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceMonitoringProfile", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Models.Client", null)
+                        .WithOne()
+                        .HasForeignKey("SecureClientPortal.Backend.Models.ComplianceMonitoringProfile", "ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.ComplianceVerification", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Models.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

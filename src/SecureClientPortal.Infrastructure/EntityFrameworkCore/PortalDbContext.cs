@@ -38,6 +38,9 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<UserAccessToken> UserAccessTokens => Set<UserAccessToken>();
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
     public DbSet<ComplianceItem> ComplianceItems => Set<ComplianceItem>();
+    public DbSet<ComplianceMonitoringProfile> ComplianceMonitoringProfiles => Set<ComplianceMonitoringProfile>();
+    public DbSet<ComplianceCheckSetting> ComplianceCheckSettings => Set<ComplianceCheckSetting>();
+    public DbSet<ComplianceVerification> ComplianceVerifications => Set<ComplianceVerification>();
     public DbSet<ComplianceReminder> ComplianceReminders => Set<ComplianceReminder>();
     public DbSet<ComplianceEvidenceVersion> ComplianceEvidenceVersions => Set<ComplianceEvidenceVersion>();
     public DbSet<ReportSchedule> ReportSchedules => Set<ReportSchedule>();
@@ -51,6 +54,35 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ComplianceMonitoringProfile>(entity =>
+        {
+            entity.ToTable("AppComplianceMonitoringProfiles");
+            entity.HasKey(x => x.ClientId);
+            entity.Property(x => x.CsdSupplierNumber).HasMaxLength(100);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasOne<Client>().WithOne().HasForeignKey<ComplianceMonitoringProfile>(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ComplianceCheckSetting>(entity =>
+        {
+            entity.ToTable("AppComplianceCheckSettings");
+            entity.HasKey(x => new { x.ClientId, x.CheckCode });
+            entity.Property(x => x.CheckCode).HasMaxLength(50);
+            entity.Property(x => x.Applicability).HasMaxLength(30);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.HasOne<ComplianceMonitoringProfile>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ComplianceVerification>(entity =>
+        {
+            entity.ToTable("AppComplianceVerifications");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CheckCode).HasMaxLength(50);
+            entity.Property(x => x.Method).HasMaxLength(40);
+            entity.Property(x => x.Outcome).HasMaxLength(30);
+            entity.Property(x => x.EvidenceReference).HasMaxLength(500);
+            entity.Property(x => x.IdentifierFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.ClientId, x.CheckCode, x.RecordedAtUtc });
+            entity.HasOne<Client>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<AccountSecurity>(entity =>
         {
             entity.ToTable("AppAccountSecurity");

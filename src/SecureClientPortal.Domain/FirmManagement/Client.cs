@@ -81,6 +81,13 @@ public class Client
         Touch();
     }
 
+    public void UpdateComplianceIdentifiers(string registrationNumber, string taxNumber)
+    {
+        RegistrationNumber = NormalizeOptional(registrationNumber);
+        TaxNumber = NormalizeOptional(taxNumber);
+        Touch();
+    }
+
     public void ChangeStatus(ClientStatus status)
     {
         Status = status.ToStorageValue();
