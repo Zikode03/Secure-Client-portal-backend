@@ -13,9 +13,9 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Applicati
 
 /// <summary>
 /// Deterministic Phase 4 compliance engine. It automates obligation creation, evidence readiness,
-/// requests and deadline state, while deliberately keeping the external SARS/CIPC/UIF filing step
-/// under accountant control. Existing ComplianceItem rows remain the durable register/evidence anchor;
-/// richer period, rule-version, submission and payment metadata is stored in SystemSetting JSON.
+/// requests and deadline state, while deliberately keeping external SARS/CIPC/UIF filing under
+/// accountant control. CSD is treated as a standing National Treasury supplier-compliance record,
+/// not as a tax return: the engine tracks registration evidence without inventing a statutory filing date.
 /// </summary>
 public sealed class ComplianceAutomationService : IComplianceAutomationService
 {
@@ -96,6 +96,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
         if (request.VatCycleMonths is < 1 or > 12 || request.VatAnchorMonth is < 1 or > 12 || request.FinancialYearEndMonth is < 1 or > 12)
             return ServiceResult<ClientComplianceProfileDto>.ErrorResult("VAT cycle, VAT anchor month and financial year-end month must be between 1 and 12.");
 
+        var csdSupplierNumber = string.IsNullOrWhiteSpace(request.CsdSupplierNumber) ? null : request.CsdSupplierNumber.Trim();
         var profile = new ClientComplianceProfileDto(
             clientId,
             request.VatRegistered,
@@ -107,6 +108,9 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
             request.ProvisionalTaxpayer,
             request.CompanyTaxRegistered,
             request.CipcRegistered,
+            request.GovernmentSupplier,
+            request.CsdRegistered,
+            csdSupplierNumber,
             request.FinancialYearEndMonth,
             DateTime.UtcNow);
 
@@ -166,6 +170,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
     public Task<ServiceResult<ComplianceObligationDto>> RecordSubmissionAsync(Guid id, RecordComplianceSubmissionRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
         MutateAsync(id, user, "compliance.obligation.submission_recorded", ct, state =>
         {
+            if (state.SubmissionStatus == "not_required") return "This obligation does not require an external filing submission.";
             if (state.ReviewStatus != "approved") return "Review must be approved before an external submission can be recorded.";
             if (string.IsNullOrWhiteSpace(request.SubmissionReference)) return "A submission reference is required.";
             if (request.AmountPayable is < 0 || request.AmountRefundable is < 0) return "Submission amounts cannot be negative.";
@@ -258,7 +263,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
                 {
                     var category = await EnsureCategoryAsync(rule.CategoryCode, ct);
                     var dueDate = BuildDueDate(rule, period.End);
-                    if (!rule.DueDayOfMonth.HasValue)
+                    if (!rule.DueDayOfMonth.HasValue && rule.Code != "CSD")
                         warnings.Add($"{rule.Code}: deadline is not configured; set a verified due-day rule before relying on deadline alerts.");
 
                     var item = ComplianceItem.Create(
@@ -399,7 +404,9 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
             UpdateRegisterItem(item, ComplianceItemStatus.Valid, ComplianceRiskLevel.Low);
             return;
         }
-        if (state.SubmissionStatus == "submitted" && (!state.PaymentRequired || state.PaymentStatus == "paid"))
+
+        var filingComplete = state.SubmissionStatus == "submitted" || (state.SubmissionStatus == "not_required" && state.ReviewStatus == "approved");
+        if (filingComplete && (!state.PaymentRequired || state.PaymentStatus == "paid"))
         {
             state.WorkflowStatus = "complete";
             UpdateRegisterItem(item, ComplianceItemStatus.Valid, ComplianceRiskLevel.Low);
@@ -424,11 +431,12 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
             return;
         }
 
-        state.WorkflowStatus = state.ReviewStatus == "approved" ? "ready_to_file"
+        state.WorkflowStatus = state.ReviewStatus == "approved"
+            ? (state.SubmissionStatus == "not_required" ? "complete" : "ready_to_file")
             : state.PreparationStatus == "complete" ? "ready_for_review"
             : state.PreparationStatus == "in_progress" ? "in_preparation"
             : "ready_to_prepare";
-        UpdateRegisterItem(item, ComplianceItemStatus.Pending, RiskFor(state.DueDateUtc, now));
+        UpdateRegisterItem(item, state.WorkflowStatus == "complete" ? ComplianceItemStatus.Valid : ComplianceItemStatus.Pending, RiskFor(state.DueDateUtc, now));
     }
 
     private static void UpdateRegisterItem(ComplianceItem item, ComplianceItemStatus status, ComplianceRiskLevel risk) =>
@@ -446,14 +454,15 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
     {
         var effective = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         // Exact statutory due days are intentionally not guessed. An administrator must verify and
-        // version those dates before production deadline alerts are trusted.
+        // version those dates before production deadline alerts are trusted. CSD intentionally has
+        // no filing due day because it is tracked as a standing supplier-registration requirement.
         ComplianceRuleDefinitionDto Rule(
             string code, string name, string authority, string category, int cadence, string field,
             bool requiresSubmission, bool requiresPayment, params string[] evidence) =>
-            new(code, name, authority, category, cadence, 1, null, field, requiresSubmission, requiresPayment, evidence, effective, null, "starter-2026.1");
+            new(code, name, authority, category, cadence, 1, null, field, requiresSubmission, requiresPayment, evidence, effective, null, "starter-2026.2");
 
         return new ComplianceRuleSetDto(
-            "starter-2026.1",
+            "starter-2026.2",
             new[]
             {
                 Rule("VAT201", "VAT201 return", "SARS", "TAX", 2, "VatRegistered", true, true, "bank_statement", "sales_invoices", "purchase_invoices"),
@@ -463,7 +472,8 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
                 Rule("ITR14", "ITR14 company income tax return", "SARS", "TAX", 12, "CompanyTaxRegistered", true, false, "annual_financial_statements"),
                 Rule("UIF", "UIF declaration/payment", "UIF", "PAYROLL", 1, "UifRegistered", true, true, "payroll_document"),
                 Rule("COIDA", "COIDA return of earnings", "Compensation Fund", "PAYROLL", 12, "CoidaRegistered", true, true, "payroll_document"),
-                Rule("CIPC_AR", "CIPC annual return", "CIPC", "CIPC", 12, "CipcRegistered", true, true, "company_records")
+                Rule("CIPC_AR", "CIPC annual return", "CIPC", "CIPC", 12, "CipcRegistered", true, true, "company_records"),
+                Rule("CSD", "Central Supplier Database registration", "National Treasury", "CSD", 12, "GovernmentSupplier", false, false, "csd_registration_report")
             },
             effective);
     }
@@ -480,7 +490,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
             }
             catch (JsonException) { }
         }
-        return new ClientComplianceProfileDto(clientId, null, 2, 1, null, null, null, null, null, null, 2, DateTime.UtcNow);
+        return new ClientComplianceProfileDto(clientId, null, 2, 1, null, null, null, null, null, null, null, null, null, 2, DateTime.UtcNow);
     }
 
     private async Task<List<ObligationState>> LoadObligationStatesAsync(CancellationToken ct)
@@ -531,6 +541,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
         {
             "PAYROLL" => ("Payroll Compliance", "Employer declarations, payroll taxes and labour-related compliance."),
             "CIPC" => ("CIPC Compliance", "Company registration and annual-return obligations."),
+            "CSD" => ("CSD Compliance", "National Treasury Central Supplier Database registration and supporting evidence."),
             _ => ("Tax Compliance", "Tax registrations, returns, payments and supporting evidence.")
         };
         var created = ComplianceCategory.Create(Guid.NewGuid(), details.Item1, details.Item2, code);
@@ -551,6 +562,8 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
         "ProvisionalTaxpayer" => profile.ProvisionalTaxpayer,
         "CompanyTaxRegistered" => profile.CompanyTaxRegistered,
         "CipcRegistered" => profile.CipcRegistered,
+        "GovernmentSupplier" => profile.GovernmentSupplier ?? (profile.CsdRegistered == true ? true : null),
+        "CsdRegistered" => profile.CsdRegistered,
         _ => null
     };
 
@@ -606,6 +619,7 @@ public sealed class ComplianceAutomationService : IComplianceAutomationService
             "payroll_document" => category.StartsWith("payroll", StringComparison.OrdinalIgnoreCase),
             "annual_financial_statements" => category is "afs" or "financial_statements" or "annual_financial_statements",
             "company_records" => category.Contains("company", StringComparison.OrdinalIgnoreCase) || category.Contains("cipc", StringComparison.OrdinalIgnoreCase),
+            "csd_registration_report" => category.Contains("csd", StringComparison.OrdinalIgnoreCase) || category.Contains("supplier_registration", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
     }
