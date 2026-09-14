@@ -46,7 +46,9 @@ public class ComplianceAutomationTests
                 CoidaRegistered: false,
                 ProvisionalTaxpayer: false,
                 CompanyTaxRegistered: false,
-                CipcRegistered: false),
+                CipcRegistered: false,
+                GovernmentSupplier: false,
+                CsdRegistered: false),
             admin);
 
         var first = await service.RunAsync(admin, client.Id, new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Utc));
@@ -58,6 +60,43 @@ public class ComplianceAutomationTests
         Assert.Single(obligations.Value!);
         Assert.Equal("VAT201", obligations.Value![0].Code);
         Assert.Equal("waiting_for_client", obligations.Value[0].WorkflowStatus);
+    }
+
+    [Fact]
+    public async Task GovernmentSupplier_GeneratesCsdStandingComplianceObligation()
+    {
+        await using var db = BuildDb();
+        var client = BuildClient(Guid.NewGuid());
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var service = new ComplianceAutomationService(db);
+        var admin = BuildAdmin();
+        await service.UpdateProfileAsync(
+            client.Id,
+            new UpdateClientComplianceProfileRequest(
+                VatRegistered: false,
+                PayeRegistered: false,
+                UifRegistered: false,
+                CoidaRegistered: false,
+                ProvisionalTaxpayer: false,
+                CompanyTaxRegistered: false,
+                CipcRegistered: false,
+                GovernmentSupplier: true,
+                CsdRegistered: true,
+                CsdSupplierNumber: "MAAA0123456"),
+            admin);
+
+        var run = await service.RunAsync(admin, client.Id, new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Utc));
+        var obligations = await service.GetObligationsAsync(admin, client.Id);
+
+        Assert.Equal(1, run.Value!.ObligationsCreated);
+        var obligation = Assert.Single(obligations.Value!);
+        Assert.Equal("CSD", obligation.Code);
+        Assert.Equal("National Treasury", obligation.Authority);
+        Assert.Null(obligation.DueDateUtc);
+        Assert.Equal("not_required", obligation.SubmissionStatus);
+        Assert.Contains("csd_registration_report", obligation.MissingEvidenceCategories);
     }
 
     [Fact]
@@ -116,6 +155,7 @@ public class ComplianceAutomationTests
 
         Assert.NotEmpty(rules.Value!.Rules);
         Assert.All(rules.Value.Rules, rule => Assert.Null(rule.DueDayOfMonth));
+        Assert.Contains(rules.Value.Rules, rule => rule.Code == "CSD" && rule.Authority == "National Treasury");
     }
 
     private static PortalDbContext BuildDb()
