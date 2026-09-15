@@ -1,689 +1,428 @@
+using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.Compliance;
 using SecureClientPortal.Backend.Application.Modules.Compliance;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
-using SecureClientPortal.Backend.Domain.Shared.Modules.Requests;
 using SecureClientPortal.Backend.Models;
-using System.Security.Claims;
-using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
 
-/// <summary>
-/// Deterministic Phase 4 compliance engine. It automates obligation creation, evidence readiness,
-/// requests and deadline state, while deliberately keeping external SARS/CIPC/UIF filing under
-/// accountant control. CSD is treated as a standing National Treasury supplier-compliance record,
-/// not as a tax return: the engine tracks registration evidence without inventing a statutory filing date.
-/// </summary>
-public sealed class ComplianceAutomationService : IComplianceAutomationService
+public sealed partial class ComplianceAutomationService(PortalDbContext db, IComplianceService evidenceService) : IComplianceAutomationService
 {
-    private const string RulesKey = "compliance.automation.rules";
-    private const string ProfilePrefix = "compliance.automation.profile:";
-    private const string ObligationPrefix = "compliance.automation.obligation:";
-    private static readonly Guid RuleSetAuditId = Guid.Parse("8d8b6770-50db-4f39-9e40-a771413da401");
-    private static readonly Guid AutomationAuditId = Guid.Parse("e1ad7ad6-b18b-4217-b4bd-8cb8877070fd");
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    public ComplianceAutomationService(PortalDbContext db) : this(db, new ComplianceService(db)) { }
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static string Encode<T>(T value) => JsonSerializer.Serialize(value, Json);
+    private static T Decode<T>(string value) => JsonSerializer.Deserialize<T>(value, Json)
+        ?? throw new InvalidOperationException("Invalid persisted compliance data.");
+    private static bool Staff(ClaimsPrincipal user) => user.IsAdmin() || user.IsAccountant();
+    private static bool PortalUser(ClaimsPrincipal user) => Staff(user) || user.IsClient();
+    private async Task<bool> Access(Guid id, ClaimsPrincipal user, CancellationToken ct) =>
+        PortalUser(user) && (await user.GetAccessibleClientIdsAsync(db, ct)).Contains(id);
+    private static ServiceResult<T> Error<T>(string message, int status = 400) => ServiceResult<T>.ErrorResult(message, statusCode: status);
 
-    private readonly PortalDbContext _db;
-
-    public ComplianceAutomationService(PortalDbContext db) => _db = db;
-
-    public async Task<ServiceResult<ComplianceRuleSetDto>> GetRulesAsync(ClaimsPrincipal user, CancellationToken ct = default)
+    public async Task<ServiceResult<ComplianceRuleSet>> GetRulesAsync(ClaimsPrincipal user, CancellationToken ct = default)
     {
-        if (!user.IsAdmin() && !user.IsAccountant() && !user.IsClient())
-            return ServiceResult<ComplianceRuleSetDto>.ForbiddenResult();
-        return ServiceResult<ComplianceRuleSetDto>.Success(await LoadRulesAsync(ct));
+        if (!PortalUser(user)) return ServiceResult<ComplianceRuleSet>.ForbiddenResult();
+        return ServiceResult<ComplianceRuleSet>.Success(await Rules(ct));
     }
 
-    public async Task<ServiceResult<ComplianceRuleSetDto>> UpdateRulesAsync(
-        UpdateComplianceRuleSetRequest request,
-        ClaimsPrincipal user,
-        CancellationToken ct = default)
+    private async Task<ComplianceRuleSet> Rules(CancellationToken ct)
     {
-        if (!user.IsAdmin()) return ServiceResult<ComplianceRuleSetDto>.ForbiddenResult();
-        var validation = ValidateRules(request);
-        if (validation is not null) return ServiceResult<ComplianceRuleSetDto>.ErrorResult(validation);
-
-        var normalized = new ComplianceRuleSetDto(
-            request.Version.Trim(),
-            request.Rules.Select(rule => rule with
-            {
-                Code = rule.Code.Trim().ToUpperInvariant(),
-                Name = rule.Name.Trim(),
-                Authority = rule.Authority.Trim(),
-                CategoryCode = rule.CategoryCode.Trim().ToUpperInvariant(),
-                ApplicabilityField = rule.ApplicabilityField.Trim(),
-                RequiredDocumentCategories = rule.RequiredDocumentCategories
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(NormalizeCategory)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray(),
-                Version = string.IsNullOrWhiteSpace(rule.Version) ? request.Version.Trim() : rule.Version.Trim()
-            }).ToArray(),
-            DateTime.UtcNow);
-
-        await SaveSettingAsync(RulesKey, normalized, ct);
-        await _db.WriteAuditLogAsync(
-            user,
-            "compliance.automation.rules_updated",
-            "compliance_rule_set",
-            RuleSetAuditId,
-            null,
-            JsonSerializer.Serialize(new { normalized.Version, RuleCount = normalized.Rules.Count }, JsonOptions),
-            ct);
-        return ServiceResult<ComplianceRuleSetDto>.Success(normalized);
+        await ImportLegacyRulesAsync(ct);
+        var row = await db.ComplianceAutomationConfigurations.FindAsync(["rules"], ct);
+        return row is null ? StarterRules() : Decode<ComplianceRuleSet>(row.PayloadJson);
     }
 
-    public async Task<ServiceResult<ClientComplianceProfileDto>> GetProfileAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct = default)
+    // These are configurable workflow templates, not verified statutory deadlines.
+    // Unconfirmed registrations never generate work. Administrators must verify due rules.
+    private static ComplianceRuleSet StarterRules()
     {
-        if (!await CanAccessClientAsync(clientId, user, ct))
-            return ServiceResult<ClientComplianceProfileDto>.ForbiddenResult();
-        return ServiceResult<ClientComplianceProfileDto>.Success(await LoadProfileAsync(clientId, ct));
+        const string version = "unconfigured-v1";
+        var since = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        ComplianceRuleDefinition Rule(string code, string name, string authority, string field, int cadence, params string[] documents) =>
+            new(code, name, authority, code, cadence, 1, null, field, code != "CSD", false, documents, since, null, version);
+        return new(version, [
+            Rule("VAT201", "VAT return", "SARS", "vatRegistered", 2, "bank_statement", "invoices"),
+            Rule("EMP201", "Employer declaration", "SARS", "payeRegistered", 1, "payroll"),
+            Rule("EMP501", "Employer reconciliation", "SARS", "payeRegistered", 6, "payroll_document"),
+            Rule("UIF", "UIF declaration", "UIF", "uifRegistered", 1, "payroll"),
+            Rule("COIDA", "Compensation Fund return", "Compensation Fund", "coidaRegistered", 12, "payroll"),
+            Rule("IRP6", "Provisional tax", "SARS", "provisionalTaxpayer", 6, "financial_statements"),
+            Rule("ITR14", "Company income tax return", "SARS", "companyTaxRegistered", 12, "financial_statements"),
+            Rule("CIPC", "Company annual return", "CIPC", "cipcRegistered", 12),
+            Rule("CSD", "Central Supplier Database registration", "National Treasury", "governmentSupplier", 0, "csd_registration_report")
+        ], since);
     }
 
-    public async Task<ServiceResult<ClientComplianceProfileDto>> UpdateProfileAsync(
-        Guid clientId,
-        UpdateClientComplianceProfileRequest request,
-        ClaimsPrincipal user,
-        CancellationToken ct = default)
+    private static bool? Applies(ClientComplianceProfile p, string field) => field switch
     {
-        if (!user.IsAdmin() && !user.IsAccountant())
-            return ServiceResult<ClientComplianceProfileDto>.ForbiddenResult();
-        if (!await CanAccessClientAsync(clientId, user, ct))
-            return ServiceResult<ClientComplianceProfileDto>.ForbiddenResult();
-        if (request.VatCycleMonths is < 1 or > 12 || request.VatAnchorMonth is < 1 or > 12 || request.FinancialYearEndMonth is < 1 or > 12)
-            return ServiceResult<ClientComplianceProfileDto>.ErrorResult("VAT cycle, VAT anchor month and financial year-end month must be between 1 and 12.");
+        "vatRegistered" => p.VatRegistered, "payeRegistered" => p.PayeRegistered,
+        "uifRegistered" => p.UifRegistered, "coidaRegistered" => p.CoidaRegistered,
+        "provisionalTaxpayer" => p.ProvisionalTaxpayer, "companyTaxRegistered" => p.CompanyTaxRegistered,
+        "cipcRegistered" => p.CipcRegistered, "governmentSupplier" => p.GovernmentSupplier,
+        "csdRegistered" => p.CsdRegistered, _ => null
+    };
+    private static readonly string[] Fields = ["vatRegistered", "payeRegistered", "uifRegistered", "coidaRegistered",
+        "provisionalTaxpayer", "companyTaxRegistered", "cipcRegistered", "governmentSupplier", "csdRegistered"];
 
-        var csdSupplierNumber = string.IsNullOrWhiteSpace(request.CsdSupplierNumber) ? null : request.CsdSupplierNumber.Trim();
-        var profile = new ClientComplianceProfileDto(
-            clientId,
-            request.VatRegistered,
-            request.VatCycleMonths,
-            request.VatAnchorMonth,
-            request.PayeRegistered,
-            request.UifRegistered,
-            request.CoidaRegistered,
-            request.ProvisionalTaxpayer,
-            request.CompanyTaxRegistered,
-            request.CipcRegistered,
-            request.GovernmentSupplier,
-            request.CsdRegistered,
-            csdSupplierNumber,
-            request.FinancialYearEndMonth,
-            DateTime.UtcNow);
-
-        await SaveSettingAsync(ProfileKey(clientId), profile, ct);
-        await _db.WriteAuditLogAsync(
-            user,
-            "compliance.automation.profile_updated",
-            "client",
-            clientId,
-            clientId,
-            JsonSerializer.Serialize(profile, JsonOptions),
-            ct);
-        return ServiceResult<ClientComplianceProfileDto>.Success(profile);
+    public async Task<ServiceResult<ComplianceRuleSet>> UpdateRulesAsync(UpdateComplianceRulesRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!user.IsAdmin()) return ServiceResult<ComplianceRuleSet>.ForbiddenResult();
+        if (string.IsNullOrWhiteSpace(request.Version) || request.Version.Length > 100 || request.Rules is null
+            || request.Rules.Length is < 1 or > 50)
+            return Error<ComplianceRuleSet>("Provide a version and between 1 and 50 rules.");
+        if (request.Rules.Any(r => r is null || string.IsNullOrWhiteSpace(r.Code) || r.Code.Length > 50
+            || !System.Text.RegularExpressions.Regex.IsMatch(r.Code, "^[A-Z0-9_-]+$")
+            || string.IsNullOrWhiteSpace(r.Name) || r.Name.Length > 200 || string.IsNullOrWhiteSpace(r.Authority)
+            || r.Authority.Length > 100 || string.IsNullOrWhiteSpace(r.CategoryCode) || r.CategoryCode.Length > 50
+            || !Fields.Contains(r.ApplicabilityField) || r.DueOffsetMonths is < 0 or > 24
+            || (r.RequiresPayment && !r.RequiresSubmission)
+            || r.DueDayOfMonth is < 1 or > 31 || r.CadenceMonths is < 0 or > 12
+            || (r.Code != "CSD" && (r.CadenceMonths == 0 || 12 % r.CadenceMonths != 0))
+            || (r.Code == "CSD" && (r.CadenceMonths != 0 || r.RequiresSubmission || r.RequiresPayment
+                || r.DueDayOfMonth != null || r.ApplicabilityField != "governmentSupplier"))
+            || r.RequiredDocumentCategories is null || r.RequiredDocumentCategories.Length > 30
+            || r.RequiredDocumentCategories.Any(c => string.IsNullOrWhiteSpace(c) || c.Length > 100)
+            || r.EffectiveFromUtc == default || r.EffectiveToUtc <= r.EffectiveFromUtc))
+            return Error<ComplianceRuleSet>("Invalid rule, applicability, period, document category or deadline.");
+        if (request.Rules.Select(r => r.Code).Distinct().Count() != request.Rules.Length)
+            return Error<ComplianceRuleSet>("Rule codes must be unique.");
+        var version = request.Version.Trim();
+        if ((await Rules(ct)).Version == version)
+            return Error<ComplianceRuleSet>("Use a new rule version; the current version is immutable.", 409);
+        var key = "rules-version:" + version;
+        if (key.Length > 100) return Error<ComplianceRuleSet>("Version must be at most 86 characters.");
+        if (await db.ComplianceAutomationConfigurations.AnyAsync(x => x.Key == key, ct))
+            return Error<ComplianceRuleSet>("This rule version already exists. Use a new version.", 409);
+        var next = new ComplianceRuleSet(version, request.Rules.Select(r => r with
+        {
+            Version = version,
+            RequiredDocumentCategories = r.RequiredDocumentCategories.Select(Normalize).Distinct().ToArray()
+        }).ToArray(), DateTime.UtcNow);
+        await SetConfiguration("rules", null, next, ct);
+        await SetConfiguration(key, null, next, ct);
+        Audit(user, "rules_updated", Guid.NewGuid(), null, new { version });
+        return await Save(next, ct);
     }
 
-    public async Task<ServiceResult<IReadOnlyList<ComplianceObligationDto>>> GetObligationsAsync(
-        ClaimsPrincipal user,
-        Guid? clientId = null,
-        CancellationToken ct = default)
+    public async Task<ServiceResult<ClientComplianceProfile>> GetProfileAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct)
     {
-        var allowed = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!await Access(clientId, user, ct)) return ServiceResult<ClientComplianceProfile>.ForbiddenResult();
+        return ServiceResult<ClientComplianceProfile>.Success(await Profile(clientId, ct));
+    }
+    private async Task<ClientComplianceProfile> Profile(Guid id, CancellationToken ct)
+    {
+        await ImportLegacyClientAsync(id, ct);
+        var row = await db.ComplianceAutomationConfigurations.FindAsync(["profile:" + id], ct);
+        return row is null ? new ClientComplianceProfile { ClientId = id } : Decode<ClientComplianceProfile>(row.PayloadJson);
+    }
+    public async Task<ServiceResult<ClientComplianceProfile>> UpdateProfileAsync(Guid clientId, ClientComplianceProfile request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!Staff(user) || !await Access(clientId, user, ct)) return ServiceResult<ClientComplianceProfile>.ForbiddenResult();
+        if (!new[] { 1, 2, 3, 6, 12 }.Contains(request.VatCycleMonths) || request.VatAnchorMonth is < 1 or > 12
+            || request.FinancialYearEndMonth is < 1 or > 12 || request.CsdSupplierNumber?.Length > 100)
+            return Error<ClientComplianceProfile>("Provide valid cycle months, year-end month and supplier number.");
+        var next = request with { ClientId = clientId, UpdatedAtUtc = DateTime.UtcNow, CsdSupplierNumber = request.CsdSupplierNumber?.Trim() };
+        await SetConfiguration("profile:" + clientId, clientId, next, ct);
+        Audit(user, "profile_updated", clientId, clientId, new { clientId });
+        return await Save(next, ct);
+    }
+
+    public async Task<ServiceResult<IReadOnlyList<ComplianceObligationResponse>>> GetObligationsAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!PortalUser(user)) return ServiceResult<IReadOnlyList<ComplianceObligationResponse>>.ForbiddenResult();
+        var allowed = await user.GetAccessibleClientIdsAsync(db, ct);
         if (clientId.HasValue && !allowed.Contains(clientId.Value))
-            return ServiceResult<IReadOnlyList<ComplianceObligationDto>>.ForbiddenResult();
-
-        var states = (await LoadObligationStatesAsync(ct))
-            .Where(x => allowed.Contains(x.ClientId) && (!clientId.HasValue || x.ClientId == clientId.Value))
-            .OrderBy(x => x.DueDateUtc ?? DateTime.MaxValue)
-            .ThenBy(x => x.Code)
-            .ToList();
-        var clientIds = states.Select(x => x.ClientId).Distinct().ToArray();
-        var names = await _db.Clients.Where(x => clientIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
-        return ServiceResult<IReadOnlyList<ComplianceObligationDto>>.Success(
-            states.Select(x => ToDto(x, names.GetValueOrDefault(x.ClientId) ?? "Client")).ToArray());
+            return ServiceResult<IReadOnlyList<ComplianceObligationResponse>>.ForbiddenResult();
+        foreach (var id in allowed.Where(id => !clientId.HasValue || id == clientId.Value))
+            await ImportLegacyClientAsync(id, ct);
+        var rows = await db.ComplianceObligations.AsNoTracking()
+            .Where(x => allowed.Contains(x.ClientId) && (!clientId.HasValue || x.ClientId == clientId))
+            .OrderByDescending(x => x.PeriodStartUtc).ToListAsync(ct);
+        var result = new List<ComplianceObligationResponse>();
+        foreach (var row in rows) result.Add(await Refresh(row, ct));
+        return ServiceResult<IReadOnlyList<ComplianceObligationResponse>>.Success(result);
     }
 
-    public Task<ServiceResult<ComplianceObligationDto>> RecordPreparationAsync(Guid id, RecordCompliancePreparationRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        MutateAsync(id, user, "compliance.obligation.preparation_recorded", ct, state =>
-        {
-            if (request.Complete && state.MissingEvidenceCategories.Count > 0)
-                return "Preparation cannot be completed while required evidence is missing.";
-            state.PreparationStatus = request.Complete ? "complete" : "in_progress";
-            if (!request.Complete) state.ReviewStatus = "not_started";
-            state.LastNote = request.Note?.Trim();
-            return null;
-        });
+    public Task<ServiceResult<ComplianceAutomationRunResult>> RunAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct) =>
+        RunCoreAsync(clientId, user, DateTime.UtcNow, ct);
 
-    public Task<ServiceResult<ComplianceObligationDto>> RecordReviewAsync(Guid id, RecordComplianceReviewRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        MutateAsync(id, user, "compliance.obligation.review_recorded", ct, state =>
-        {
-            if (request.Approved && state.PreparationStatus != "complete")
-                return "The obligation must be prepared before review can be approved.";
-            state.ReviewStatus = request.Approved ? "approved" : "changes_required";
-            state.LastNote = request.Note?.Trim();
-            return null;
-        });
-
-    public Task<ServiceResult<ComplianceObligationDto>> RecordSubmissionAsync(Guid id, RecordComplianceSubmissionRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        MutateAsync(id, user, "compliance.obligation.submission_recorded", ct, state =>
-        {
-            if (state.SubmissionStatus == "not_required") return "This obligation does not require an external filing submission.";
-            if (state.ReviewStatus != "approved") return "Review must be approved before an external submission can be recorded.";
-            if (string.IsNullOrWhiteSpace(request.SubmissionReference)) return "A submission reference is required.";
-            if (request.AmountPayable is < 0 || request.AmountRefundable is < 0) return "Submission amounts cannot be negative.";
-            state.SubmissionStatus = "submitted";
-            state.SubmittedAtUtc = request.SubmittedAtUtc.ToUniversalTime();
-            state.SubmissionReference = request.SubmissionReference.Trim();
-            state.AmountPayable = request.AmountPayable;
-            state.AmountRefundable = request.AmountRefundable;
-            state.PaymentRequired = request.PaymentRequired;
-            state.PaymentStatus = request.PaymentRequired ? "outstanding" : "not_required";
-            state.LastNote = request.Note?.Trim();
-            return null;
-        });
-
-    public Task<ServiceResult<ComplianceObligationDto>> RecordPaymentAsync(Guid id, RecordCompliancePaymentRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        MutateAsync(id, user, "compliance.obligation.payment_recorded", ct, state =>
-        {
-            if (state.SubmissionStatus != "submitted") return "Submission must be recorded before payment can be recorded.";
-            if (!state.PaymentRequired) return "This obligation does not require a payment.";
-            if (request.AmountPaid < 0 || string.IsNullOrWhiteSpace(request.PaymentReference)) return "A non-negative payment amount and payment reference are required.";
-            state.PaymentStatus = "paid";
-            state.PaidAtUtc = request.PaidAtUtc.ToUniversalTime();
-            state.PaymentReference = request.PaymentReference.Trim();
-            state.AmountPaid = request.AmountPaid;
-            state.LastNote = request.Note?.Trim();
-            return null;
-        });
-
-    public Task<ServiceResult<ComplianceObligationDto>> MarkNotApplicableAsync(Guid id, MarkComplianceNotApplicableRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        MutateAsync(id, user, "compliance.obligation.not_applicable", ct, state =>
-        {
-            if (string.IsNullOrWhiteSpace(request.Reason)) return "A reason is required when an obligation is marked not applicable.";
-            state.NotApplicable = true;
-            state.NotApplicableReason = request.Reason.Trim();
-            state.LastNote = request.Reason.Trim();
-            return null;
-        });
-
-    public async Task<ServiceResult<ComplianceAutomationRunResult>> RunAsync(ClaimsPrincipal user, Guid? clientId = null, DateTime? utcNow = null, CancellationToken ct = default)
+    private async Task<ServiceResult<ComplianceAutomationRunResult>> RunCoreAsync(Guid? clientId, ClaimsPrincipal user, DateTime now, CancellationToken ct)
     {
-        if (!user.IsAdmin() && !user.IsAccountant()) return ServiceResult<ComplianceAutomationRunResult>.ForbiddenResult();
-        var allowed = await user.GetAccessibleClientIdsAsync(_db, ct);
+        if (!Staff(user)) return ServiceResult<ComplianceAutomationRunResult>.ForbiddenResult();
+        var allowed = await user.GetAccessibleClientIdsAsync(db, ct);
         if (clientId.HasValue && !allowed.Contains(clientId.Value)) return ServiceResult<ComplianceAutomationRunResult>.ForbiddenResult();
-
-        var target = clientId.HasValue ? new HashSet<Guid> { clientId.Value } : allowed;
-        var result = await RunInternalAsync(target, utcNow?.ToUniversalTime() ?? DateTime.UtcNow, ct);
-        await _db.WriteAuditLogAsync(
-            user,
-            "compliance.automation.run",
-            "compliance_automation",
-            AutomationAuditId,
-            clientId,
-            JsonSerializer.Serialize(result, JsonOptions),
-            ct);
-        return ServiceResult<ComplianceAutomationRunResult>.Success(result);
-    }
-
-    public async Task<ComplianceAutomationRunResult> RunSystemAsync(DateTime? utcNow = null, CancellationToken ct = default)
-    {
-        var clientIds = (await _db.Clients.Where(x => x.Status == "active").Select(x => x.Id).ToListAsync(ct)).ToHashSet();
-        return await RunInternalAsync(clientIds, utcNow?.ToUniversalTime() ?? DateTime.UtcNow, ct);
-    }
-
-    private async Task<ComplianceAutomationRunResult> RunInternalAsync(HashSet<Guid> clientIds, DateTime now, CancellationToken ct)
-    {
-        var rules = await LoadRulesAsync(ct);
-        var clients = await _db.Clients.Where(x => clientIds.Contains(x.Id) && x.Status == "active").OrderBy(x => x.Name).ToListAsync(ct);
-        var states = await LoadObligationStatesAsync(ct);
-        var warnings = new List<string>();
-        var created = 0;
-        var refreshed = 0;
-        var requestsCreated = 0;
-
+        var clients = await db.Clients.Where(x => allowed.Contains(x.Id) && (!clientId.HasValue || x.Id == clientId) && x.Status == "active").ToListAsync(ct);
+        var rules = await Rules(ct);
+        var warnings = new HashSet<string> { "This run reconciles local workflows only; it does not check or submit to government systems." };
+        var created = 0; var refreshed = 0; var requestsCreated = 0;
         foreach (var client in clients)
         {
-            var profile = await LoadProfileAsync(client.Id, ct);
-            foreach (var rule in rules.Rules.Where(x => IsRuleEffective(x, now)))
+            var profile = await Profile(client.Id, ct);
+            if (!profile.UpdatedAtUtc.HasValue) warnings.Add(client.Name + ": confirm the compliance profile first.");
+            foreach (var rule in rules.Rules.Where(r => r.EffectiveFromUtc <= now && (!r.EffectiveToUtc.HasValue || r.EffectiveToUtc >= now)))
             {
-                var applies = GetApplicability(profile, rule.ApplicabilityField);
-                if (!applies.HasValue)
+                if (Applies(profile, rule.ApplicabilityField) is not true)
                 {
-                    warnings.Add($"{client.Name}: {rule.Code} applicability is not confirmed.");
+                    if (Applies(profile, rule.ApplicabilityField) is null)
+                        warnings.Add(client.Name + ": " + rule.Code + " applicability is not confirmed.");
                     continue;
                 }
-                if (!applies.Value) continue;
-
-                var period = ResolvePeriod(rule, profile, now);
-                var state = states.FirstOrDefault(x => x.ClientId == client.Id && x.Code.Equals(rule.Code, StringComparison.OrdinalIgnoreCase) && x.PeriodStartUtc == period.Start && x.PeriodEndUtc == period.End);
-                if (state is null)
+                // The current profile does not collect incorporation anniversaries or COIDA
+                // assessment-year settings. Never fabricate those periods from financial year end.
+                if (rule.Code is "CIPC" or "CIPC_AR" or "COIDA")
                 {
-                    var category = await EnsureCategoryAsync(rule.CategoryCode, ct);
-                    var dueDate = BuildDueDate(rule, period.End);
-                    if (!rule.DueDayOfMonth.HasValue && rule.Code != "CSD")
-                        warnings.Add($"{rule.Code}: deadline is not configured; set a verified due-day rule before relying on deadline alerts.");
-
-                    var item = ComplianceItem.Create(
-                        Guid.NewGuid(), client.Id, category.Id, BuildObligationName(rule.Code, period.Start, period.End),
-                        ComplianceItemStatus.Missing,
-                        client.AssignedAccountantId == Guid.Empty ? null : client.AssignedAccountantId,
-                        RiskFor(dueDate, now),
-                        rule.RequiredDocumentCategories.FirstOrDefault(), dueDate, null, now);
-                    _db.ComplianceItems.Add(item);
-                    await _db.SaveChangesAsync(ct);
-
-                    state = new ObligationState
+                    warnings.Add(rule.Code + ": period-specific registration/assessment dates are not configured; no obligation generated.");
+                    continue;
+                }
+                var (start, end) = Period(profile, rule, now);
+                if (rule.Code == "CSD" && await db.ComplianceObligations.AnyAsync(x => x.ClientId == client.Id && x.Code == "CSD", ct)) continue;
+                var existing = await db.ComplianceObligations.FirstOrDefaultAsync(x =>
+                    x.ClientId == client.Id && x.Code == rule.Code && x.PeriodStartUtc == start, ct);
+                if (existing is not null) continue;
+                DateTime? due = null;
+                if (rule.Code != "CSD")
+                {
+                    if (rule.DueDayOfMonth is int day)
                     {
-                        Id = item.Id,
-                        ClientId = client.Id,
-                        Code = rule.Code,
-                        Name = rule.Name,
-                        Authority = rule.Authority,
-                        PeriodStartUtc = period.Start,
-                        PeriodEndUtc = period.End,
-                        DueDateUtc = dueDate,
-                        SubmissionStatus = rule.RequiresSubmission ? "not_submitted" : "not_required",
-                        RequiredDocumentCategories = rule.RequiredDocumentCategories.Select(NormalizeCategory).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                        ResponsibleAccountantId = client.AssignedAccountantId == Guid.Empty ? null : client.AssignedAccountantId,
-                        RuleVersion = rule.Version,
-                        CreatedReason = $"Created automatically because the client compliance profile confirms {rule.ApplicabilityField}.",
-                        CreatedAtUtc = now,
-                        UpdatedAtUtc = now
-                    };
-                    states.Add(state);
-                    created++;
+                        var month = new DateTime(end.Year, end.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(rule.DueOffsetMonths);
+                        due = month.AddDays(Math.Min(day, DateTime.DaysInMonth(month.Year, month.Month)) - 1);
+                    }
+                    else warnings.Add(rule.Code + ": deadline is not configured.");
                 }
-
-                var registerItem = await _db.ComplianceItems.FirstOrDefaultAsync(x => x.Id == state.Id, ct);
-                if (registerItem is null) continue;
-                await RefreshEvidenceAsync(state, ct);
-                RecalculateWorkflow(state, registerItem, now);
-                await SaveObligationStateAsync(state, ct);
-                refreshed++;
-
-                if (state.MissingEvidenceCategories.Count > 0)
+                var category = db.ComplianceCategories.Local.FirstOrDefault(x => x.Code == rule.CategoryCode)
+                    ?? await db.ComplianceCategories.FirstOrDefaultAsync(x => x.Code == rule.CategoryCode, ct);
+                if (category is null)
                 {
-                    var requestCount = await EnsureMissingEvidenceRequestAsync(state, client.AssignedAccountantId, now, ct);
-                    if (requestCount == 0 && client.AssignedAccountantId == Guid.Empty)
-                        warnings.Add($"{client.Name}: {state.Code} is missing evidence but no responsible accountant is assigned.");
-                    requestsCreated += requestCount;
+                    category = ComplianceCategory.Create(Guid.NewGuid(), rule.Name, "Compliance workflow evidence", rule.CategoryCode);
+                    db.ComplianceCategories.Add(category);
                 }
+                var item = ComplianceItem.Create(Guid.NewGuid(), client.Id, category.Id,
+                    rule.Name + " " + start.ToString("yyyy-MM"), ComplianceItemStatus.Missing,
+                    client.AssignedAccountantId, ComplianceRiskLevel.Medium, null, due, null);
+                db.ComplianceItems.Add(item);
+                var row = new ComplianceObligation
+                {
+                    Id = Guid.NewGuid(), ClientId = client.Id, Code = rule.Code,
+                    PeriodStartUtc = start, ComplianceItemId = item.Id, RuleJson = Encode(rule)
+                };
+                var state = new ComplianceObligationResponse
+                {
+                    Id = row.Id, ClientId = client.Id, ClientName = client.Name, Code = rule.Code, Name = rule.Name,
+                    Authority = rule.Authority, PeriodStartUtc = start, PeriodEndUtc = end, DueDateUtc = due,
+                    ResponsibleAccountantId = client.AssignedAccountantId, RuleVersion = rule.Version,
+                    SubmissionStatus = rule.RequiresSubmission ? "not_submitted" : "not_required",
+                    PaymentRequired = rule.RequiresPayment, PaymentStatus = rule.RequiresPayment ? "outstanding" : "not_required",
+                    CreatedReason = "Confirmed " + rule.ApplicabilityField + "; local workflow only, not an authority compliance conclusion.",
+                    CreatedAtUtc = now, UpdatedAtUtc = now
+                };
+                row.StateJson = Encode(state);
+                db.ComplianceObligations.Add(row);
+                created++;
+                Audit(user, "obligation_created", row.Id, client.Id, new { row.ComplianceItemId, rule.Version });
+            }
+            var persisted = await db.ComplianceObligations.Where(x => x.ClientId == client.Id).ToListAsync(ct);
+            var rows = persisted.Concat(db.ComplianceObligations.Local.Where(x => x.ClientId == client.Id)).DistinctBy(x => x.Id).ToArray();
+            foreach (var row in rows)
+            {
+                var refreshedState = (await Refresh(row, ct)) with { UpdatedAtUtc = now };
+                requestsCreated += await EnsureMissingEvidenceRequestAsync(refreshedState, now, ct);
+                await UpdateRegisterAsync(row, refreshedState, ct);
+                row.StateJson = Encode(refreshedState);
+                refreshed++;
             }
         }
-
-        await _db.SaveChangesAsync(ct);
-        return new ComplianceAutomationRunResult(now, clients.Count, created, refreshed, requestsCreated, 0, warnings.Distinct().ToArray());
+        Audit(user, "run", Guid.NewGuid(), clientId, new { created, refreshed });
+        return await Save(new ComplianceAutomationRunResult(now, clients.Count, created, refreshed, requestsCreated, 0, warnings.ToArray()), ct);
     }
 
-    private async Task<ServiceResult<ComplianceObligationDto>> MutateAsync(
-        Guid id,
-        ClaimsPrincipal user,
-        string auditAction,
-        CancellationToken ct,
-        Func<ObligationState, string?> mutation)
+    private static (DateTime Start, DateTime End) Period(ClientComplianceProfile profile, ComplianceRuleDefinition rule, DateTime now)
     {
-        if (!user.IsAdmin() && !user.IsAccountant()) return ServiceResult<ComplianceObligationDto>.ForbiddenResult();
-        var state = await LoadObligationStateAsync(id, ct);
-        if (state is null) return ServiceResult<ComplianceObligationDto>.NotFoundResult("Compliance obligation was not found.");
-        if (!await CanAccessClientAsync(state.ClientId, user, ct)) return ServiceResult<ComplianceObligationDto>.ForbiddenResult();
-        var item = await _db.ComplianceItems.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (item is null) return ServiceResult<ComplianceObligationDto>.NotFoundResult("Compliance register item was not found.");
+        if (rule.Code == "CSD")
+        {
+            var standing = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            return (standing, standing); // stable identity; not a recurring return
+        }
+        var cadence = rule.Code == "VAT201" ? profile.VatCycleMonths : rule.CadenceMonths;
+        var anchor = rule.Code == "VAT201" ? profile.VatAnchorMonth : cadence > 1 ? profile.FinancialYearEndMonth : 1;
+        var endMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-1);
+        while ((endMonth.Month - anchor + 12) % cadence != 0) endMonth = endMonth.AddMonths(-1);
+        return (endMonth.AddMonths(1 - cadence), endMonth.AddMonths(1).AddTicks(-1));
+    }
 
-        await RefreshEvidenceAsync(state, ct);
-        var error = mutation(state);
-        if (error is not null) return ServiceResult<ComplianceObligationDto>.ErrorResult(error, statusCode: 409);
-
-        RecalculateWorkflow(state, item, DateTime.UtcNow);
-        await SaveObligationStateAsync(state, ct);
-        await _db.SaveChangesAsync(ct);
-        await _db.WriteAuditLogAsync(
-            user, auditAction, "compliance_obligation", id, state.ClientId,
-            JsonSerializer.Serialize(new
+    private static string Normalize(string value) => value.Trim().ToLowerInvariant().Replace(" ", "_").Replace("-", "_");
+    private async Task<ComplianceObligationResponse> Refresh(ComplianceObligation row, CancellationToken ct)
+    {
+        var state = Decode<ComplianceObligationResponse>(row.StateJson);
+        var rule = Decode<ComplianceRuleDefinition>(row.RuleJson);
+        var client = await db.Clients.AsNoTracking().FirstAsync(x => x.Id == row.ClientId, ct);
+        var categories = rule.RequiredDocumentCategories.Select(Normalize).Distinct().ToArray();
+        var startMonth = state.PeriodStartUtc.Year * 12 + state.PeriodStartUtc.Month;
+        var endMonth = state.PeriodEndUtc.Year * 12 + state.PeriodEndUtc.Month;
+        var found = await (from doc in db.Documents
+                           join pack in db.MonthlyPacks on doc.MonthlyPackId equals pack.Id
+                           where doc.ClientId == row.ClientId && pack.ClientId == row.ClientId
+                               && doc.Status == "accepted" && doc.StorageKey != null
+                               && pack.Year * 12 + pack.Month >= startMonth && pack.Year * 12 + pack.Month <= endMonth
+                           select doc.Category).Distinct().ToListAsync(ct);
+        var missing = categories.Where(required => !found.Any(actual => EvidenceMatches(required, actual))).ToList();
+        var required = categories.Length;
+        if (rule.Code == "CSD")
+        {
+            var hasReport = await db.ComplianceEvidenceVersions.AnyAsync(x => x.ComplianceItemId == row.ComplianceItemId
+                && x.ClientId == row.ClientId && x.IsCurrentVersion, ct);
+            if (!categories.Contains("csd_registration_report"))
             {
-                state.Code, state.PeriodStartUtc, state.PeriodEndUtc, state.WorkflowStatus,
-                state.PreparationStatus, state.ReviewStatus, state.SubmissionStatus, state.PaymentStatus, state.LastNote
-            }, JsonOptions), ct);
-
-        var clientName = await _db.Clients.Where(x => x.Id == state.ClientId).Select(x => x.Name).FirstOrDefaultAsync(ct) ?? "Client";
-        return ServiceResult<ComplianceObligationDto>.Success(ToDto(state, clientName));
-    }
-
-    private async Task RefreshEvidenceAsync(ObligationState state, CancellationToken ct)
-    {
-        if (state.RequiredDocumentCategories.Count == 0)
-        {
-            state.MissingEvidenceCategories = [];
-            state.EvidenceFound = 0;
-            return;
-        }
-
-        var packs = await _db.MonthlyPacks.Where(x => x.ClientId == state.ClientId).Select(x => new { x.Id, x.Year, x.Month }).ToListAsync(ct);
-        var startIndex = state.PeriodStartUtc.Year * 12 + state.PeriodStartUtc.Month;
-        var endIndex = state.PeriodEndUtc.Year * 12 + state.PeriodEndUtc.Month;
-        var packIds = packs.Where(x => x.Year * 12 + x.Month >= startIndex && x.Year * 12 + x.Month <= endIndex).Select(x => x.Id).ToArray();
-        var actual = await _db.Documents
-            .Where(x => x.ClientId == state.ClientId && packIds.Contains(x.MonthlyPackId) && x.Status != "rejected")
-            .Select(x => x.Category)
-            .Distinct()
-            .ToListAsync(ct);
-
-        state.MissingEvidenceCategories = state.RequiredDocumentCategories
-            .Where(required => !actual.Any(category => EvidenceMatches(required, category)))
-            .ToList();
-        state.EvidenceFound = state.RequiredDocumentCategories.Count - state.MissingEvidenceCategories.Count;
-    }
-
-    private async Task<int> EnsureMissingEvidenceRequestAsync(ObligationState state, Guid accountantId, DateTime now, CancellationToken ct)
-    {
-        if (accountantId == Guid.Empty) return 0;
-        if (state.DueDateUtc.HasValue && (state.DueDateUtc.Value.Date - now.Date).TotalDays > 21) return 0;
-        var period = $"{state.PeriodStartUtc:yyyy-MM} to {state.PeriodEndUtc:yyyy-MM}";
-        var title = $"Compliance evidence: {state.Code} {period}";
-        if (await _db.Requests.AnyAsync(x => x.ClientId == state.ClientId && x.Title == title && x.Status != "resolved", ct)) return 0;
-
-        var requestDue = state.DueDateUtc?.AddDays(-7);
-        if (requestDue.HasValue && requestDue.Value < now) requestDue = state.DueDateUtc;
-        var request = RequestItem.Create(
-            Guid.NewGuid(), state.ClientId, "missing_document", null, title,
-            $"Please provide the missing evidence required for {state.Code}: {string.Join(", ", state.MissingEvidenceCategories)}.",
-            state.DueDateUtc.HasValue && (state.DueDateUtc.Value.Date - now.Date).TotalDays <= 7 ? RequestPriority.High : RequestPriority.Medium,
-            accountantId, RequestStatus.WaitingOnClient, requestDue, now);
-        _db.Requests.Add(request);
-        state.EvidenceRequestId = request.Id;
-        return 1;
-    }
-
-    private static void RecalculateWorkflow(ObligationState state, ComplianceItem item, DateTime now)
-    {
-        if (state.NotApplicable)
-        {
-            state.WorkflowStatus = "not_applicable";
-            UpdateRegisterItem(item, ComplianceItemStatus.Valid, ComplianceRiskLevel.Low);
-            return;
-        }
-
-        var filingComplete = state.SubmissionStatus == "submitted" || (state.SubmissionStatus == "not_required" && state.ReviewStatus == "approved");
-        if (filingComplete && (!state.PaymentRequired || state.PaymentStatus == "paid"))
-        {
-            state.WorkflowStatus = "complete";
-            UpdateRegisterItem(item, ComplianceItemStatus.Valid, ComplianceRiskLevel.Low);
-            return;
-        }
-        if (state.DueDateUtc.HasValue && state.DueDateUtc.Value.Date < now.Date)
-        {
-            state.WorkflowStatus = "overdue";
-            UpdateRegisterItem(item, ComplianceItemStatus.Expired, ComplianceRiskLevel.Critical);
-            return;
-        }
-        if (state.SubmissionStatus == "submitted" && state.PaymentRequired && state.PaymentStatus != "paid")
-        {
-            state.WorkflowStatus = "payment_outstanding";
-            UpdateRegisterItem(item, ComplianceItemStatus.Pending, RiskFor(state.DueDateUtc, now));
-            return;
-        }
-        if (state.MissingEvidenceCategories.Count > 0)
-        {
-            state.WorkflowStatus = "waiting_for_client";
-            UpdateRegisterItem(item, ComplianceItemStatus.Missing, RiskFor(state.DueDateUtc, now));
-            return;
-        }
-
-        state.WorkflowStatus = state.ReviewStatus == "approved"
-            ? (state.SubmissionStatus == "not_required" ? "complete" : "ready_to_file")
-            : state.PreparationStatus == "complete" ? "ready_for_review"
-            : state.PreparationStatus == "in_progress" ? "in_preparation"
-            : "ready_to_prepare";
-        UpdateRegisterItem(item, state.WorkflowStatus == "complete" ? ComplianceItemStatus.Valid : ComplianceItemStatus.Pending, RiskFor(state.DueDateUtc, now));
-    }
-
-    private static void UpdateRegisterItem(ComplianceItem item, ComplianceItemStatus status, ComplianceRiskLevel risk) =>
-        item.Update(item.Name, status, item.OwnerUserId, risk, item.RequiredDocumentCategory, item.LinkedDocumentId, item.DueDateUtc, item.ExpiryDateUtc);
-
-    private async Task<ComplianceRuleSetDto> LoadRulesAsync(CancellationToken ct)
-    {
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == RulesKey, ct);
-        if (setting is null) return BuildStarterRules();
-        try { return JsonSerializer.Deserialize<ComplianceRuleSetDto>(setting.ValueJson, JsonOptions) ?? BuildStarterRules(); }
-        catch (JsonException) { return BuildStarterRules(); }
-    }
-
-    private static ComplianceRuleSetDto BuildStarterRules()
-    {
-        var effective = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        // Exact statutory due days are intentionally not guessed. An administrator must verify and
-        // version those dates before production deadline alerts are trusted. CSD intentionally has
-        // no filing due day because it is tracked as a standing supplier-registration requirement.
-        ComplianceRuleDefinitionDto Rule(
-            string code, string name, string authority, string category, int cadence, string field,
-            bool requiresSubmission, bool requiresPayment, params string[] evidence) =>
-            new(code, name, authority, category, cadence, 1, null, field, requiresSubmission, requiresPayment, evidence, effective, null, "starter-2026.2");
-
-        return new ComplianceRuleSetDto(
-            "starter-2026.2",
-            new[]
-            {
-                Rule("VAT201", "VAT201 return", "SARS", "TAX", 2, "VatRegistered", true, true, "bank_statement", "sales_invoices", "purchase_invoices"),
-                Rule("EMP201", "EMP201 employer declaration", "SARS", "PAYROLL", 1, "PayeRegistered", true, true, "payroll_document"),
-                Rule("EMP501", "EMP501 reconciliation", "SARS", "PAYROLL", 6, "PayeRegistered", true, false, "payroll_document"),
-                Rule("IRP6", "IRP6 provisional tax", "SARS", "TAX", 6, "ProvisionalTaxpayer", true, true, "management_accounts"),
-                Rule("ITR14", "ITR14 company income tax return", "SARS", "TAX", 12, "CompanyTaxRegistered", true, false, "annual_financial_statements"),
-                Rule("UIF", "UIF declaration/payment", "UIF", "PAYROLL", 1, "UifRegistered", true, true, "payroll_document"),
-                Rule("COIDA", "COIDA return of earnings", "Compensation Fund", "PAYROLL", 12, "CoidaRegistered", true, true, "payroll_document"),
-                Rule("CIPC_AR", "CIPC annual return", "CIPC", "CIPC", 12, "CipcRegistered", true, true, "company_records"),
-                Rule("CSD", "Central Supplier Database registration", "National Treasury", "CSD", 12, "GovernmentSupplier", false, false, "csd_registration_report")
-            },
-            effective);
-    }
-
-    private async Task<ClientComplianceProfileDto> LoadProfileAsync(Guid clientId, CancellationToken ct)
-    {
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == ProfileKey(clientId), ct);
-        if (setting is not null)
-        {
-            try
-            {
-                var saved = JsonSerializer.Deserialize<ClientComplianceProfileDto>(setting.ValueJson, JsonOptions);
-                if (saved is not null) return saved;
+                required++;
+                if (!hasReport) missing.Add("csd_registration_report");
             }
-            catch (JsonException) { }
+            else if (hasReport) missing.Remove("csd_registration_report");
         }
-        return new ClientComplianceProfileDto(clientId, null, 2, 1, null, null, null, null, null, null, null, null, null, 2, DateTime.UtcNow);
+        state = state with { ClientName = client.Name, ResponsibleAccountantId = client.AssignedAccountantId,
+            EvidenceRequired = required, EvidenceFound = required - missing.Count, MissingEvidenceCategories = missing.ToArray() };
+        return Status(state);
     }
 
-    private async Task<List<ObligationState>> LoadObligationStatesAsync(CancellationToken ct)
+    private static ComplianceObligationResponse Status(ComplianceObligationResponse s)
     {
-        var settings = await _db.SystemSettings.Where(x => x.Key.StartsWith(ObligationPrefix)).ToListAsync(ct);
-        var result = new List<ObligationState>();
-        foreach (var setting in settings)
+        var ready = s.NotApplicableReason is not null ? "not_applicable"
+            : s.MissingEvidenceCategories.Length > 0 ? "waiting_for_client"
+            : s.PreparationStatus != "complete" ? (s.PreparationStatus == "in_progress" ? "in_preparation" : "ready_to_prepare")
+            : s.ReviewStatus != "approved" ? "ready_for_review"
+            : s.SubmissionStatus == "not_submitted" ? "ready_to_file"
+            : s.PaymentRequired && s.PaymentStatus != "paid" ? "payment_outstanding" : "complete";
+        return s with { Readiness = ready, WorkflowStatus = ready is not ("complete" or "not_applicable")
+            && s.DueDateUtc?.Date < DateTime.UtcNow.Date ? "overdue" : ready };
+    }
+
+    public Task<ServiceResult<ComplianceObligationResponse>> PreparationAsync(Guid id, PreparationRequest r, ClaimsPrincipal u, CancellationToken ct) =>
+        Change(id, u, "preparation", r, s =>
         {
-            try
-            {
-                var state = JsonSerializer.Deserialize<ObligationState>(setting.ValueJson, JsonOptions);
-                if (state is not null) result.Add(state);
-            }
-            catch (JsonException) { }
+            if (s.SubmissionStatus == "submitted") return (s, "A filed obligation cannot be prepared again.");
+            if (r.Complete && s.MissingEvidenceCategories.Length > 0) return (s, "Required evidence is still missing.");
+            return (s with { PreparationStatus = r.Complete ? "complete" : "in_progress", ReviewStatus = "not_started" }, null);
+        }, ct);
+    public Task<ServiceResult<ComplianceObligationResponse>> ReviewAsync(Guid id, ReviewObligationRequest r, ClaimsPrincipal u, CancellationToken ct) =>
+        Change(id, u, "review", r, s =>
+        {
+            if (s.SubmissionStatus == "submitted") return (s, "A filed obligation cannot be reviewed again.");
+            if (s.PreparationStatus != "complete" || s.MissingEvidenceCategories.Length > 0) return (s, "Complete preparation and evidence before review.");
+            return (s with { ReviewStatus = r.Approved ? "approved" : "changes_required",
+                PreparationStatus = r.Approved ? "complete" : "in_progress" }, null);
+        }, ct);
+    public Task<ServiceResult<ComplianceObligationResponse>> SubmissionAsync(Guid id, SubmissionRequest r, ClaimsPrincipal u, CancellationToken ct) =>
+        Change(id, u, "submission", r, s =>
+        {
+            if (s.SubmissionStatus != "not_submitted" || s.ReviewStatus != "approved" || s.MissingEvidenceCategories.Length > 0)
+                return (s, "Only reviewed, evidence-ready obligations awaiting filing can be submitted.");
+            if (!ValidReference(r.SubmissionReference) || !ValidDate(r.SubmittedAtUtc) || r.AmountPayable < 0 || r.AmountRefundable < 0
+                || r.AmountPayable > 0 && r.AmountRefundable > 0 || r.AmountPayable > 0 && !r.PaymentRequired
+                || r.PaymentRequired && r.AmountPayable is not > 0 || s.PaymentRequired && !r.PaymentRequired)
+                return (s, "Provide a real submission date/reference and consistent non-negative amounts; required payments cannot be waived.");
+            return (s with { SubmissionStatus = "submitted", SubmittedAtUtc = r.SubmittedAtUtc.ToUniversalTime(),
+                SubmissionReference = r.SubmissionReference.Trim(), AmountPayable = r.AmountPayable, AmountRefundable = r.AmountRefundable,
+                PaymentRequired = r.PaymentRequired, PaymentStatus = r.PaymentRequired ? "outstanding" : "not_required" }, null);
+        }, ct);
+    public Task<ServiceResult<ComplianceObligationResponse>> PaymentAsync(Guid id, PaymentRequest r, ClaimsPrincipal u, CancellationToken ct) =>
+        Change(id, u, "payment", r, s =>
+        {
+            if (s.SubmissionStatus != "submitted" || !s.PaymentRequired || s.PaymentStatus == "paid")
+                return (s, "Record the submission first; payment must still be outstanding.");
+            if (!ValidReference(r.PaymentReference) || !ValidDate(r.PaidAtUtc) || r.AmountPaid <= 0
+                || s.AmountPayable is null || r.AmountPaid < s.AmountPayable)
+                return (s, "Provide the payment date/reference and full amount paid. A partial payment cannot close the obligation.");
+            return (s with { PaidAtUtc = r.PaidAtUtc.ToUniversalTime(), PaymentReference = r.PaymentReference.Trim(),
+                AmountPaid = r.AmountPaid, PaymentStatus = "paid" }, null);
+        }, ct);
+    public Task<ServiceResult<ComplianceObligationResponse>> NotApplicableAsync(Guid id, NotApplicableRequest r, ClaimsPrincipal u, CancellationToken ct) =>
+        Change(id, u, "not_applicable", r, s =>
+        {
+            if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Length > 1000 || s.SubmissionStatus == "submitted")
+                return (s, "Provide a reason; submitted obligations cannot be marked not applicable.");
+            return (s with { NotApplicableReason = r.Reason.Trim() }, null);
+        }, ct);
+    private static bool ValidReference(string? value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 200;
+    // The UI records calendar dates at noon UTC; compare dates to avoid rejecting today's entries.
+    private static bool ValidDate(DateTime value) => value != default && value.Year >= 2000 && value.ToUniversalTime().Date <= DateTime.UtcNow.Date;
+
+    private async Task<ServiceResult<ComplianceObligationResponse>> Change(Guid id, ClaimsPrincipal user, string action, object request,
+        Func<ComplianceObligationResponse, (ComplianceObligationResponse State, string? Error)> change, CancellationToken ct)
+    {
+        if (!Staff(user)) return ServiceResult<ComplianceObligationResponse>.ForbiddenResult();
+        await ImportLegacyObligationAsync(id, user, ct);
+        var row = await db.ComplianceObligations.FindAsync([id], ct);
+        if (row is null) return ServiceResult<ComplianceObligationResponse>.NotFoundResult();
+        if (!await Access(row.ClientId, user, ct)) return ServiceResult<ComplianceObligationResponse>.ForbiddenResult();
+        var before = await Refresh(row, ct);
+        if (before.NotApplicableReason is not null) return Error<ComplianceObligationResponse>("This obligation is marked not applicable.", 409);
+        var (next, error) = change(before);
+        if (error is not null) return Error<ComplianceObligationResponse>(error, 409);
+        next = Status(next with { UpdatedAtUtc = DateTime.UtcNow });
+        row.StateJson = Encode(next);
+        await UpdateRegisterAsync(row, next, ct);
+        Audit(user, action, id, row.ClientId, request);
+        return await Save(next, ct);
+    }
+
+    public async Task<ServiceResult<ObligationEvidenceResponse>> UploadEvidenceAsync(Guid id, UploadComplianceEvidenceRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        await ImportLegacyObligationAsync(id, user, ct);
+        var row = await db.ComplianceObligations.FindAsync([id], ct);
+        if (row is null) return ServiceResult<ObligationEvidenceResponse>.NotFoundResult();
+        if (!await Access(row.ClientId, user, ct)) return ServiceResult<ObligationEvidenceResponse>.ForbiddenResult();
+        // Check BOTH identities before delegating: obligation IDs are never legacy item IDs.
+        if (!await db.ComplianceItems.AnyAsync(x => x.Id == row.ComplianceItemId && x.ClientId == row.ClientId, ct))
+            return Error<ObligationEvidenceResponse>("The obligation evidence link is invalid.", 409);
+        if (request.Note?.Length > 2000) return Error<ObligationEvidenceResponse>("Evidence note must be at most 2000 characters.");
+        var uploaded = await evidenceService.UploadEvidenceAsync(row.ComplianceItemId.ToString(), request, user, ct);
+        if (uploaded.Value is null) return new(default, uploaded.Forbidden, uploaded.NotFound, uploaded.Unauthorized,
+            uploaded.Error, uploaded.ErrorCode, uploaded.StatusCode);
+        // UploadEvidenceAsync only returns after protected storage/scanning has succeeded.
+        // A filing receipt does not satisfy unrelated monthly preparation categories.
+        var state = await Refresh(row, ct);
+        // Replacing a standing registration report requires a fresh professional review.
+        // Filing receipts do not reset an already recorded external submission.
+        if (row.Code == "CSD")
+            state = Status(state with { PreparationStatus = "not_started", ReviewStatus = "not_started" });
+        state = state with { UpdatedAtUtc = DateTime.UtcNow };
+        row.StateJson = Encode(state);
+        await UpdateRegisterAsync(row, state, ct);
+        Audit(user, "evidence_linked", row.Id, row.ClientId, new { row.ComplianceItemId, evidenceVersionId = uploaded.Value.Id });
+        return await Save(new ObligationEvidenceResponse(state, uploaded.Value), ct);
+    }
+
+    public async Task<ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>> GetEvidenceAsync(Guid id, ClaimsPrincipal user, CancellationToken ct)
+    {
+        await ImportLegacyObligationAsync(id, user, ct);
+        var row = await db.ComplianceObligations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (row is null) return ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>.NotFoundResult();
+        if (!await Access(row.ClientId, user, ct)) return ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>.ForbiddenResult();
+        if (!await db.ComplianceItems.AnyAsync(x => x.Id == row.ComplianceItemId && x.ClientId == row.ClientId, ct))
+            return Error<IReadOnlyList<ComplianceEvidenceVersionResponse>>("The obligation evidence link is invalid.", 409);
+        return await evidenceService.GetEvidenceVersionsAsync(row.ComplianceItemId.ToString(), user, ct);
+    }
+
+    private async Task SetConfiguration<T>(string key, Guid? clientId, T value, CancellationToken ct)
+    {
+        var row = await db.ComplianceAutomationConfigurations.FindAsync([key], ct);
+        if (row is null)
+        {
+            row = new ComplianceAutomationConfiguration { Key = key, ClientId = clientId };
+            db.ComplianceAutomationConfigurations.Add(row);
         }
-        return result;
+        row.PayloadJson = Encode(value);
     }
-
-    private async Task<ObligationState?> LoadObligationStateAsync(Guid id, CancellationToken ct)
+    private void Audit(ClaimsPrincipal user, string action, Guid id, Guid? clientId, object metadata) =>
+        db.AuditLogs.Add(AuditLog.Create(Guid.NewGuid(), user.GetUserId(), user.IsAdmin() ? "admin" : user.IsAccountant() ? "accountant" : "client",
+            "compliance.automation." + action, "compliance_obligation", id, clientId, Encode(metadata)));
+    private async Task<ServiceResult<T>> Save<T>(T result, CancellationToken ct)
     {
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == ObligationKey(id), ct);
-        if (setting is null) return null;
-        try { return JsonSerializer.Deserialize<ObligationState>(setting.ValueJson, JsonOptions); }
-        catch (JsonException) { return null; }
-    }
-
-    private Task SaveObligationStateAsync(ObligationState state, CancellationToken ct)
-    {
-        state.UpdatedAtUtc = DateTime.UtcNow;
-        return SaveSettingAsync(ObligationKey(state.Id), state, ct);
-    }
-
-    private async Task SaveSettingAsync<T>(string key, T value, CancellationToken ct)
-    {
-        var json = JsonSerializer.Serialize(value, JsonOptions);
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(x => x.Key == key, ct);
-        if (setting is null) _db.SystemSettings.Add(SystemSetting.Create(key, json));
-        else setting.UpdateValue(json);
-        await _db.SaveChangesAsync(ct);
-    }
-
-    private async Task<ComplianceCategory> EnsureCategoryAsync(string categoryCode, CancellationToken ct)
-    {
-        var code = categoryCode.Trim().ToUpperInvariant();
-        var existing = await _db.ComplianceCategories.FirstOrDefaultAsync(x => x.Code == code, ct);
-        if (existing is not null) return existing;
-        var details = code switch
-        {
-            "PAYROLL" => ("Payroll Compliance", "Employer declarations, payroll taxes and labour-related compliance."),
-            "CIPC" => ("CIPC Compliance", "Company registration and annual-return obligations."),
-            "CSD" => ("CSD Compliance", "National Treasury Central Supplier Database registration and supporting evidence."),
-            _ => ("Tax Compliance", "Tax registrations, returns, payments and supporting evidence.")
-        };
-        var created = ComplianceCategory.Create(Guid.NewGuid(), details.Item1, details.Item2, code);
-        _db.ComplianceCategories.Add(created);
-        await _db.SaveChangesAsync(ct);
-        return created;
-    }
-
-    private async Task<bool> CanAccessClientAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct) =>
-        (await user.GetAccessibleClientIdsAsync(_db, ct)).Contains(clientId);
-
-    private static bool? GetApplicability(ClientComplianceProfileDto profile, string field) => field.Trim() switch
-    {
-        "VatRegistered" => profile.VatRegistered,
-        "PayeRegistered" => profile.PayeRegistered,
-        "UifRegistered" => profile.UifRegistered,
-        "CoidaRegistered" => profile.CoidaRegistered,
-        "ProvisionalTaxpayer" => profile.ProvisionalTaxpayer,
-        "CompanyTaxRegistered" => profile.CompanyTaxRegistered,
-        "CipcRegistered" => profile.CipcRegistered,
-        "GovernmentSupplier" => profile.GovernmentSupplier ?? (profile.CsdRegistered == true ? true : null),
-        "CsdRegistered" => profile.CsdRegistered,
-        _ => null
-    };
-
-    private static (DateTime Start, DateTime End) ResolvePeriod(ComplianceRuleDefinitionDto rule, ClientComplianceProfileDto profile, DateTime now)
-    {
-        var cadence = rule.Code.Equals("VAT201", StringComparison.OrdinalIgnoreCase) ? Math.Clamp(profile.VatCycleMonths, 1, 12) : Math.Clamp(rule.CadenceMonths, 1, 12);
-        if (cadence == 1)
-        {
-            var start = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-            return (start, start.AddMonths(1).AddDays(-1));
-        }
-        if (cadence == 12 && rule.Code is "ITR14" or "CIPC_AR" or "COIDA")
-        {
-            var fyEndMonth = Math.Clamp(profile.FinancialYearEndMonth, 1, 12);
-            var endYear = now.Month <= fyEndMonth ? now.Year : now.Year + 1;
-            var end = new DateTime(endYear, fyEndMonth, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1).AddDays(-1);
-            var start = new DateTime(end.Year, end.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-11);
-            return (start, end);
-        }
-
-        var anchorMonth = rule.Code.Equals("VAT201", StringComparison.OrdinalIgnoreCase) ? Math.Clamp(profile.VatAnchorMonth, 1, 12) : 1;
-        var absolute = now.Year * 12 + now.Month - 1;
-        var anchorAbsolute = now.Year * 12 + anchorMonth - 1;
-        while (anchorAbsolute > absolute) anchorAbsolute -= 12;
-        var startAbsolute = anchorAbsolute + Math.Max(0, (absolute - anchorAbsolute) / cadence) * cadence;
-        var startDate = new DateTime(startAbsolute / 12, startAbsolute % 12 + 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        return (startDate, startDate.AddMonths(cadence).AddDays(-1));
-    }
-
-    private static DateTime? BuildDueDate(ComplianceRuleDefinitionDto rule, DateTime periodEnd)
-    {
-        if (!rule.DueDayOfMonth.HasValue) return null;
-        var target = new DateTime(periodEnd.Year, periodEnd.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(Math.Clamp(rule.DueOffsetMonths, 0, 24));
-        var day = Math.Min(rule.DueDayOfMonth.Value, DateTime.DaysInMonth(target.Year, target.Month));
-        return new DateTime(target.Year, target.Month, day, 23, 59, 59, DateTimeKind.Utc);
-    }
-
-    private static ComplianceRiskLevel RiskFor(DateTime? dueDate, DateTime now)
-    {
-        if (!dueDate.HasValue) return ComplianceRiskLevel.Medium;
-        var days = (dueDate.Value.Date - now.Date).TotalDays;
-        return days < 0 ? ComplianceRiskLevel.Critical : days <= 7 ? ComplianceRiskLevel.High : days <= 21 ? ComplianceRiskLevel.Medium : ComplianceRiskLevel.Low;
-    }
-
-    private static bool EvidenceMatches(string required, string actual)
-    {
-        var requirement = NormalizeCategory(required);
-        var category = NormalizeCategory(actual);
-        if (category == requirement || category.StartsWith(requirement + "_client_", StringComparison.OrdinalIgnoreCase)) return true;
-        return requirement switch
-        {
-            "sales_invoices" or "purchase_invoices" => category is "invoices" or "invoice" || category.StartsWith("invoices_client_", StringComparison.OrdinalIgnoreCase),
-            "payroll_document" => category.StartsWith("payroll", StringComparison.OrdinalIgnoreCase),
-            "annual_financial_statements" => category is "afs" or "financial_statements" or "annual_financial_statements",
-            "company_records" => category.Contains("company", StringComparison.OrdinalIgnoreCase) || category.Contains("cipc", StringComparison.OrdinalIgnoreCase),
-            "csd_registration_report" => category.Contains("csd", StringComparison.OrdinalIgnoreCase) || category.Contains("supplier_registration", StringComparison.OrdinalIgnoreCase),
-            _ => false
-        };
-    }
-
-    private static string NormalizeCategory(string value) => value.Trim().ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
-    private static bool IsRuleEffective(ComplianceRuleDefinitionDto rule, DateTime now) => rule.EffectiveFromUtc <= now && (!rule.EffectiveToUtc.HasValue || rule.EffectiveToUtc.Value >= now);
-    private static string BuildObligationName(string code, DateTime start, DateTime end) => $"{code} {start:MMM yyyy}" + (start.Month == end.Month && start.Year == end.Year ? string.Empty : $" – {end:MMM yyyy}");
-
-    private static string? ValidateRules(UpdateComplianceRuleSetRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Version)) return "A rule-set version is required.";
-        if (request.Rules.Count == 0) return "At least one compliance rule is required.";
-        if (request.Rules.Any(x => string.IsNullOrWhiteSpace(x.Code) || string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Authority) || string.IsNullOrWhiteSpace(x.CategoryCode))) return "Every rule needs a code, name, authority and category.";
-        if (request.Rules.Any(x => x.CadenceMonths is < 1 or > 12)) return "Rule cadence must be between 1 and 12 months.";
-        if (request.Rules.Any(x => x.DueOffsetMonths is < 0 or > 24)) return "Due-date offset must be between 0 and 24 months.";
-        if (request.Rules.Any(x => x.DueDayOfMonth is < 1 or > 31)) return "Due day must be between 1 and 31 when configured.";
-        if (request.Rules.GroupBy(x => x.Code.Trim(), StringComparer.OrdinalIgnoreCase).Any(x => x.Count() > 1)) return "Compliance rule codes must be unique within a rule-set version.";
-        return null;
-    }
-
-    private static ComplianceObligationDto ToDto(ObligationState s, string clientName) => new(
-        s.Id, s.ClientId, clientName, s.Code, s.Name, s.Authority, s.PeriodStartUtc, s.PeriodEndUtc, s.DueDateUtc,
-        s.WorkflowStatus, s.WorkflowStatus, s.PreparationStatus, s.ReviewStatus, s.SubmissionStatus, s.SubmittedAtUtc,
-        s.SubmissionReference, s.AmountPayable, s.AmountRefundable, s.PaymentRequired, s.PaymentStatus, s.PaidAtUtc,
-        s.PaymentReference, s.RequiredDocumentCategories.Count, s.EvidenceFound, s.MissingEvidenceCategories,
-        s.ResponsibleAccountantId, s.RuleVersion, s.CreatedReason, s.CreatedAtUtc, s.UpdatedAtUtc);
-
-    private static string ProfileKey(Guid clientId) => $"{ProfilePrefix}{clientId:N}";
-    private static string ObligationKey(Guid id) => $"{ObligationPrefix}{id:N}";
-
-    private sealed class ObligationState
-    {
-        public Guid Id { get; set; }
-        public Guid ClientId { get; set; }
-        public string Code { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string Authority { get; set; } = string.Empty;
-        public DateTime PeriodStartUtc { get; set; }
-        public DateTime PeriodEndUtc { get; set; }
-        public DateTime? DueDateUtc { get; set; }
-        public string WorkflowStatus { get; set; } = "waiting_for_client";
-        public string PreparationStatus { get; set; } = "not_started";
-        public string ReviewStatus { get; set; } = "not_started";
-        public string SubmissionStatus { get; set; } = "not_submitted";
-        public DateTime? SubmittedAtUtc { get; set; }
-        public string? SubmissionReference { get; set; }
-        public decimal? AmountPayable { get; set; }
-        public decimal? AmountRefundable { get; set; }
-        public bool PaymentRequired { get; set; }
-        public string PaymentStatus { get; set; } = "not_required";
-        public DateTime? PaidAtUtc { get; set; }
-        public string? PaymentReference { get; set; }
-        public decimal? AmountPaid { get; set; }
-        public List<string> RequiredDocumentCategories { get; set; } = [];
-        public List<string> MissingEvidenceCategories { get; set; } = [];
-        public int EvidenceFound { get; set; }
-        public Guid? ResponsibleAccountantId { get; set; }
-        public Guid? EvidenceRequestId { get; set; }
-        public bool NotApplicable { get; set; }
-        public string? NotApplicableReason { get; set; }
-        public string RuleVersion { get; set; } = string.Empty;
-        public string CreatedReason { get; set; } = string.Empty;
-        public string? LastNote { get; set; }
-        public DateTime CreatedAtUtc { get; set; }
-        public DateTime UpdatedAtUtc { get; set; }
+        try { await db.SaveChangesAsync(ct); return ServiceResult<T>.Success(result); }
+        catch (DbUpdateConcurrencyException) { return Error<T>("Compliance data changed. Reload before trying again.", 409); }
+        catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 })
+        { return Error<T>("This record was created by another request. Reload before trying again.", 409); }
     }
 }

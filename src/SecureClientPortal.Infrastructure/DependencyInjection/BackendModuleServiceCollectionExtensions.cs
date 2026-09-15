@@ -48,8 +48,8 @@ public static class BackendModuleServiceCollectionExtensions
     {
         services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
         services.AddScoped<IHealthService, HealthService>();
-        // Production automation is wrapped so monthly packs respect each client profile and the
-        // compliance engine is executed as part of the same scheduled automation cycle.
+        // Production automation is wrapped so automatic month creation respects each client's
+        // selected monthly-pack profile instead of applying every active firm template to everyone.
         services.AddScoped<IAutomationWorkflowService, ProfileAwareAutomationWorkflowService>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddScoped<IIntegrationEventDispatcher, IntegrationEventDispatcher>();
@@ -99,6 +99,8 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddMonthlyPacksModule(this IServiceCollection services)
     {
+        // Monthly packs have two layers: the pack workflow itself and a client-specific profile
+        // that determines which recurring slots should exist for each client.
         services.AddScoped<IDocumentSlotService, DocumentSlotService>();
         services.AddScoped<IClientMonthlyPackProfileService, ClientMonthlyPackProfileService>();
         services.AddScoped<IMonthlyPackService, MonthlyPackService>();
@@ -108,6 +110,7 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddClientsModule(this IServiceCollection services)
     {
         services.AddScoped<IClientService, ClientService>();
+        services.AddScoped<IClientOnboardingService, ClientOnboardingService>();
         return services;
     }
 
@@ -142,8 +145,8 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddComplianceModule(this IServiceCollection services)
     {
         services.AddScoped<IComplianceService, ComplianceService>();
-        services.AddScoped<IComplianceMonitoringService, ComplianceMonitoringService>();
         services.AddScoped<IComplianceAutomationService, ComplianceAutomationService>();
+        services.AddScoped<IComplianceMonitoringService, ComplianceMonitoringService>();
         return services;
     }
 
