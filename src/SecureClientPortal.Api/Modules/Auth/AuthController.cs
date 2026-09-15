@@ -82,6 +82,12 @@ public class AuthController : ControllerBase
         return await ExecuteAsync(async () => FromResult(await _service.MeAsync(User, ct)));
     }
 
+    [HttpPut("profile")]
+    [Authorize]
+    [EnableRateLimiting("auth-account")]
+    public Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request, CancellationToken ct) =>
+        ExecuteAsync(async () => FromResult(await _service.UpdateProfileAsync(request, User, ct)));
+
     [HttpGet("security")]
     [Authorize]
     public async Task<IActionResult> Security(CancellationToken ct)

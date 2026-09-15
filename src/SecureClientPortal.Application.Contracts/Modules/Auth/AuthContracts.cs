@@ -1,5 +1,6 @@
 namespace SecureClientPortal.Backend.Application.Contracts.Modules.Auth;
 
+public record UpdateProfileRequest(string FullName, string? Title, string? Phone);
 public record LoginRequest(string Email, string Password, bool RememberMe = false);
 public record CompleteInviteRequest(string Email, string Token, string FullName, string Password);
 public record ForgotPasswordRequest(string Email);

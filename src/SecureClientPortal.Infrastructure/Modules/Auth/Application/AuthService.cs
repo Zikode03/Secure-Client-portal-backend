@@ -388,6 +388,8 @@ public sealed partial class AuthService : IAuthService
             {
                 id = user.Id,
                 fullName = user.FullName,
+                title = PersonalProfileField(user.ProfileJson, "title"),
+                phone = PersonalProfileField(user.ProfileJson, "phone"),
                 email = user.Email,
                 role = user.Role,
                 roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role),

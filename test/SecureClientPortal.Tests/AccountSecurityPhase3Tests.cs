@@ -155,6 +155,45 @@ public sealed class AccountSecurityPhase3Tests
         Assert.All(await fixture.Db.UserSessions.ToListAsync(Ct),session=>Assert.NotNull(session.RevokedAtUtc));
         Assert.True((await fixture.Service.CompleteInviteAsync(new(fixture.User.Email,raw,fixture.User.FullName,Password),Context(),Ct)).Unauthorized);
     }
+    [Theory]
+    [InlineData(UserRole.Client)]
+    [InlineData(UserRole.Accountant)]
+    [InlineData(UserRole.Admin)]
+    public async Task PersonalProfilePersistsOnlyOwnDetailsAndPreservesAccess(UserRole role)
+    {
+        await using var fixture = new Fixture(role);
+        fixture.User.SetProfileJson("{\"company\":\"Original firm\",\"managedFlag\":true}");
+        var other = User.CreateInvited(Guid.NewGuid(), "Other User", "other@example.test", UserRole.Client, fixture.User.PasswordHash, "[]", null);
+        fixture.Db.Users.Add(other);
+        await fixture.Db.SaveChangesAsync(Ct);
+        var actor = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(new[] {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, fixture.User.Id.ToString()),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, fixture.User.Role),
+            new System.Security.Claims.Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        }, "test"));
+        var result = await fixture.Service.UpdateProfileAsync(new("  Updated Name  ", "  Finance lead ", "+27 11 123 4567"), actor, Ct);
+        Assert.Null(result.Error);
+        fixture.Db.ChangeTracker.Clear();
+        var saved = await fixture.Db.Users.SingleAsync(x => x.Id == fixture.User.Id, Ct);
+        Assert.Equal("Updated Name", saved.FullName);
+        Assert.Equal(role.ToStorageValue(), saved.Role);
+        Assert.Equal("security@example.test", saved.Email);
+        Assert.Equal("[]", saved.ClientIdsJson);
+        var profile = JsonSerializer.Deserialize<JsonElement>(saved.ProfileJson!);
+        Assert.Equal("Finance lead", profile.GetProperty("title").GetString());
+        Assert.True(profile.GetProperty("managedFlag").GetBoolean());
+        Assert.Equal("Original firm", profile.GetProperty("company").GetString());
+        Assert.Equal("Other User", (await fixture.Db.Users.SingleAsync(x => x.Id == other.Id, Ct)).FullName);
+        var me = JsonSerializer.SerializeToElement((await fixture.NewService().MeAsync(actor, Ct)).Value).GetProperty("user");
+        Assert.Equal("+27 11 123 4567", me.GetProperty("phone").GetString());
+        Assert.Single(await fixture.Db.AuditLogs.Where(x => x.Action == "user.profile_updated").ToListAsync(Ct));
+        var invalid = await fixture.Service.UpdateProfileAsync(new(" ", "", ""), actor, Ct);
+        Assert.Equal("INVALID_PROFILE", invalid.ErrorCode);
+        Assert.Equal("Updated Name", saved.FullName);
+        var unauthenticated = await fixture.Service.UpdateProfileAsync(new("Changed", "", ""), new System.Security.Claims.ClaimsPrincipal(), Ct);
+        Assert.True(unauthenticated.Unauthorized);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage,HttpResponseMessage> reply) : HttpMessageHandler
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct) => Task.FromResult(reply(request)); }
     private sealed class Mail : IAccessEmailSender
