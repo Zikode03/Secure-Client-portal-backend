@@ -110,6 +110,7 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddClientsModule(this IServiceCollection services)
     {
         services.AddScoped<IClientService, ClientService>();
+        services.AddScoped<IClientOnboardingService, ClientOnboardingService>();
         return services;
     }
 
@@ -144,6 +145,7 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddComplianceModule(this IServiceCollection services)
     {
         services.AddScoped<IComplianceService, ComplianceService>();
+        services.AddScoped<IComplianceAutomationService, ComplianceAutomationService>();
         services.AddScoped<IComplianceMonitoringService, ComplianceMonitoringService>();
         return services;
     }

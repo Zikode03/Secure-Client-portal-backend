@@ -45,6 +45,8 @@ public sealed class AdminService : IAdminService
     public async Task<ServiceResult<object>> CreateUserAsync(AdminCreateUserRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
         IdentityValidators.ValidateAdminCreateUser(request);
+        if (string.Equals(request.Role.Trim(), "client", StringComparison.OrdinalIgnoreCase))
+            return ServiceResult<object>.ErrorResult("Use Clients > Add client to create a business and link its client login, or the user API with explicit client IDs.");
 
         var email = request.Email.Trim().ToLowerInvariant();
         if (await _db.Users.AnyAsync(x => x.Email == email, ct))

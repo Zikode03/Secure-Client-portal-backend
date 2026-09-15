@@ -38,6 +38,8 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<UserAccessToken> UserAccessTokens => Set<UserAccessToken>();
     public DbSet<ComplianceCategory> ComplianceCategories => Set<ComplianceCategory>();
     public DbSet<ComplianceItem> ComplianceItems => Set<ComplianceItem>();
+    public DbSet<ComplianceObligation> ComplianceObligations => Set<ComplianceObligation>();
+    public DbSet<ComplianceAutomationConfiguration> ComplianceAutomationConfigurations => Set<ComplianceAutomationConfiguration>();
     public DbSet<ComplianceMonitoringProfile> ComplianceMonitoringProfiles => Set<ComplianceMonitoringProfile>();
     public DbSet<ComplianceCheckSetting> ComplianceCheckSettings => Set<ComplianceCheckSetting>();
     public DbSet<ComplianceVerification> ComplianceVerifications => Set<ComplianceVerification>();
@@ -54,6 +56,25 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ComplianceObligation>(entity =>
+        {
+            entity.ToTable("AppComplianceObligations");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Code).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.StateJson).IsConcurrencyToken().IsRequired();
+            entity.Property(x => x.RuleJson).IsRequired();
+            entity.HasIndex(x => new { x.ClientId, x.Code, x.PeriodStartUtc }).IsUnique();
+            entity.HasOne<Client>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<ComplianceItem>().WithOne().HasForeignKey<ComplianceObligation>(x => x.ComplianceItemId).OnDelete(DeleteBehavior.NoAction);
+        });
+        modelBuilder.Entity<ComplianceAutomationConfiguration>(entity =>
+        {
+            entity.ToTable("AppComplianceAutomationConfigurations");
+            entity.HasKey(x => x.Key);
+            entity.Property(x => x.Key).HasMaxLength(100);
+            entity.Property(x => x.PayloadJson).IsConcurrencyToken().IsRequired();
+            entity.HasOne<Client>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<ComplianceMonitoringProfile>(entity =>
         {
             entity.ToTable("AppComplianceMonitoringProfiles");
