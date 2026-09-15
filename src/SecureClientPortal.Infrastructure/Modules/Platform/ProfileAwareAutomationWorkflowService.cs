@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SecureClientPortal.Backend.Application.Modules.Compliance;
 using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Application.Modules.Platform;
 using SecureClientPortal.Backend.Data;
@@ -6,42 +7,46 @@ using SecureClientPortal.Backend.Data;
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 
 /// <summary>
-/// Compatibility wrapper around the existing automation engine.
-/// The legacy engine still performs reminders, escalations, month-end submission and pack creation,
-/// but historically added every active firm template to every client. This wrapper removes only
-/// slots created by that automation run and rebuilds those additions from each client's own profile.
-/// Existing user-uploaded/current-pack slots are never deleted.
+/// Compatibility wrapper around the existing automation engine. It corrects legacy broad monthly-pack
+/// slot creation and also runs the Phase 4 compliance engine. The optional compliance dependency keeps
+/// existing unit tests and direct two-argument construction backwards compatible.
 /// </summary>
 public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowService
 {
     private readonly PortalDbContext _db;
     private readonly IClientMonthlyPackProfileService _profiles;
+    private readonly IComplianceAutomationService? _complianceAutomation;
 
     public ProfileAwareAutomationWorkflowService(
         PortalDbContext db,
-        IClientMonthlyPackProfileService profiles)
+        IClientMonthlyPackProfileService profiles,
+        IComplianceAutomationService? complianceAutomation = null)
     {
         _db = db;
         _profiles = profiles;
+        _complianceAutomation = complianceAutomation;
     }
 
     public async Task<AutomationRunSummary> RunAsync(DateTime? utcNow = null, CancellationToken ct = default)
     {
         var now = utcNow?.ToUniversalTime() ?? DateTime.UtcNow;
 
-        // Snapshot packs and slots before automation. Anything new after the inner run can be
-        // reconciled safely without modifying client work that already existed.
-        var packIdsBeforeRun = (await _db.MonthlyPacks
-            .Select(x => x.Id)
-            .ToListAsync(ct))
-            .ToHashSet();
-        var slotIdsBeforeRun = (await _db.DocumentSlots
-            .Select(x => x.Id)
-            .ToListAsync(ct))
-            .ToHashSet();
+        var packIdsBeforeRun = (await _db.MonthlyPacks.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        var slotIdsBeforeRun = (await _db.DocumentSlots.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
 
         var inner = new AutomationWorkflowService(_db);
         var summary = await inner.RunAsync(now, ct);
+
+        // Compliance generation must not depend on whether a monthly pack happened to change today.
+        // The service is idempotent, so scheduled runs can safely evaluate every active client.
+        if (_complianceAutomation is not null)
+        {
+            var compliance = await _complianceAutomation.RunSystemAsync(now, ct);
+            summary = summary with
+            {
+                ComplianceItemsUpdated = summary.ComplianceItemsUpdated + compliance.ObligationsCreated + compliance.ObligationsRefreshed
+            };
+        }
 
         var automationSlots = await _db.DocumentSlots
             .Where(x => !slotIdsBeforeRun.Contains(x.Id))
@@ -52,8 +57,6 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
             .ToListAsync(ct))
             .ToHashSet();
 
-        // A newly created pack may have zero legacy-template slots. Include new packs explicitly so
-        // approved custom recurring requirements are still materialised for that month.
         var affectedPackIds = automationSlots
             .Select(x => x.MonthlyPackId)
             .Concat(newPackIds)
@@ -65,7 +68,7 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
             return summary;
         }
 
-        // Remove only the broad legacy-template slots produced by this run.
+        // Remove only broad slots created by the legacy run, never pre-existing client work.
         if (automationSlots.Count > 0)
         {
             _db.DocumentSlots.RemoveRange(automationSlots);
@@ -76,10 +79,7 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
         foreach (var packId in affectedPackIds)
         {
             var pack = await _db.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == packId, ct);
-            if (pack is null)
-            {
-                continue;
-            }
+            if (pack is null) continue;
 
             var beforeCount = await _db.DocumentSlots.CountAsync(x => x.MonthlyPackId == pack.Id, ct);
             await _profiles.ApplyProfileToPackAsync(pack.ClientId, pack.Id, ct);
@@ -87,7 +87,6 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
             correctedSlotCount += Math.Max(0, afterCount - beforeCount);
         }
 
-        // Keep all other automation metrics intact while reporting the corrected slot count.
         return summary with { DocumentSlotsCreated = correctedSlotCount };
     }
 }

@@ -6,6 +6,7 @@ namespace SecureClientPortal.Backend.Application.Modules.Compliance;
 
 public interface IComplianceAutomationService
 {
+    Task<ComplianceAutomationRunResult> RunSystemAsync(DateTime? utcNow = null, CancellationToken ct = default);
     Task<ServiceResult<ComplianceRuleSet>> GetRulesAsync(ClaimsPrincipal user, CancellationToken ct);
     Task<ServiceResult<ComplianceRuleSet>> UpdateRulesAsync(UpdateComplianceRulesRequest request, ClaimsPrincipal user, CancellationToken ct);
     Task<ServiceResult<ClientComplianceProfile>> GetProfileAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct);
@@ -20,4 +21,3 @@ public interface IComplianceAutomationService
     Task<ServiceResult<ObligationEvidenceResponse>> UploadEvidenceAsync(Guid id, UploadComplianceEvidenceRequest request, ClaimsPrincipal user, CancellationToken ct);
     Task<ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>> GetEvidenceAsync(Guid id, ClaimsPrincipal user, CancellationToken ct);
 }
-

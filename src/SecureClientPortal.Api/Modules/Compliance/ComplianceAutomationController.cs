@@ -48,4 +48,3 @@ public sealed class ComplianceAutomationController(IComplianceAutomationService 
         return Ok(result.Value);
     }
 }
-

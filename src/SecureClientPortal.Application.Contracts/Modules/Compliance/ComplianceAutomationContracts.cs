@@ -72,4 +72,3 @@ public sealed record SubmissionRequest(DateTime SubmittedAtUtc, string Submissio
 public sealed record PaymentRequest(DateTime PaidAtUtc, string PaymentReference, decimal AmountPaid, string? Note);
 public sealed record NotApplicableRequest(string Reason);
 public sealed record ObligationEvidenceResponse(ComplianceObligationResponse Obligation, ComplianceEvidenceVersionResponse Evidence);
-

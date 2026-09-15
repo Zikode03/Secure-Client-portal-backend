@@ -41,7 +41,7 @@ public sealed class ComplianceAutomationApiTests
         Assert.Null(profile.Error);
         var run = await service.RunAsync(ClientId, Actor("admin"), Ct);
         Assert.Null(run.Error);
-        return Assert.Single((await service.GetObligationsAsync(ClientId, Actor("admin"), Ct)).Value!);
+        return Assert.Single((await service.GetObligationsAsync(ClientId, Actor("admin"), Ct)).Value!.Where(x => x.Code == (csd ? "CSD" : "EMP201")));
     }
     private static FormFile File()
     {
@@ -148,7 +148,7 @@ public sealed class ComplianceAutomationApiTests
         Assert.True((await service.GetEvidenceAsync(item.Id, foreign, Ct)).Forbidden);
         Assert.True((await service.RunAsync(null, Actor("client"), Ct)).Forbidden);
         Assert.True((await service.PreparationAsync(item.Id, new(true, null), Actor("client"), Ct)).Forbidden);
-        Assert.True((await service.UpdateProfileAsync(ClientId, new(), Actor("client"), Ct)).Forbidden);
+        Assert.True((await service.UpdateProfileAsync(ClientId, new ClientComplianceProfile(), Actor("client"), Ct)).Forbidden);
         Assert.Empty(await db.ComplianceEvidenceVersions.ToListAsync(Ct));
     }
 
@@ -171,7 +171,7 @@ public sealed class ComplianceAutomationApiTests
         var service = Service(db);
         var rules = (await service.GetRulesAsync(Actor("admin"), Ct)).Value!;
         var rule = rules.Rules.Single(r => r.Code == "EMP201") with { RequiredDocumentCategories = [] };
-        Assert.Null((await service.UpdateRulesAsync(new("verified-test", [rule]), Actor("admin"), Ct)).Error);
+        Assert.Null((await service.UpdateRulesAsync(new UpdateComplianceRulesRequest("verified-test", [rule]), Actor("admin"), Ct)).Error);
         var item = await Generate(service, csd: false);
         var submission = new SubmissionRequest(DateTime.UtcNow, "SARS-123", 100m, null, true, null);
         Assert.NotNull((await service.SubmissionAsync(item.Id, submission, Actor("accountant"), Ct)).Error);
@@ -193,13 +193,13 @@ public sealed class ComplianceAutomationApiTests
         var service = Service(db);
         var item = await Generate(service);
         var rules = (await service.GetRulesAsync(Actor("admin"), Ct)).Value!;
-        Assert.True((await service.UpdateRulesAsync(new("v2", rules.Rules), Actor("accountant"), Ct)).Forbidden);
-        Assert.NotNull((await service.UpdateRulesAsync(new("v2", [rules.Rules[0] with { CadenceMonths = 0 }]), Actor("admin"), Ct)).Error);
-        Assert.Null((await service.UpdateRulesAsync(new("v2", rules.Rules), Actor("admin"), Ct)).Error);
-        Assert.Equal(409, (await service.UpdateRulesAsync(new("v2", rules.Rules), Actor("admin"), Ct)).StatusCode);
+        Assert.True((await service.UpdateRulesAsync(new UpdateComplianceRulesRequest("v2", rules.Rules), Actor("accountant"), Ct)).Forbidden);
+        Assert.NotNull((await service.UpdateRulesAsync(new UpdateComplianceRulesRequest("v2", [rules.Rules[0] with { CadenceMonths = 0 }]), Actor("admin"), Ct)).Error);
+        Assert.Null((await service.UpdateRulesAsync(new UpdateComplianceRulesRequest("v2", rules.Rules), Actor("admin"), Ct)).Error);
+        Assert.Equal(409, (await service.UpdateRulesAsync(new UpdateComplianceRulesRequest("v2", rules.Rules), Actor("admin"), Ct)).StatusCode);
         await service.RunAsync(ClientId, Actor("admin"), Ct);
         Assert.Equal(item.RuleVersion, (await service.GetObligationsAsync(ClientId, Actor("admin"), Ct)).Value![0].RuleVersion);
-        Assert.NotNull((await service.UpdateProfileAsync(ClientId, new() { VatCycleMonths = 0 }, Actor("admin"), Ct)).Error);
+        Assert.NotNull((await service.UpdateProfileAsync(ClientId, new ClientComplianceProfile() { VatCycleMonths = 0 }, Actor("admin"), Ct)).Error);
     }
 
     [Fact]
@@ -212,6 +212,59 @@ public sealed class ComplianceAutomationApiTests
         await db.SaveChangesAsync(Ct);
         Assert.Equal(409, (await service.UploadEvidenceAsync(item.Id, new() { File = File() }, Actor("client"), Ct)).StatusCode);
         Assert.Empty(await db.ComplianceEvidenceVersions.ToListAsync(Ct));
+    }
+
+
+    [Fact]
+    public async Task LegacyRecordsKeepTheirIdentityFilingAndEvidenceLinks()
+    {
+        await using var db = Database();
+        var category = ComplianceCategory.Create(Guid.NewGuid(), "Legacy CSD", "Supplier evidence", "CSD");
+        var item = ComplianceItem.Create(Guid.NewGuid(), ClientId, category.Id, "Legacy registration",
+            ComplianceItemStatus.Pending, ActorId, ComplianceRiskLevel.Medium, null, null, null);
+        db.ComplianceCategories.Add(category);
+        db.ComplianceItems.Add(item);
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var state = new ComplianceObligationResponse { Id = item.Id, ClientId = ClientId, Code = "CSD",
+            Name = "Legacy registration", Authority = "National Treasury", RuleVersion = "legacy-v1",
+            PeriodStartUtc = new DateTime(2026, 1, 1), PeriodEndUtc = new DateTime(2026, 12, 31),
+            PreparationStatus = "complete", ReviewStatus = "approved", SubmissionStatus = "not_required" };
+        var legacyKey = "compliance.automation.obligation:" + item.Id.ToString("N");
+        db.SystemSettings.Add(SystemSetting.Create(legacyKey, JsonSerializer.Serialize(state, json)));
+        db.SystemSettings.Add(SystemSetting.Create("compliance.automation.profile:" + ClientId.ToString("N"),
+            JsonSerializer.Serialize(new ClientComplianceProfile { ClientId = ClientId, GovernmentSupplier = true,
+                VatRegistered = true, VatCycleMonths = 2, VatAnchorMonth = 1, UpdatedAtUtc = DateTime.UtcNow }, json)));
+        await db.SaveChangesAsync(Ct);
+        var service = Service(db, new MemoryStorage());
+        var profile = (await service.GetProfileAsync(ClientId, Actor("client"), Ct)).Value!;
+        Assert.Equal(2, profile.VatAnchorMonth);
+        var imported = Assert.Single((await service.GetObligationsAsync(ClientId, Actor("client"), Ct)).Value!);
+        Assert.Equal(item.Id, imported.Id);
+        Assert.Equal("legacy-v1", imported.RuleVersion);
+        Assert.Equal("approved", imported.ReviewStatus);
+        var upload = await service.UploadEvidenceAsync(imported.Id, new() { File = File() }, Actor("client"), Ct);
+        Assert.Equal(item.Id, upload.Value!.Evidence.ComplianceItemId);
+        Assert.Equal("not_started", upload.Value.Obligation.ReviewStatus);
+        await service.GetObligationsAsync(ClientId, Actor("client"), Ct);
+        Assert.Single(await db.ComplianceObligations.ToListAsync(Ct));
+        Assert.True(await db.SystemSettings.AnyAsync(x => x.Key == legacyKey, Ct));
+        await service.RunSystemAsync(new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Utc), Ct);
+        Assert.Single(await db.ComplianceObligations.Where(x => x.Code == "CSD").ToListAsync(Ct));
+    }
+
+    [Fact]
+    public async Task SchedulerCreatesMissingEvidenceRequestsOnce()
+    {
+        await using var db = Database();
+        var service = Service(db);
+        await service.UpdateProfileAsync(ClientId, new ClientComplianceProfile { GovernmentSupplier = true }, Actor("admin"), Ct);
+        var now = new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Utc);
+        var first = await service.RunSystemAsync(now, Ct);
+        var second = await service.RunSystemAsync(now, Ct);
+        Assert.Equal(1, first.MissingEvidenceRequestsCreated);
+        Assert.Equal(0, second.MissingEvidenceRequestsCreated);
+        Assert.Single(await db.Requests.ToListAsync(Ct));
+        Assert.Equal(now, first.RunAtUtc);
     }
 
     private sealed class MemoryStorage : IFileStorage

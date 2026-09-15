@@ -10,8 +10,9 @@ using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
 
-public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceService evidenceService) : IComplianceAutomationService
+public sealed partial class ComplianceAutomationService(PortalDbContext db, IComplianceService evidenceService) : IComplianceAutomationService
 {
+    public ComplianceAutomationService(PortalDbContext db) : this(db, new ComplianceService(db)) { }
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static string Encode<T>(T value) => JsonSerializer.Serialize(value, Json);
     private static T Decode<T>(string value) => JsonSerializer.Deserialize<T>(value, Json)
@@ -22,7 +23,7 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         PortalUser(user) && (await user.GetAccessibleClientIdsAsync(db, ct)).Contains(id);
     private static ServiceResult<T> Error<T>(string message, int status = 400) => ServiceResult<T>.ErrorResult(message, statusCode: status);
 
-    public async Task<ServiceResult<ComplianceRuleSet>> GetRulesAsync(ClaimsPrincipal user, CancellationToken ct)
+    public async Task<ServiceResult<ComplianceRuleSet>> GetRulesAsync(ClaimsPrincipal user, CancellationToken ct = default)
     {
         if (!PortalUser(user)) return ServiceResult<ComplianceRuleSet>.ForbiddenResult();
         return ServiceResult<ComplianceRuleSet>.Success(await Rules(ct));
@@ -30,6 +31,7 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
 
     private async Task<ComplianceRuleSet> Rules(CancellationToken ct)
     {
+        await ImportLegacyRulesAsync(ct);
         var row = await db.ComplianceAutomationConfigurations.FindAsync(["rules"], ct);
         return row is null ? StarterRules() : Decode<ComplianceRuleSet>(row.PayloadJson);
     }
@@ -45,12 +47,13 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         return new(version, [
             Rule("VAT201", "VAT return", "SARS", "vatRegistered", 2, "bank_statement", "invoices"),
             Rule("EMP201", "Employer declaration", "SARS", "payeRegistered", 1, "payroll"),
+            Rule("EMP501", "Employer reconciliation", "SARS", "payeRegistered", 6, "payroll_document"),
             Rule("UIF", "UIF declaration", "UIF", "uifRegistered", 1, "payroll"),
             Rule("COIDA", "Compensation Fund return", "Compensation Fund", "coidaRegistered", 12, "payroll"),
             Rule("IRP6", "Provisional tax", "SARS", "provisionalTaxpayer", 6, "financial_statements"),
             Rule("ITR14", "Company income tax return", "SARS", "companyTaxRegistered", 12, "financial_statements"),
             Rule("CIPC", "Company annual return", "CIPC", "cipcRegistered", 12),
-            Rule("CSD", "Central Supplier Database registration", "CSD", "governmentSupplier", 0)
+            Rule("CSD", "Central Supplier Database registration", "National Treasury", "governmentSupplier", 0, "csd_registration_report")
         ], since);
     }
 
@@ -88,6 +91,8 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         if (request.Rules.Select(r => r.Code).Distinct().Count() != request.Rules.Length)
             return Error<ComplianceRuleSet>("Rule codes must be unique.");
         var version = request.Version.Trim();
+        if ((await Rules(ct)).Version == version)
+            return Error<ComplianceRuleSet>("Use a new rule version; the current version is immutable.", 409);
         var key = "rules-version:" + version;
         if (key.Length > 100) return Error<ComplianceRuleSet>("Version must be at most 86 characters.");
         if (await db.ComplianceAutomationConfigurations.AnyAsync(x => x.Key == key, ct))
@@ -110,6 +115,7 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
     }
     private async Task<ClientComplianceProfile> Profile(Guid id, CancellationToken ct)
     {
+        await ImportLegacyClientAsync(id, ct);
         var row = await db.ComplianceAutomationConfigurations.FindAsync(["profile:" + id], ct);
         return row is null ? new ClientComplianceProfile { ClientId = id } : Decode<ClientComplianceProfile>(row.PayloadJson);
     }
@@ -131,6 +137,8 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         var allowed = await user.GetAccessibleClientIdsAsync(db, ct);
         if (clientId.HasValue && !allowed.Contains(clientId.Value))
             return ServiceResult<IReadOnlyList<ComplianceObligationResponse>>.ForbiddenResult();
+        foreach (var id in allowed.Where(id => !clientId.HasValue || id == clientId.Value))
+            await ImportLegacyClientAsync(id, ct);
         var rows = await db.ComplianceObligations.AsNoTracking()
             .Where(x => allowed.Contains(x.ClientId) && (!clientId.HasValue || x.ClientId == clientId))
             .OrderByDescending(x => x.PeriodStartUtc).ToListAsync(ct);
@@ -139,31 +147,39 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         return ServiceResult<IReadOnlyList<ComplianceObligationResponse>>.Success(result);
     }
 
-    public async Task<ServiceResult<ComplianceAutomationRunResult>> RunAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct)
+    public Task<ServiceResult<ComplianceAutomationRunResult>> RunAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct) =>
+        RunCoreAsync(clientId, user, DateTime.UtcNow, ct);
+
+    private async Task<ServiceResult<ComplianceAutomationRunResult>> RunCoreAsync(Guid? clientId, ClaimsPrincipal user, DateTime now, CancellationToken ct)
     {
         if (!Staff(user)) return ServiceResult<ComplianceAutomationRunResult>.ForbiddenResult();
         var allowed = await user.GetAccessibleClientIdsAsync(db, ct);
         if (clientId.HasValue && !allowed.Contains(clientId.Value)) return ServiceResult<ComplianceAutomationRunResult>.ForbiddenResult();
         var clients = await db.Clients.Where(x => allowed.Contains(x.Id) && (!clientId.HasValue || x.Id == clientId) && x.Status == "active").ToListAsync(ct);
-        var now = DateTime.UtcNow;
         var rules = await Rules(ct);
         var warnings = new HashSet<string> { "This run reconciles local workflows only; it does not check or submit to government systems." };
-        var created = 0; var refreshed = 0;
+        var created = 0; var refreshed = 0; var requestsCreated = 0;
         foreach (var client in clients)
         {
             var profile = await Profile(client.Id, ct);
             if (!profile.UpdatedAtUtc.HasValue) warnings.Add(client.Name + ": confirm the compliance profile first.");
             foreach (var rule in rules.Rules.Where(r => r.EffectiveFromUtc <= now && (!r.EffectiveToUtc.HasValue || r.EffectiveToUtc >= now)))
             {
-                if (Applies(profile, rule.ApplicabilityField) != true) continue;
+                if (Applies(profile, rule.ApplicabilityField) is not true)
+                {
+                    if (Applies(profile, rule.ApplicabilityField) is null)
+                        warnings.Add(client.Name + ": " + rule.Code + " applicability is not confirmed.");
+                    continue;
+                }
                 // The current profile does not collect incorporation anniversaries or COIDA
                 // assessment-year settings. Never fabricate those periods from financial year end.
-                if (rule.Code is "CIPC" or "COIDA")
+                if (rule.Code is "CIPC" or "CIPC_AR" or "COIDA")
                 {
                     warnings.Add(rule.Code + ": period-specific registration/assessment dates are not configured; no obligation generated.");
                     continue;
                 }
                 var (start, end) = Period(profile, rule, now);
+                if (rule.Code == "CSD" && await db.ComplianceObligations.AnyAsync(x => x.ClientId == client.Id && x.Code == "CSD", ct)) continue;
                 var existing = await db.ComplianceObligations.FirstOrDefaultAsync(x =>
                     x.ClientId == client.Id && x.Code == rule.Code && x.PeriodStartUtc == start, ct);
                 if (existing is not null) continue;
@@ -209,17 +225,18 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
                 Audit(user, "obligation_created", row.Id, client.Id, new { row.ComplianceItemId, rule.Version });
             }
             var persisted = await db.ComplianceObligations.Where(x => x.ClientId == client.Id).ToListAsync(ct);
-            var rows = persisted.Concat(db.ComplianceObligations.Local.Where(x => x.ClientId == client.Id)).DistinctBy(x => x.Id);
+            var rows = persisted.Concat(db.ComplianceObligations.Local.Where(x => x.ClientId == client.Id)).DistinctBy(x => x.Id).ToArray();
             foreach (var row in rows)
             {
-                row.StateJson = Encode((await Refresh(row, ct)) with { UpdatedAtUtc = now });
+                var refreshedState = (await Refresh(row, ct)) with { UpdatedAtUtc = now };
+                requestsCreated += await EnsureMissingEvidenceRequestAsync(refreshedState, now, ct);
+                await UpdateRegisterAsync(row, refreshedState, ct);
+                row.StateJson = Encode(refreshedState);
                 refreshed++;
             }
         }
-        // Request/notification creation is deliberately not simulated.
-        warnings.Add("Missing evidence is listed here; this run does not send document requests or notifications.");
         Audit(user, "run", Guid.NewGuid(), clientId, new { created, refreshed });
-        return await Save(new ComplianceAutomationRunResult(now, clients.Count, created, refreshed, 0, 0, warnings.ToArray()), ct);
+        return await Save(new ComplianceAutomationRunResult(now, clients.Count, created, refreshed, requestsCreated, 0, warnings.ToArray()), ct);
     }
 
     private static (DateTime Start, DateTime End) Period(ClientComplianceProfile profile, ComplianceRuleDefinition rule, DateTime now)
@@ -251,13 +268,18 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
                                && doc.Status == "accepted" && doc.StorageKey != null
                                && pack.Year * 12 + pack.Month >= startMonth && pack.Year * 12 + pack.Month <= endMonth
                            select doc.Category).Distinct().ToListAsync(ct);
-        var missing = categories.Except(found.Select(Normalize)).ToList();
+        var missing = categories.Where(required => !found.Any(actual => EvidenceMatches(required, actual))).ToList();
         var required = categories.Length;
         if (rule.Code == "CSD")
         {
-            required++;
-            if (!await db.ComplianceEvidenceVersions.AnyAsync(x => x.ComplianceItemId == row.ComplianceItemId
-                && x.ClientId == row.ClientId && x.IsCurrentVersion, ct)) missing.Add("csd_registration_evidence");
+            var hasReport = await db.ComplianceEvidenceVersions.AnyAsync(x => x.ComplianceItemId == row.ComplianceItemId
+                && x.ClientId == row.ClientId && x.IsCurrentVersion, ct);
+            if (!categories.Contains("csd_registration_report"))
+            {
+                required++;
+                if (!hasReport) missing.Add("csd_registration_report");
+            }
+            else if (hasReport) missing.Remove("csd_registration_report");
         }
         state = state with { ClientName = client.Name, ResponsibleAccountantId = client.AssignedAccountantId,
             EvidenceRequired = required, EvidenceFound = required - missing.Count, MissingEvidenceCategories = missing.ToArray() };
@@ -330,21 +352,24 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
         Func<ComplianceObligationResponse, (ComplianceObligationResponse State, string? Error)> change, CancellationToken ct)
     {
         if (!Staff(user)) return ServiceResult<ComplianceObligationResponse>.ForbiddenResult();
+        await ImportLegacyObligationAsync(id, user, ct);
         var row = await db.ComplianceObligations.FindAsync([id], ct);
         if (row is null) return ServiceResult<ComplianceObligationResponse>.NotFoundResult();
         if (!await Access(row.ClientId, user, ct)) return ServiceResult<ComplianceObligationResponse>.ForbiddenResult();
         var before = await Refresh(row, ct);
         if (before.NotApplicableReason is not null) return Error<ComplianceObligationResponse>("This obligation is marked not applicable.", 409);
         var (next, error) = change(before);
-        if (error is not null) return Error<ComplianceObligationResponse>(error);
+        if (error is not null) return Error<ComplianceObligationResponse>(error, 409);
         next = Status(next with { UpdatedAtUtc = DateTime.UtcNow });
         row.StateJson = Encode(next);
+        await UpdateRegisterAsync(row, next, ct);
         Audit(user, action, id, row.ClientId, request);
         return await Save(next, ct);
     }
 
     public async Task<ServiceResult<ObligationEvidenceResponse>> UploadEvidenceAsync(Guid id, UploadComplianceEvidenceRequest request, ClaimsPrincipal user, CancellationToken ct)
     {
+        await ImportLegacyObligationAsync(id, user, ct);
         var row = await db.ComplianceObligations.FindAsync([id], ct);
         if (row is null) return ServiceResult<ObligationEvidenceResponse>.NotFoundResult();
         if (!await Access(row.ClientId, user, ct)) return ServiceResult<ObligationEvidenceResponse>.ForbiddenResult();
@@ -364,12 +389,14 @@ public sealed class ComplianceAutomationService(PortalDbContext db, IComplianceS
             state = Status(state with { PreparationStatus = "not_started", ReviewStatus = "not_started" });
         state = state with { UpdatedAtUtc = DateTime.UtcNow };
         row.StateJson = Encode(state);
+        await UpdateRegisterAsync(row, state, ct);
         Audit(user, "evidence_linked", row.Id, row.ClientId, new { row.ComplianceItemId, evidenceVersionId = uploaded.Value.Id });
         return await Save(new ObligationEvidenceResponse(state, uploaded.Value), ct);
     }
 
     public async Task<ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>> GetEvidenceAsync(Guid id, ClaimsPrincipal user, CancellationToken ct)
     {
+        await ImportLegacyObligationAsync(id, user, ct);
         var row = await db.ComplianceObligations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>.NotFoundResult();
         if (!await Access(row.ClientId, user, ct)) return ServiceResult<IReadOnlyList<ComplianceEvidenceVersionResponse>>.ForbiddenResult();
