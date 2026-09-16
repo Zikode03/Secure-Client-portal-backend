@@ -144,6 +144,7 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddComplianceModule(this IServiceCollection services)
     {
+        services.AddHttpClient<ICipcAuthorityClient, CipcAuthorityClient>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddScoped<IComplianceService, ComplianceService>();
         services.AddScoped<IComplianceAutomationService, ComplianceAutomationService>();
         services.AddScoped<IComplianceMonitoringService, ComplianceMonitoringService>();
