@@ -17,6 +17,7 @@ using SecureClientPortal.Backend.Application.Modules.Requests;
 using SecureClientPortal.Backend.Infrastructure.DependencyInjection;
 using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
 using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
+using SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
 using Microsoft.IdentityModel.Tokens;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
@@ -42,6 +43,7 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<PortalLinksOptions>(builder.Configuration.GetSection(PortalLinksOptions.Section));
 builder.Services.Configure<AccessEmailOptions>(builder.Configuration.GetSection(AccessEmailOptions.Section));
 builder.Services.Configure<AutomationOptions>(builder.Configuration.GetSection(AutomationOptions.Section));
+builder.Services.Configure<CipcApiOptions>(builder.Configuration.GetSection(CipcApiOptions.Section));
 var configuredStorage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
 var keyRingPath = Path.GetFullPath(
     Path.IsPathRooted(configuredStorage.KeyRingPath)
