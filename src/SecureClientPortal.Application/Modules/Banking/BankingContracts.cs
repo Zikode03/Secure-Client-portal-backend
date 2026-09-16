@@ -130,6 +130,7 @@ public interface IBankingService
 {
     Task<BankingOperationResult<BankingOverviewDto>> GetOverviewAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<MonthlyPackBankingStatusDto>> GetMonthlyPackStatusAsync(Guid clientId, int year, int month, ClaimsPrincipal user, CancellationToken ct = default);
+    Task<BankingOperationResult<bool>> ReconcileMonthlyPackBankSlotAsync(Guid clientId, Guid monthlyPackId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> ConnectSandboxAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> SyncAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> DisconnectAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default);
