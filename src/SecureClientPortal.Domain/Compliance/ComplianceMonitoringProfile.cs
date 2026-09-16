@@ -28,7 +28,7 @@ public sealed class ComplianceCheckSetting
     public void Update(string applicability, string reason) { Applicability = applicability; Reason = reason; }
 }
 
-// Append-only manual observations. No API caller can claim provider verification.
+// Append-only observations. Manual callers cannot create authority-verified records.
 public sealed class ComplianceVerification
 {
     public Guid Id { get; private set; }
@@ -47,7 +47,15 @@ public sealed class ComplianceVerification
     public static ComplianceVerification RecordManual(Guid clientId, string code, string outcome,
         string evidenceReference, DateTime checkedAt, DateTime reviewAfter, Guid actorId, string fingerprint) => new()
     {
-        Id = Guid.NewGuid(), ClientId = clientId, CheckCode = code, Outcome = outcome,
+        Id = Guid.NewGuid(), ClientId = clientId, CheckCode = code, Method = "accountant_confirmed", Outcome = outcome,
+        EvidenceReference = evidenceReference, CheckedAtUtc = checkedAt, ReviewAfterUtc = reviewAfter,
+        RecordedAtUtc = DateTime.UtcNow, RecordedByUserId = actorId, IdentifierFingerprint = fingerprint
+    };
+
+    public static ComplianceVerification RecordAuthority(Guid clientId, string code, string outcome,
+        string evidenceReference, DateTime checkedAt, DateTime reviewAfter, Guid actorId, string fingerprint) => new()
+    {
+        Id = Guid.NewGuid(), ClientId = clientId, CheckCode = code, Method = "authority_verified", Outcome = outcome,
         EvidenceReference = evidenceReference, CheckedAtUtc = checkedAt, ReviewAfterUtc = reviewAfter,
         RecordedAtUtc = DateTime.UtcNow, RecordedByUserId = actorId, IdentifierFingerprint = fingerprint
     };
