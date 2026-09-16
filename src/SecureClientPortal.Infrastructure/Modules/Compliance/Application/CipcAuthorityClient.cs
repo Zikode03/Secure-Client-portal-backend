@@ -22,6 +22,8 @@ public sealed class CipcApiOptions
 public sealed class CipcCheckOptions
 {
     public string EndpointTemplate { get; set; } = "";
+    public string RequestMethod { get; set; } = "GET";
+    public string RegistrationNumberBodyProperty { get; set; } = "";
     public string OutcomeProperty { get; set; } = "";
     public string EvidenceProperty { get; set; } = "";
     public string[] PassValues { get; set; } = [];
@@ -44,6 +46,7 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
             && !string.IsNullOrWhiteSpace(config.ClientSecret)
             && config.Checks.TryGetValue(checkCode, out var check)
             && !string.IsNullOrWhiteSpace(check.EndpointTemplate)
+            && IsSupportedMethod(check.RequestMethod)
             && !string.IsNullOrWhiteSpace(check.OutcomeProperty)
             && (check.PassValues?.Length > 0 || check.FailValues?.Length > 0);
     }
@@ -64,9 +67,19 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
                 ? absolute
                 : new Uri(new Uri(config.ApiBaseUrl.TrimEnd('/') + "/"), relative.TrimStart('/'));
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            using var request = new HttpRequestMessage(ParseMethod(check.RequestMethod), endpoint);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            if (request.Method != HttpMethod.Get && !string.IsNullOrWhiteSpace(check.RegistrationNumberBodyProperty))
+            {
+                var body = JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    [check.RegistrationNumberBodyProperty.Trim()] = registrationNumber.Trim()
+                });
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            }
+
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode)
                 return Failed($"CIPC verification is unavailable (HTTP {(int)response.StatusCode}). No compliance result was saved.");
@@ -137,9 +150,36 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
         value = root;
         foreach (var segment in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value)) return false;
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                if (!TryGetPropertyCaseInsensitive(value, segment, out value)) return false;
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Array && int.TryParse(segment, out var index) && index >= 0 && index < value.GetArrayLength())
+            {
+                value = value[index];
+                continue;
+            }
+
+            return false;
         }
         return true;
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.TryGetProperty(propertyName, out value)) return true;
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+        value = default;
+        return false;
     }
 
     private static string Value(JsonElement value) => value.ValueKind switch
@@ -153,6 +193,12 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
 
     private static bool Match(string value, IEnumerable<string> candidates) =>
         candidates.Any(candidate => string.Equals(candidate?.Trim(), value.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSupportedMethod(string? method) =>
+        string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) || string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);
+
+    private static HttpMethod ParseMethod(string? method) =>
+        string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Post : HttpMethod.Get;
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength];
