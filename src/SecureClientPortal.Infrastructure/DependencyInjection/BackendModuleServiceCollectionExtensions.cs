@@ -101,7 +101,8 @@ public static class BackendModuleServiceCollectionExtensions
     {
         services.AddScoped<IDocumentSlotService, DocumentSlotService>();
         services.AddScoped<IClientMonthlyPackProfileService, ClientMonthlyPackProfileService>();
-        services.AddScoped<IMonthlyPackService, MonthlyPackService>();
+        services.AddScoped<MonthlyPackService>();
+        services.AddScoped<IMonthlyPackService, BankAwareMonthlyPackService>();
         return services;
     }
 
