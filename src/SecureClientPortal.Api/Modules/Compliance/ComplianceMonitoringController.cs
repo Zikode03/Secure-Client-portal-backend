@@ -26,6 +26,10 @@ public sealed class ComplianceMonitoringController(IComplianceMonitoringService 
     [Authorize(Policy = "AccountantOnly")]
     public async Task<IActionResult> RecordManual(Guid clientId, RecordManualVerificationRequest request, CancellationToken ct) => Result(await service.RecordManualAsync(clientId, request, User, ct));
 
+    [HttpPost("authority-verifications/cipc")]
+    [Authorize(Policy = "AccountantOnly")]
+    public async Task<IActionResult> VerifyCipc(Guid clientId, RunAuthorityVerificationRequest request, CancellationToken ct) => Result(await service.VerifyCipcAsync(clientId, request, User, ct));
+
     private IActionResult Result<T>(ServiceResult<T> result)
     {
         if (result.Forbidden) return Forbid();
