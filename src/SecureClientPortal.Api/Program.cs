@@ -18,6 +18,7 @@ using SecureClientPortal.Backend.Infrastructure.DependencyInjection;
 using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
 using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 using SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Banking;
 using Microsoft.IdentityModel.Tokens;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
@@ -44,6 +45,7 @@ builder.Services.Configure<PortalLinksOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<AccessEmailOptions>(builder.Configuration.GetSection(AccessEmailOptions.Section));
 builder.Services.Configure<AutomationOptions>(builder.Configuration.GetSection(AutomationOptions.Section));
 builder.Services.Configure<CipcApiOptions>(builder.Configuration.GetSection(CipcApiOptions.Section));
+builder.Services.Configure<BankingOptions>(builder.Configuration.GetSection(BankingOptions.Section));
 var configuredStorage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
 var keyRingPath = Path.GetFullPath(
     Path.IsPathRooted(configuredStorage.KeyRingPath)
@@ -147,6 +149,8 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddDbContext<PortalDbContext>(options =>
     options.UseSqlServer(connectionString));
+builder.Services.AddDbContext<BankingDbContext>(options =>
+    options.UseSqlServer(connectionString));
 builder.Services.AddScoped<AccessEmailSender>();
 builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender>(sp => sp.GetRequiredService<AccessEmailSender>());
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
@@ -155,6 +159,7 @@ builder.Services
     .AddAuthModule()
     .AddUsersRolesModule()
     .AddMonthlyPacksModule()
+    .AddBankingModule()
     .AddDocumentModule()
     .AddNotificationsModule()
     .AddClientsModule()
@@ -284,8 +289,6 @@ app.MapControllers();
 await SeedData.InitializeAsync(app.Services);
 if (app.Environment.IsDevelopment())
     await SeedData.InitializeDevelopmentAsync(app.Services, app.Environment);
-// Seed practical starter templates after the original generic seed. This is idempotent and gives
-// company-aware monthly-pack recommendations useful options in every environment.
 await BusinessMonthlyPackSeedData.InitializeAsync(app.Services);
 
 app.Run();
@@ -295,13 +298,19 @@ static async Task ApplyDatabaseMigrationsAsync(IServiceProvider services, ILogge
     await using var scope = services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
     var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
-    if (!pendingMigrations.Any())
+    if (pendingMigrations.Any())
     {
-        return;
+        logger.LogInformation("Applying {MigrationCount} pending portal database migrations.", pendingMigrations.Count());
+        await db.Database.MigrateAsync();
     }
 
-    logger.LogInformation("Applying {MigrationCount} pending database migrations.", pendingMigrations.Count());
-    await db.Database.MigrateAsync();
+    var bankingDb = scope.ServiceProvider.GetRequiredService<BankingDbContext>();
+    var bankingMigrations = await bankingDb.Database.GetPendingMigrationsAsync();
+    if (bankingMigrations.Any())
+    {
+        logger.LogInformation("Applying {MigrationCount} pending banking database migrations.", bankingMigrations.Count());
+        await bankingDb.Database.MigrateAsync();
+    }
 }
 
 static string PartitionKey(HttpContext httpContext)
