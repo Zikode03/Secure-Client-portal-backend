@@ -31,11 +31,13 @@ public sealed class CipcCheckOptions
 
 public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions> options) : ICipcAuthorityClient
 {
+    private const int MaxEvidenceLength = 500;
     private readonly CipcApiOptions config = options.Value;
 
     public bool IsConfigured(string checkCode)
     {
-        return config.Enabled
+        return !string.IsNullOrWhiteSpace(checkCode)
+            && config.Enabled
             && Uri.TryCreate(config.TokenUrl, UriKind.Absolute, out _)
             && Uri.TryCreate(config.ApiBaseUrl, UriKind.Absolute, out _)
             && !string.IsNullOrWhiteSpace(config.ClientId)
@@ -43,7 +45,7 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
             && config.Checks.TryGetValue(checkCode, out var check)
             && !string.IsNullOrWhiteSpace(check.EndpointTemplate)
             && !string.IsNullOrWhiteSpace(check.OutcomeProperty)
-            && (check.PassValues.Length > 0 || check.FailValues.Length > 0);
+            && (check.PassValues?.Length > 0 || check.FailValues?.Length > 0);
     }
 
     public async Task<AuthorityVerificationResult> VerifyAsync(string checkCode, string registrationNumber, CancellationToken ct)
@@ -75,9 +77,9 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
                 return Failed("CIPC returned a response that does not match the configured outcome mapping. No result was saved.");
 
             var rawOutcome = Value(outcomeElement);
-            var outcome = Match(rawOutcome, check.PassValues) ? "pass" : Match(rawOutcome, check.FailValues) ? "fail" : null;
+            var outcome = Match(rawOutcome, check.PassValues ?? []) ? "pass" : Match(rawOutcome, check.FailValues ?? []) ? "fail" : null;
             if (outcome is null)
-                return Failed($"CIPC returned an unmapped status '{rawOutcome}'. No result was saved.");
+                return Failed($"CIPC returned an unmapped status '{Truncate(rawOutcome, 120)}'. No result was saved.");
 
             var evidence = "CIPC APIVerse";
             if (!string.IsNullOrWhiteSpace(check.EvidenceProperty) && TryGetPath(document.RootElement, check.EvidenceProperty, out var evidenceElement))
@@ -85,6 +87,7 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
                 var mapped = Value(evidenceElement);
                 if (!string.IsNullOrWhiteSpace(mapped)) evidence = $"CIPC APIVerse · {mapped}";
             }
+            evidence = Truncate(evidence, MaxEvidenceLength);
 
             var checkedAt = DateTime.UtcNow;
             var reviewDays = Math.Clamp(check.ReviewDays, 1, 365);
@@ -150,6 +153,9 @@ public sealed class CipcAuthorityClient(HttpClient http, IOptions<CipcApiOptions
 
     private static bool Match(string value, IEnumerable<string> candidates) =>
         candidates.Any(candidate => string.Equals(candidate?.Trim(), value.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 
     private static AuthorityVerificationResult Failed(string message) =>
         new(false, "unknown", "", DateTime.UtcNow, DateTime.UtcNow, message);
