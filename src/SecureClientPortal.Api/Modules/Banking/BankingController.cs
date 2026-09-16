@@ -14,6 +14,14 @@ public sealed class BankingController(IBankingService service) : ControllerBase
     public async Task<IActionResult> GetOverview([FromQuery] Guid? clientId, CancellationToken ct) =>
         Result(await service.GetOverviewAsync(clientId, User, ct));
 
+    [HttpGet("monthly-pack-status")]
+    public async Task<IActionResult> GetMonthlyPackStatus(
+        [FromQuery] Guid clientId,
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken ct) =>
+        Result(await service.GetMonthlyPackStatusAsync(clientId, year, month, User, ct));
+
     [HttpPost("sandbox/connect")]
     public async Task<IActionResult> ConnectSandbox([FromBody] BankingClientRequest request, CancellationToken ct) =>
         Result(await service.ConnectSandboxAsync(request.ClientId, User, ct));
