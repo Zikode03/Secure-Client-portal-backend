@@ -1,11 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Application.Modules.Banking;
-using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
 using SecureClientPortal.Backend.Domain.Modules.Banking;
+using SecureClientPortal.Backend.Domain.Modules.MonthlyPacks;
 using System.Security.Claims;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Banking;
@@ -14,7 +13,6 @@ public sealed class BankingService(
     PortalDbContext portalDb,
     BankingDbContext bankingDb,
     IBankDataProvider provider,
-    IClientMonthlyPackProfileService monthlyPackProfiles,
     IOptions<BankingOptions> options) : IBankingService
 {
     private readonly BankingOptions config = options.Value;
@@ -88,18 +86,11 @@ public sealed class BankingService(
         var fullCalendarPeriodReached = periodEnd.Date <= today;
         var isPeriodComplete = allCovered && fullCalendarPeriodReached;
 
-        var dataFrom = coverageByConnection
-            .Where(x => x.DataFrom.HasValue)
-            .Select(x => x.DataFrom!.Value)
-            .DefaultIfEmpty()
-            .Min();
-        var hasDataFrom = coverageByConnection.Any(x => x.DataFrom.HasValue);
-        var dataThrough = coverageByConnection
-            .Where(x => x.DataThrough.HasValue)
-            .Select(x => x.DataThrough!.Value)
-            .DefaultIfEmpty()
-            .Min();
-        var hasDataThrough = coverageByConnection.Any(x => x.DataThrough.HasValue);
+        var dataFromValues = coverageByConnection.Where(x => x.DataFrom.HasValue).Select(x => x.DataFrom!.Value).ToList();
+        var dataThroughValues = coverageByConnection.Where(x => x.DataThrough.HasValue).Select(x => x.DataThrough!.Value).ToList();
+        var dataFrom = dataFromValues.Count == 0 ? (DateTime?)null : dataFromValues.Min();
+        // The pack is only as current as the least-current active connection.
+        var dataThrough = dataThroughValues.Count == 0 ? (DateTime?)null : dataThroughValues.Min();
 
         string status;
         string message;
@@ -137,11 +128,33 @@ public sealed class BankingService(
             periodStart,
             periodEnd,
             requiredThrough,
-            hasDataFrom ? DateTime.SpecifyKind(dataFrom, DateTimeKind.Utc) : null,
-            hasDataThrough ? DateTime.SpecifyKind(dataThrough, DateTimeKind.Utc) : null,
-            firstGap?.MissingFrom is null ? null : DateTime.SpecifyKind(firstGap.MissingFrom.Value, DateTimeKind.Utc),
-            firstGap?.MissingTo is null ? null : DateTime.SpecifyKind(firstGap.MissingTo.Value, DateTimeKind.Utc),
+            dataFrom,
+            dataThrough,
+            firstGap?.MissingFrom,
+            firstGap?.MissingTo,
             message));
+    }
+
+    public async Task<BankingOperationResult<bool>> ReconcileMonthlyPackBankSlotAsync(
+        Guid clientId,
+        Guid monthlyPackId,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        if (!await CanAccessClientAsync(clientId, user, ct))
+            return BankingOperationResult<bool>.Denied();
+
+        var pack = await portalDb.MonthlyPacks.FirstOrDefaultAsync(
+            x => x.Id == monthlyPackId && x.ClientId == clientId,
+            ct);
+        if (pack is null)
+            return BankingOperationResult<bool>.Fail("Monthly pack was not found.");
+
+        var hasActiveConnection = await bankingDb.BankConnections.AnyAsync(
+            x => x.ClientId == clientId && x.Status != "disconnected",
+            ct);
+        await ApplyBankStatementSlotStateAsync(pack, hasActiveConnection, ct);
+        return BankingOperationResult<bool>.Ok(hasActiveConnection);
     }
 
     public async Task<BankingOperationResult<BankingOverviewDto>> ConnectSandboxAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default)
@@ -154,9 +167,13 @@ public sealed class BankingService(
         if (resolved.clientId is null) return BankingOperationResult<BankingOverviewDto>.Fail("A client could not be resolved for the current user.");
 
         var id = resolved.clientId.Value;
-        var existing = await bankingDb.BankConnections.AnyAsync(x => x.ClientId == id && x.Status != "disconnected", ct);
+        // Multiple individually linked banks are supported. Only a duplicate connection for the
+        // same provider is blocked here; each real bank provider can coexist with the others.
+        var existing = await bankingDb.BankConnections.AnyAsync(
+            x => x.ClientId == id && x.Provider == provider.Name && x.Status != "disconnected",
+            ct);
         if (existing)
-            return BankingOperationResult<BankingOverviewDto>.Fail("This client already has an active bank connection.");
+            return BankingOperationResult<BankingOverviewDto>.Fail("This bank provider is already connected for the client.");
 
         var providerResult = await provider.ConnectAsync(id, ct);
         var now = DateTime.UtcNow;
@@ -176,7 +193,7 @@ public sealed class BankingService(
         bankingDb.BankSyncRuns.Add(initialRun);
         connection.MarkSynced(now);
         await bankingDb.SaveChangesAsync(ct);
-        await ReconcileMonthlyPackBankFeedAsync(id, true, user, ct);
+        await ReconcileLatestOpenPackBankSlotAsync(id, true, ct);
         return BankingOperationResult<BankingOverviewDto>.Ok(await BuildOverviewAsync(id, ct));
     }
 
@@ -226,58 +243,80 @@ public sealed class BankingService(
 
         var stillConnected = await bankingDb.BankConnections.AnyAsync(
             x => x.ClientId == connection.ClientId && x.Status != "disconnected", ct);
-        await ReconcileMonthlyPackBankFeedAsync(connection.ClientId, stillConnected, user, ct);
+        await ReconcileLatestOpenPackBankSlotAsync(connection.ClientId, stillConnected, ct);
         return BankingOperationResult<BankingOverviewDto>.Ok(await BuildOverviewAsync(connection.ClientId, ct));
     }
 
-    private async Task ReconcileMonthlyPackBankFeedAsync(Guid clientId, bool connected, ClaimsPrincipal user, CancellationToken ct)
+    private async Task ReconcileLatestOpenPackBankSlotAsync(Guid clientId, bool connected, CancellationToken ct)
     {
-        var currentResult = await monthlyPackProfiles.GetAsync(clientId, user, ct);
-        if (currentResult.Value is null || currentResult.Forbidden || currentResult.NotFound || currentResult.Unauthorized || currentResult.Error is not null)
-            return;
+        var pack = await portalDb.MonthlyPacks
+            .Where(x => x.ClientId == clientId && x.Status != "under_review" && x.Status != "complete" && x.Status != "closed")
+            .OrderByDescending(x => x.Year)
+            .ThenByDescending(x => x.Month)
+            .FirstOrDefaultAsync(ct);
+        if (pack is not null)
+            await ApplyBankStatementSlotStateAsync(pack, connected, ct);
+    }
 
-        var current = currentResult.Value;
-        var operating = current.OperatingProfile;
-        var operatingInput = new ClientOperatingProfileInput(
-            VatRegistered: operating?.VatRegistered,
-            VatCycleMonths: operating?.VatCycleMonths ?? 2,
-            VatAnchorMonth: operating?.VatAnchorMonth ?? 1,
-            HasEmployees: operating?.HasEmployees,
-            HoldsInventory: operating?.HoldsInventory,
-            UsesSupplierAccounts: operating?.UsesSupplierAccounts,
-            UsesPos: operating?.UsesPos,
-            OperatesFleet: operating?.OperatesFleet,
-            UsesSubcontractors: operating?.UsesSubcontractors,
-            UsesPaymentCertificates: operating?.UsesPaymentCertificates,
-            TracksProjectCosts: operating?.TracksProjectCosts,
-            UsesBookingPlatforms: operating?.UsesBookingPlatforms,
-            UsesFoodSuppliers: operating?.UsesFoodSuppliers,
-            ManufacturesGoods: operating?.ManufacturesGoods,
-            BankFeedConnected: connected,
-            SalesInvoicesSynced: operating?.SalesInvoicesSynced ?? false,
-            PurchaseInvoicesSynced: operating?.PurchaseInvoicesSynced ?? false);
-        var recurring = current.RecurringItems
-            .Where(x => string.Equals(x.Source, "client_specific", StringComparison.OrdinalIgnoreCase))
-            .Select(x => new ClientMonthlyPackProfileItemInput(
-                x.Category,
-                x.Label,
-                x.IsRequired,
-                x.DefaultDueDayOfMonth,
-                x.Cadence,
-                x.EffectiveFromUtc,
-                x.EffectiveToUtc))
-            .ToArray();
-
-        await monthlyPackProfiles.UpdateAsync(
-            clientId,
-            new UpdateClientMonthlyPackProfileRequest(
-                current.TemplateId,
-                recurring,
-                operatingInput,
-                DateTime.UtcNow,
-                ReconcileCurrentPack: true),
-            user,
+    private async Task ApplyBankStatementSlotStateAsync(MonthlyPack pack, bool connected, CancellationToken ct)
+    {
+        var slot = await portalDb.DocumentSlots.FirstOrDefaultAsync(
+            x => x.MonthlyPackId == pack.Id && x.Category == "bank_statement",
             ct);
+
+        if (connected)
+        {
+            if (slot is null)
+            {
+                slot = DocumentSlot.Create(
+                    Guid.NewGuid(),
+                    pack.Id,
+                    pack.ClientId,
+                    "bank_statement",
+                    "Bank Statement",
+                    true,
+                    null,
+                    DateTime.UtcNow);
+                slot.MarkNotApplicable();
+                portalDb.DocumentSlots.Add(slot);
+            }
+            else if (slot.Status == "not_started")
+            {
+                // The feed replaces the manual upload, but the slot remains visible for audit/history.
+                slot.MarkNotApplicable();
+            }
+            else if (slot.Status != "not_applicable" && slot.IsRequired)
+            {
+                // Never erase evidence already uploaded/reviewed. Existing manual evidence stays visible
+                // but becomes optional while Banking is the authoritative source for this period.
+                slot.UpdateDefinition(slot.Category, slot.Label, false);
+            }
+        }
+        else
+        {
+            if (slot is null)
+            {
+                slot = DocumentSlot.Create(
+                    Guid.NewGuid(),
+                    pack.Id,
+                    pack.ClientId,
+                    "bank_statement",
+                    "Bank Statement",
+                    true,
+                    null,
+                    DateTime.UtcNow);
+                slot.MarkNotStarted();
+                portalDb.DocumentSlots.Add(slot);
+            }
+            else
+            {
+                slot.UpdateDefinition(slot.Category, slot.Label, true);
+                if (slot.Status == "not_applicable")
+                    slot.MarkNotStarted();
+            }
+        }
+
+        await portalDb.SaveChangesAsync(ct);
     }
 
     private async Task ApplyProviderDataAsync(
@@ -385,13 +424,9 @@ public sealed class BankingService(
             if (end < start) continue;
 
             if (merged.Count == 0 || start > merged[^1].End.AddDays(1))
-            {
                 merged.Add(new CoverageInterval(start, end));
-            }
             else if (end > merged[^1].End)
-            {
                 merged[^1] = merged[^1] with { End = end };
-            }
         }
 
         if (merged.Count == 0)
