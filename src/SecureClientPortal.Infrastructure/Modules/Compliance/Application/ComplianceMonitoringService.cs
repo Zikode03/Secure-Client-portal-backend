@@ -12,14 +12,14 @@ using SecureClientPortal.Backend.Models;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
 
-public sealed class ComplianceMonitoringService(PortalDbContext db) : IComplianceMonitoringService
+public sealed class ComplianceMonitoringService(PortalDbContext db, ICipcAuthorityClient? cipc = null) : IComplianceMonitoringService
 {
     private sealed record Definition(string Code, string Source, string Name, string Description);
     private static readonly Definition[] Catalogue =
     [
         new("cipc_registration", "CIPC", "Company registration", "Registration and enterprise status only; not overall company compliance."),
-        new("cipc_annual_returns", "CIPC", "Annual returns", "A separate check of annual-return standing. API coverage is not confirmed."),
-        new("cipc_beneficial_ownership", "CIPC", "Beneficial ownership", "A separate check of beneficial-ownership standing. API coverage is not confirmed."),
+        new("cipc_annual_returns", "CIPC", "Annual returns", "Annual-return standing from CIPC when the authorised API mapping is configured; otherwise use a manual accountant check."),
+        new("cipc_beneficial_ownership", "CIPC", "Beneficial ownership", "Beneficial-ownership standing from CIPC when the authorised API mapping is configured; otherwise use a manual accountant check."),
         new("sars_tcs", "SARS", "Tax compliance status", "TCS verification requires taxpayer authorisation. Automated access is not approved."),
         new("csd_registration", "CSD", "Supplier registration", "Supplier registration only; not a guarantee of tender eligibility or all underlying checks.")
     ];
@@ -43,9 +43,11 @@ public sealed class ComplianceMonitoringService(PortalDbContext db) : IComplianc
                 .OrderByDescending(x => x.RecordedAtUtc).ThenByDescending(x => x.Id).FirstOrDefaultAsync(ct);
             var result = latest is null ? null : await MapAsync(latest, client, profile, ct);
             var status = result is null ? "not_checked" : !result.MatchesCurrentIdentifiers ? "identifiers_changed"
-                : result.ReviewAfterUtc <= DateTime.UtcNow ? "stale" : "accountant_confirmed";
+                : result.ReviewAfterUtc <= DateTime.UtcNow ? "stale"
+                : result.Method == "authority_verified" ? "authority_verified" : "accountant_confirmed";
+            var connection = definition.Source == "CIPC" && cipc?.IsConfigured(definition.Code) == true ? "connected" : "not_connected";
             checks.Add(new(definition.Code, definition.Source, definition.Name, definition.Description,
-                setting?.Applicability ?? "undecided", setting?.Reason ?? "", "not_connected", status, result));
+                setting?.Applicability ?? "undecided", setting?.Reason ?? "", connection, status, result));
         }
         return ServiceResult<ComplianceMonitoringResponse>.Success(new(clientId, client.Name, profile?.Version ?? Guid.Empty,
             client.RegistrationNumber, client.TaxNumber, profile?.CsdSupplierNumber ?? "", CanManage(user), checks));
@@ -76,7 +78,6 @@ public sealed class ComplianceMonitoringService(PortalDbContext db) : IComplianc
             if (setting is null) { setting = ComplianceCheckSetting.Create(clientId, input.CheckCode); db.ComplianceCheckSettings.Add(setting); }
             setting.Update(input.Applicability, input.Reason.Trim());
         }
-        // Save configuration and a redacted audit event together. No identifiers in audit metadata.
         db.AuditLogs.Add(AuditLog.Create(Guid.NewGuid(), user.GetUserId(), user.IsAdmin() ? "admin" : "accountant",
             "compliance.monitoring_configured", "client", clientId, clientId,
             JsonSerializer.Serialize(new { checks = request.Checks.Select(x => new { x.CheckCode, x.Applicability }) })));
@@ -105,13 +106,48 @@ public sealed class ComplianceMonitoringService(PortalDbContext db) : IComplianc
         var entry = ComplianceVerification.RecordManual(clientId, request.CheckCode, request.Outcome,
             request.EvidenceReference.Trim(), request.CheckedAtUtc, request.ReviewAfterUtc, user.GetUserId()!.Value, Fingerprint(identifier));
         db.ComplianceVerifications.Add(entry);
-        // Touch the concurrency token to prevent racing configuration changes or duplicate submissions.
         profile.Update(profile.CsdSupplierNumber);
         db.AuditLogs.Add(AuditLog.Create(Guid.NewGuid(), user.GetUserId(), user.IsAdmin() ? "admin" : "accountant",
             "compliance.manual_verification_recorded", "compliance_verification", entry.Id, clientId,
             JsonSerializer.Serialize(new { request.CheckCode, request.Outcome, method = "accountant_confirmed" })));
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Conflict(); }
+        return await GetAsync(clientId, user, ct);
+    }
+
+    public async Task<ServiceResult<ComplianceMonitoringResponse>> VerifyCipcAsync(Guid clientId, RunAuthorityVerificationRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!CanManage(user) || !await CanRead(clientId, user, ct)) return ServiceResult<ComplianceMonitoringResponse>.ForbiddenResult();
+        if (!request.CheckCode.StartsWith("cipc_", StringComparison.Ordinal) || !Catalogue.Any(x => x.Code == request.CheckCode))
+            return Error("Only supported CIPC checks can use the authority connector.");
+        if (cipc is null || !cipc.IsConfigured(request.CheckCode))
+            return Error("CIPC integration is not configured for this check. Use the manual accountant-confirmed workflow until the authorised API subscription is configured.", 503);
+
+        var profile = await db.ComplianceMonitoringProfiles.SingleOrDefaultAsync(x => x.ClientId == clientId, ct);
+        if (profile is null || profile.Version != request.Version) return Conflict();
+        var setting = await db.ComplianceCheckSettings.SingleOrDefaultAsync(x => x.ClientId == clientId && x.CheckCode == request.CheckCode, ct);
+        if (setting?.Applicability != "applies") return Error("Confirm that this CIPC check applies before running authority verification.");
+        var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, ct);
+        if (client is null) return ServiceResult<ComplianceMonitoringResponse>.NotFoundResult();
+        if (string.IsNullOrWhiteSpace(client.RegistrationNumber)) return Error("Save the company registration number before running a CIPC verification.");
+
+        var providerResult = await cipc.VerifyAsync(request.CheckCode, client.RegistrationNumber, ct);
+        if (!providerResult.Success)
+            return Error(providerResult.Error ?? "CIPC verification is unavailable. No result was saved.", 503);
+        if (providerResult.Outcome is not ("pass" or "fail"))
+            return Error("CIPC returned an unsupported result. No result was saved.", 503);
+
+        var entry = ComplianceVerification.RecordAuthority(clientId, request.CheckCode, providerResult.Outcome,
+            providerResult.EvidenceReference, providerResult.CheckedAtUtc, providerResult.ReviewAfterUtc,
+            user.GetUserId()!.Value, Fingerprint(client.RegistrationNumber));
+        db.ComplianceVerifications.Add(entry);
+        profile.Update(profile.CsdSupplierNumber);
+        db.AuditLogs.Add(AuditLog.Create(Guid.NewGuid(), user.GetUserId(), user.IsAdmin() ? "admin" : "accountant",
+            "compliance.authority_verification_recorded", "compliance_verification", entry.Id, clientId,
+            JsonSerializer.Serialize(new { request.CheckCode, providerResult.Outcome, source = "CIPC", method = "authority_verified" })));
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Conflict(); }
+        catch (DbUpdateException) { db.ChangeTracker.Clear(); return Error("The CIPC result was received but could not be saved. Refresh before trying again.", 500); }
         return await GetAsync(clientId, user, ct);
     }
 
@@ -141,6 +177,6 @@ public sealed class ComplianceMonitoringService(PortalDbContext db) : IComplianc
         code.StartsWith("cipc_", StringComparison.Ordinal) ? client.RegistrationNumber : code == "sars_tcs" ? client.TaxNumber : profile?.CsdSupplierNumber ?? "";
     private static string Fingerprint(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim().ToUpperInvariant())));
     private static bool IdentifierValid(string? value) => value is not null && value.Length <= 100 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '/' or '-');
-    private static ServiceResult<ComplianceMonitoringResponse> Error(string message) => ServiceResult<ComplianceMonitoringResponse>.ErrorResult(message);
+    private static ServiceResult<ComplianceMonitoringResponse> Error(string message, int statusCode = 400) => ServiceResult<ComplianceMonitoringResponse>.ErrorResult(message, statusCode: statusCode);
     private static ServiceResult<ComplianceMonitoringResponse> Conflict() => ServiceResult<ComplianceMonitoringResponse>.ErrorResult("This setup changed. Reload before saving again.", statusCode: 409);
 }
