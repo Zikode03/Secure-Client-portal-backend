@@ -233,7 +233,8 @@ public sealed class BankingService(
     private async Task ReconcileMonthlyPackBankFeedAsync(Guid clientId, bool connected, ClaimsPrincipal user, CancellationToken ct)
     {
         var currentResult = await monthlyPackProfiles.GetAsync(clientId, user, ct);
-        if (!currentResult.IsSuccess || currentResult.Value is null) return;
+        if (currentResult.Value is null || currentResult.Forbidden || currentResult.NotFound || currentResult.Unauthorized || currentResult.Error is not null)
+            return;
 
         var current = currentResult.Value;
         var operating = current.OperatingProfile;
