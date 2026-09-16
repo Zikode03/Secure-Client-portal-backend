@@ -17,19 +17,30 @@ public sealed class BankAwareMonthlyPackService(
     IBankingService banking,
     PortalDbContext db) : IMonthlyPackService
 {
-    public Task<(bool forbidden, IReadOnlyList<MonthlyPack> items)> GetAllAsync(
+    public async Task<(bool forbidden, IReadOnlyList<MonthlyPack> items)> GetAllAsync(
         ClaimsPrincipal user,
         string? clientId = null,
-        CancellationToken ct = default) =>
-        inner.GetAllAsync(user, clientId, ct);
+        CancellationToken ct = default)
+    {
+        var result = await inner.GetAllAsync(user, clientId, ct);
+        if (!result.forbidden)
+            foreach (var pack in result.items)
+                await ReconcileOrThrowAsync(pack, user, ct);
+        return result;
+    }
 
-    public Task<(bool forbidden, MonthlyPack? pack)> GetByClientAndPeriodAsync(
+    public async Task<(bool forbidden, MonthlyPack? pack)> GetByClientAndPeriodAsync(
         string clientId,
         int year,
         int month,
         ClaimsPrincipal user,
-        CancellationToken ct = default) =>
-        inner.GetByClientAndPeriodAsync(clientId, year, month, user, ct);
+        CancellationToken ct = default)
+    {
+        var result = await inner.GetByClientAndPeriodAsync(clientId, year, month, user, ct);
+        if (!result.forbidden && result.pack is not null)
+            await ReconcileOrThrowAsync(result.pack, user, ct);
+        return result;
+    }
 
     public async Task<(bool forbidden, MonthlyPack created)> CreateAsync(
         CreateMonthlyPackRequest request,
@@ -39,11 +50,7 @@ public sealed class BankAwareMonthlyPackService(
         var result = await inner.CreateAsync(request, user, ct);
         if (!result.forbidden && result.created is not null)
         {
-            await banking.ReconcileMonthlyPackBankSlotAsync(
-                result.created.ClientId,
-                result.created.Id,
-                user,
-                ct);
+            await ReconcileOrThrowAsync(result.created, user, ct);
         }
         return result;
     }
@@ -53,7 +60,9 @@ public sealed class BankAwareMonthlyPackService(
         ClaimsPrincipal user,
         CancellationToken ct = default)
     {
-        await ReconcileByPackIdAsync(id, user, ct);
+        var reconciliation = await ReconcileByPackIdAsync(id, user, ct);
+        if (reconciliation?.Forbidden == true) return (true, false, null, null);
+        if (reconciliation?.Success == false) return (false, true, "Bank-statement readiness could not be verified. Please retry.", null);
         return await inner.SubmitAsync(id, user, ct);
     }
 
@@ -62,18 +71,28 @@ public sealed class BankAwareMonthlyPackService(
         ClaimsPrincipal user,
         CancellationToken ct = default)
     {
-        await ReconcileByPackIdAsync(id, user, ct);
+        var reconciliation = await ReconcileByPackIdAsync(id, user, ct);
+        if (reconciliation?.Forbidden == true) return (true, false, null, null);
+        if (reconciliation?.Success == false) return (false, true, "Bank-statement readiness could not be verified. Please retry.", null);
         return await inner.CloseAsync(id, user, ct);
     }
 
-    private async Task ReconcileByPackIdAsync(string id, ClaimsPrincipal user, CancellationToken ct)
+    private async Task<BankingOperationResult<bool>?> ReconcileByPackIdAsync(string id, ClaimsPrincipal user, CancellationToken ct)
     {
-        if (!Guid.TryParse(id, out var packId)) return;
+        if (!Guid.TryParse(id, out var packId)) return null;
         var pack = await db.MonthlyPacks
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == packId, ct);
-        if (pack is null) return;
+        if (pack is null) return null;
 
-        await banking.ReconcileMonthlyPackBankSlotAsync(pack.ClientId, pack.Id, user, ct);
+        return await banking.ReconcileMonthlyPackBankSlotAsync(pack.ClientId, pack.Id, user, ct);
+    }
+
+    private async Task ReconcileOrThrowAsync(MonthlyPack pack, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (pack.Status is "under_review" or "complete" or "closed") return;
+        var result = await banking.ReconcileMonthlyPackBankSlotAsync(pack.ClientId, pack.Id, user, ct);
+        if (result.Forbidden || !result.Success)
+            throw new InvalidOperationException("Bank-statement readiness could not be verified.");
     }
 }

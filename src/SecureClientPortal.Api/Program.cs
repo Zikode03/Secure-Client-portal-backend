@@ -159,7 +159,7 @@ builder.Services
     .AddAuthModule()
     .AddUsersRolesModule()
     .AddMonthlyPacksModule()
-    .AddBankingModule()
+    .AddBankingModule(builder.Environment.IsDevelopment())
     .AddDocumentModule()
     .AddNotificationsModule()
     .AddClientsModule()

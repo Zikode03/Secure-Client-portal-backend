@@ -61,7 +61,7 @@ public record ClientOperatingProfileDto(
     bool? UsesBookingPlatforms,
     bool? UsesFoodSuppliers,
     bool? ManufacturesGoods,
-    bool BankFeedConnected,
+    bool BankFeedConnected, // Legacy profile preference; BankConnections alone determine live Banking state.
     bool SalesInvoicesSynced,
     bool PurchaseInvoicesSynced,
     bool IsComplete);

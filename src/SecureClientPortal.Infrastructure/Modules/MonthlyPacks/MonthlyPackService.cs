@@ -164,7 +164,11 @@ public sealed class MonthlyPackService : IMonthlyPackService
         var alreadySubmittedSlots = slots.Any(x => x.Status is "submitted" or "under_review" or "accepted");
         if (draftSlots.Count == 0 && supportingDocuments.Count == 0 && !alreadySubmittedSlots)
         {
-            return (false, true, "This monthly pack has no documents ready to submit.", null);
+            var suppliedByBanking = _bankingService is not null &&
+                (await _bankingService.GetMonthlyPackStatusAsync(pack.ClientId, pack.Year, pack.Month, user, ct)).Value is
+                    { HasActiveConnection: true, IsPeriodComplete: true, Status: "complete" };
+            if (!suppliedByBanking)
+                return (false, true, "This monthly pack has no documents ready to submit.", null);
         }
 
         var documentIds = draftSlots
@@ -315,7 +319,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
         if (result.Forbidden)
             return "Bank data for this monthly pack could not be verified for the current user.";
         if (!result.Success || result.Value is null)
-            return null;
+            return "Bank data could not be verified. Retry the Banking readiness check before submitting or closing this monthly pack.";
 
         var banking = result.Value;
         if (!banking.HasActiveConnection)
@@ -323,7 +327,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
             // No connected feed means the ordinary bank-statement document requirement remains in charge.
             return null;
         }
-        if (banking.IsPeriodComplete)
+        if (banking.IsPeriodComplete && banking.Status == "complete")
         {
             return null;
         }

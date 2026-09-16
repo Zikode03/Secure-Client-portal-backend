@@ -20,11 +20,13 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks;
 public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileService
 {
     private readonly PortalDbContext _db;
+    private readonly BankingDbContext? _bankingDb;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ClientMonthlyPackProfileService(PortalDbContext db)
+    public ClientMonthlyPackProfileService(PortalDbContext db, BankingDbContext? bankingDb = null)
     {
         _db = db;
+        _bankingDb = bankingDb;
     }
 
     public async Task<ServiceResult<ClientMonthlyPackProfileDto>> GetAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct = default)
@@ -337,6 +339,15 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             _db.DocumentSlots.Add(slot);
         }
 
+        var connected = await HasActiveBankConnectionAsync(clientId, ct);
+        foreach (var entry in _db.ChangeTracker.Entries<DocumentSlot>().Where(x =>
+                     x.State != EntityState.Deleted && x.Entity.MonthlyPackId == pack.Id && x.Entity.Category == "bank_statement"))
+        {
+            var slot = entry.Entity;
+            var hasEvidence = slot.CurrentDocumentId.HasValue || slot.Status is not ("not_started" or "not_applicable") ||
+                await _db.Documents.AnyAsync(x => x.DocumentSlotId == slot.Id, ct);
+            BankStatementSlotPolicy.Apply(slot, connected, hasEvidence);
+        }
         await _db.SaveChangesAsync(ct);
     }
 
@@ -448,7 +459,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var recommendations = BuildRecommendations(
             profileForPeriod,
             currentPack?.Year ?? DateTime.UtcNow.Year,
-            currentPack?.Month ?? DateTime.UtcNow.Month);
+            currentPack?.Month ?? DateTime.UtcNow.Month,
+            await HasActiveBankConnectionAsync(clientId, ct));
         var recommendationByCategory = recommendations.ToDictionary(
             x => DocumentDomainValues.NormalizeCategory(x.Category),
             StringComparer.OrdinalIgnoreCase);
@@ -513,7 +525,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
     {
         var template = await ResolveTemplateAsync(state.TemplateId, ct);
         var operatingProfile = ResolveOperatingProfile(state, pack.Year, pack.Month);
-        var recommendations = BuildRecommendations(operatingProfile, pack.Year, pack.Month);
+        var recommendations = BuildRecommendations(operatingProfile, pack.Year, pack.Month,
+            await HasActiveBankConnectionAsync(pack.ClientId, ct));
         var recommendationsByCategory = recommendations.ToDictionary(
             x => DocumentDomainValues.NormalizeCategory(x.Category),
             StringComparer.OrdinalIgnoreCase);
@@ -533,7 +546,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             {
                 var category = DocumentDomainValues.NormalizeCategory(requirement.DocumentCategory);
                 if (recommendationsByCategory.TryGetValue(category, out var recommendation) &&
-                    recommendation.Decision is not "include")
+                    recommendation.Decision is not "include" && category != "bank_statement")
                 {
                     continue;
                 }
@@ -578,6 +591,11 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 "Approved specifically for this business.");
         }
 
+        // The Banking slot remains part of the checklist even when no firm template includes it.
+        if (_bankingDb is not null)
+            effective["bank_statement"] = new EffectiveRequirement("bank_statement", "Bank Statement", true,
+                effective.GetValueOrDefault("bank_statement")?.DefaultDueDayOfMonth, "business_rule",
+                recommendationsByCategory["bank_statement"].Reason);
         return effective.Values.ToList();
     }
 
@@ -665,6 +683,15 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             added++;
         }
 
+        var connected = await HasActiveBankConnectionAsync(clientId, ct);
+        foreach (var entry in _db.ChangeTracker.Entries<DocumentSlot>().Where(x =>
+                     x.State != EntityState.Deleted && x.Entity.MonthlyPackId == pack.Id && x.Entity.Category == "bank_statement"))
+        {
+            var slot = entry.Entity;
+            BankStatementSlotPolicy.Apply(slot, connected,
+                slot.CurrentDocumentId.HasValue || linkedSlotIds.Contains(slot.Id) ||
+                slot.Status is not ("not_started" or "not_applicable"));
+        }
         state.UpdatedAtUtc = DateTime.UtcNow;
         await SaveStateAsync(clientId, state, ct);
         await _db.SaveChangesAsync(ct);
@@ -674,11 +701,12 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
     private static List<MonthlyPackRequirementRecommendationDto> BuildRecommendations(
         OperatingProfileState? profile,
         int year,
-        int month)
+        int month,
+        bool hasActiveBankConnection)
     {
         var items = new List<MonthlyPackRequirementRecommendationDto>();
 
-        items.Add(profile?.BankFeedConnected == true
+        items.Add(hasActiveBankConnection
             ? Recommendation("bank_statement", "Bank Statement", true, "monthly", "connected", "Bank information is supplied by the connected bank feed; no upload is required.")
             : Recommendation("bank_statement", "Bank Statement", true, "monthly", "include", "Required for each active business bank account when no bank feed supplies it."));
         items.Add(profile?.SalesInvoicesSynced == true && profile.PurchaseInvoicesSynced
@@ -884,6 +912,10 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
         return allowedClientIds.Contains(clientId);
     }
+
+    private Task<bool> HasActiveBankConnectionAsync(Guid clientId, CancellationToken ct) =>
+        _bankingDb is null ? Task.FromResult(false) :
+        _bankingDb.BankConnections.AnyAsync(x => x.ClientId == clientId && x.Status != "disconnected", ct);
 
     private async Task<MonthlyPackTemplate?> ResolveTemplateAsync(Guid? selectedTemplateId, CancellationToken ct)
     {

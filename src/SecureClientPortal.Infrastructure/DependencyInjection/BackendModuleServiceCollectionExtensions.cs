@@ -106,9 +106,10 @@ public static class BackendModuleServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddBankingModule(this IServiceCollection services)
+    public static IServiceCollection AddBankingModule(this IServiceCollection services, bool enableSandbox = false)
     {
-        services.AddScoped<IBankDataProvider, MockBankDataProvider>();
+        if (enableSandbox)
+            services.AddScoped<IBankDataProvider, MockBankDataProvider>();
         services.AddScoped<IBankingService, BankingService>();
         return services;
     }
