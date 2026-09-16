@@ -5,6 +5,7 @@ public sealed record UpdateComplianceMonitoringRequest(Guid Version, string Regi
     string CsdSupplierNumber, IReadOnlyList<CheckApplicabilityRequest> Checks);
 public sealed record RecordManualVerificationRequest(Guid Version, string CheckCode, string Outcome,
     string EvidenceReference, DateTime CheckedAtUtc, DateTime ReviewAfterUtc);
+public sealed record RunAuthorityVerificationRequest(Guid Version, string CheckCode);
 public sealed record VerificationResponse(Guid Id, string CheckCode, string Method, string Outcome,
     string EvidenceReference, DateTime CheckedAtUtc, DateTime RecordedAtUtc, DateTime ReviewAfterUtc,
     Guid RecordedByUserId, string RecordedByName, bool MatchesCurrentIdentifiers);
