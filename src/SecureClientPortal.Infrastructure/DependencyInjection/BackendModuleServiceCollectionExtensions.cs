@@ -4,6 +4,7 @@ using SecureClientPortal.Backend.Application.Common.Events;
 using SecureClientPortal.Backend.Application.Modules.Assignments;
 using SecureClientPortal.Backend.Application.Modules.AuditLogs;
 using SecureClientPortal.Backend.Application.Modules.Auth;
+using SecureClientPortal.Backend.Application.Modules.Banking;
 using SecureClientPortal.Backend.Application.Modules.Clients;
 using SecureClientPortal.Backend.Application.Modules.Compliance;
 using SecureClientPortal.Backend.Application.Modules.Documents;
@@ -23,6 +24,7 @@ using SecureClientPortal.Backend.Infrastructure.Common.Events;
 using SecureClientPortal.Backend.Infrastructure.Modules.Assignments.Application;
 using SecureClientPortal.Backend.Infrastructure.Modules.AuditLogs;
 using SecureClientPortal.Backend.Infrastructure.Modules.Auth.Application;
+using SecureClientPortal.Backend.Infrastructure.Modules.Banking;
 using SecureClientPortal.Backend.Infrastructure.Modules.Clients;
 using SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
 using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application;
@@ -48,8 +50,6 @@ public static class BackendModuleServiceCollectionExtensions
     {
         services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
         services.AddScoped<IHealthService, HealthService>();
-        // Production automation is wrapped so automatic month creation respects each client's
-        // selected monthly-pack profile instead of applying every active firm template to everyone.
         services.AddScoped<IAutomationWorkflowService, ProfileAwareAutomationWorkflowService>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddScoped<IIntegrationEventDispatcher, IntegrationEventDispatcher>();
@@ -99,11 +99,16 @@ public static class BackendModuleServiceCollectionExtensions
 
     public static IServiceCollection AddMonthlyPacksModule(this IServiceCollection services)
     {
-        // Monthly packs have two layers: the pack workflow itself and a client-specific profile
-        // that determines which recurring slots should exist for each client.
         services.AddScoped<IDocumentSlotService, DocumentSlotService>();
         services.AddScoped<IClientMonthlyPackProfileService, ClientMonthlyPackProfileService>();
         services.AddScoped<IMonthlyPackService, MonthlyPackService>();
+        return services;
+    }
+
+    public static IServiceCollection AddBankingModule(this IServiceCollection services)
+    {
+        services.AddScoped<IBankDataProvider, MockBankDataProvider>();
+        services.AddScoped<IBankingService, BankingService>();
         return services;
     }
 
