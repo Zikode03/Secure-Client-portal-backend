@@ -18,12 +18,16 @@ public sealed class MockBankDataProvider : IBankDataProvider
         var now = DateTime.UtcNow;
         var accounts = BuildAccounts(externalConnectionId, now);
         var transactions = BuildTransactions(externalConnectionId, now);
+        var coverageFrom = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var coverageTo = now;
         return Task.FromResult(new ProviderConnectionResult(
             externalConnectionId,
             now.AddDays(90),
             "accounts balances transactions",
             accounts,
-            transactions));
+            transactions,
+            coverageFrom,
+            coverageTo));
     }
 
     public Task<ProviderSyncResult> SyncAsync(string externalConnectionId, CancellationToken ct = default)
@@ -31,8 +35,10 @@ public sealed class MockBankDataProvider : IBankDataProvider
         var now = DateTime.UtcNow;
         var accounts = BuildAccounts(externalConnectionId, now);
         var transactions = BuildTransactions(externalConnectionId, now);
-        var from = transactions.Count == 0 ? null : transactions.Min(x => x.TransactionDateUtc);
-        var to = transactions.Count == 0 ? null : transactions.Max(x => x.TransactionDateUtc);
+        // Coverage describes the provider window queried, not dates on which transactions happened.
+        // A quiet banking day must not be treated as missing data.
+        var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = now;
         return Task.FromResult(new ProviderSyncResult(accounts, transactions, from, to));
     }
 
