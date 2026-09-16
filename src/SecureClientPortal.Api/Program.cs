@@ -15,6 +15,7 @@ using SecureClientPortal.Backend.Application.Modules.Reports;
 using SecureClientPortal.Backend.Application.Modules.UsersRoles;
 using SecureClientPortal.Backend.Application.Modules.Requests;
 using SecureClientPortal.Backend.Infrastructure.DependencyInjection;
+using SecureClientPortal.Backend.Infrastructure.EntityFrameworkCore;
 using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Storage;
 using SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 using SecureClientPortal.Backend.Infrastructure.Modules.Compliance.Application;
@@ -148,9 +149,9 @@ builder.Services.AddRateLimiter(options =>
 });
 
 builder.Services.AddDbContext<PortalDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(connectionString, SqlServerMigrationConfiguration.Portal));
 builder.Services.AddDbContext<BankingDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(connectionString, SqlServerMigrationConfiguration.Banking));
 builder.Services.AddScoped<AccessEmailSender>();
 builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender>(sp => sp.GetRequiredService<AccessEmailSender>());
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
@@ -304,13 +305,19 @@ static async Task ApplyDatabaseMigrationsAsync(IServiceProvider services, ILogge
         await db.Database.MigrateAsync();
     }
 
+    logger.LogInformation("PortalDbContext migration check succeeded. History: dbo.{HistoryTable}; pending: {PendingCount}.",
+        SqlServerMigrationConfiguration.PortalHistoryTable, (await db.Database.GetPendingMigrationsAsync()).Count());
+
     var bankingDb = scope.ServiceProvider.GetRequiredService<BankingDbContext>();
+    await SqlServerMigrationConfiguration.AssertBankingHistorySafeAsync(bankingDb);
     var bankingMigrations = await bankingDb.Database.GetPendingMigrationsAsync();
     if (bankingMigrations.Any())
     {
         logger.LogInformation("Applying {MigrationCount} pending banking database migrations.", bankingMigrations.Count());
         await bankingDb.Database.MigrateAsync();
     }
+    logger.LogInformation("BankingDbContext migration check succeeded. History: dbo.{HistoryTable}; pending: {PendingCount}.",
+        SqlServerMigrationConfiguration.BankingHistoryTable, (await bankingDb.Database.GetPendingMigrationsAsync()).Count());
 }
 
 static string PartitionKey(HttpContext httpContext)

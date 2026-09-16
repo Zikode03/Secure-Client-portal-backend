@@ -1,14 +1,10 @@
 using System;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using SecureClientPortal.Backend.Data;
 
 #nullable disable
 
-namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlServer.MigrationsSqlServer;
+namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlServer.Banking;
 
-[DbContext(typeof(BankingDbContext))]
-[Migration("20260916180000_BankingFoundation")]
 public partial class BankingFoundation : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

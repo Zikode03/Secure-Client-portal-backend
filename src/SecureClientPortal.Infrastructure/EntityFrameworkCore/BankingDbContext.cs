@@ -13,10 +13,17 @@ public sealed class BankingDbContext(DbContextOptions<BankingDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Portal owns Clients; Banking references them without owning their schema.
+        modelBuilder.Entity<BankingClientReference>(entity =>
+        {
+            entity.ToTable("AppClients", table => table.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+        });
         modelBuilder.Entity<BankConnection>(entity =>
         {
             entity.ToTable("AppBankConnections");
             entity.HasKey(x => x.Id);
+            entity.HasOne<BankingClientReference>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(x => x.Provider).HasMaxLength(80).IsRequired();
             entity.Property(x => x.ExternalConnectionId).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
@@ -32,6 +39,8 @@ public sealed class BankingDbContext(DbContextOptions<BankingDbContext> options)
         {
             entity.ToTable("AppBankAccounts");
             entity.HasKey(x => x.Id);
+            entity.HasOne<BankConnection>().WithMany().HasForeignKey(x => x.BankConnectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<BankingClientReference>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(x => x.ExternalAccountId).HasMaxLength(200).IsRequired();
             entity.Property(x => x.BankName).HasMaxLength(120).IsRequired();
             entity.Property(x => x.AccountName).HasMaxLength(200).IsRequired();
@@ -48,6 +57,8 @@ public sealed class BankingDbContext(DbContextOptions<BankingDbContext> options)
         {
             entity.ToTable("AppBankTransactions");
             entity.HasKey(x => x.Id);
+            entity.HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<BankingClientReference>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(x => x.ExternalTransactionId).HasMaxLength(250).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.Reference).HasMaxLength(500).IsRequired();
@@ -66,6 +77,8 @@ public sealed class BankingDbContext(DbContextOptions<BankingDbContext> options)
         {
             entity.ToTable("AppBankSyncRuns");
             entity.HasKey(x => x.Id);
+            entity.HasOne<BankConnection>().WithMany().HasForeignKey(x => x.BankConnectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<BankingClientReference>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(x => x.Provider).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.ErrorMessage).HasMaxLength(1500);
@@ -80,10 +93,17 @@ public sealed class BankingDbContext(DbContextOptions<BankingDbContext> options)
         {
             entity.ToTable("AppBankConsentRecords");
             entity.HasKey(x => x.Id);
+            entity.HasOne<BankConnection>().WithMany().HasForeignKey(x => x.BankConnectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<BankingClientReference>().WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(x => x.Provider).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Scope).HasMaxLength(500).IsRequired();
             entity.HasIndex(x => new { x.ClientId, x.GrantedAtUtc });
             entity.HasIndex(x => x.BankConnectionId);
         });
     }
+}
+
+internal sealed class BankingClientReference
+{
+    public Guid Id { get; set; }
 }
