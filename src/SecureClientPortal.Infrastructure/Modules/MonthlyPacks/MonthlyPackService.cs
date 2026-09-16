@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
 using SecureClientPortal.Backend.Application.Contracts.Modules.MonthlyPacks;
+using SecureClientPortal.Backend.Application.Modules.Banking;
 using SecureClientPortal.Backend.Application.Modules.MonthlyPacks;
 using SecureClientPortal.Backend.Auth;
 using SecureClientPortal.Backend.Data;
@@ -16,18 +17,23 @@ public sealed class MonthlyPackService : IMonthlyPackService
 {
     private readonly PortalDbContext _db;
     private readonly IClientMonthlyPackProfileService _profileService;
+    private readonly IBankingService? _bankingService;
 
     // Keep the original one-argument constructor for focused unit tests and utility callers.
-    // Production dependency injection uses the two-argument constructor below.
+    // Production dependency injection uses the constructor with module services below.
     public MonthlyPackService(PortalDbContext db)
-        : this(db, new ClientMonthlyPackProfileService(db))
+        : this(db, new ClientMonthlyPackProfileService(db), null)
     {
     }
 
-    public MonthlyPackService(PortalDbContext db, IClientMonthlyPackProfileService profileService)
+    public MonthlyPackService(
+        PortalDbContext db,
+        IClientMonthlyPackProfileService profileService,
+        IBankingService? bankingService = null)
     {
         _db = db;
         _profileService = profileService;
+        _bankingService = bankingService;
     }
 
     public async Task<(bool forbidden, IReadOnlyList<MonthlyPack> items)> GetAllAsync(ClaimsPrincipal user, string? clientId = null, CancellationToken ct = default)
@@ -127,6 +133,12 @@ public sealed class MonthlyPackService : IMonthlyPackService
         if (pack.Status is "under_review" or "complete" or "closed")
         {
             return (false, true, "This monthly pack has already been submitted or completed.", null);
+        }
+
+        var bankingBlocker = await GetBankingBlockerAsync(pack, user, ct);
+        if (bankingBlocker is not null)
+        {
+            return (false, true, bankingBlocker, null);
         }
 
         var slots = await _db.DocumentSlots
@@ -267,6 +279,12 @@ public sealed class MonthlyPackService : IMonthlyPackService
             return (true, false, null, null);
         }
 
+        var bankingBlocker = await GetBankingBlockerAsync(pack, user, ct);
+        if (bankingBlocker is not null)
+        {
+            return (false, true, bankingBlocker, null);
+        }
+
         var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
         try
         {
@@ -287,6 +305,37 @@ public sealed class MonthlyPackService : IMonthlyPackService
             ct);
 
         return (false, false, null, pack);
+    }
+
+    private async Task<string?> GetBankingBlockerAsync(MonthlyPack pack, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (_bankingService is null) return null;
+
+        var result = await _bankingService.GetMonthlyPackStatusAsync(pack.ClientId, pack.Year, pack.Month, user, ct);
+        if (result.Forbidden)
+            return "Bank data for this monthly pack could not be verified for the current user.";
+        if (!result.Success || result.Value is null)
+            return null;
+
+        var banking = result.Value;
+        if (!banking.HasActiveConnection)
+        {
+            // No connected feed means the ordinary bank-statement document requirement remains in charge.
+            return null;
+        }
+        if (banking.IsPeriodComplete)
+        {
+            return null;
+        }
+
+        return banking.Status switch
+        {
+            "needs_attention" => "The connected bank feed needs attention before this monthly pack can be submitted or closed.",
+            "incomplete" when banking.MissingFromUtc.HasValue && banking.MissingToUtc.HasValue =>
+                $"Bank data is incomplete for this monthly pack. Missing coverage: {banking.MissingFromUtc:dd MMM yyyy} to {banking.MissingToUtc:dd MMM yyyy}.",
+            "current" => $"Bank data is current through {banking.RequiredThroughUtc:dd MMM yyyy}, but the monthly period is not complete yet.",
+            _ => "Complete the connected bank data for the full monthly-pack period before submitting or closing the pack."
+        };
     }
 
     private static void ApplyStatus(MonthlyPack pack, string status)
