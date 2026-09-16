@@ -57,6 +57,23 @@ public sealed record BankingOverviewDto(
     IReadOnlyList<BankTransactionDto> RecentTransactions,
     IReadOnlyList<BankSyncRunDto> SyncRuns);
 
+public sealed record MonthlyPackBankingStatusDto(
+    Guid ClientId,
+    int Year,
+    int Month,
+    string Status,
+    bool HasActiveConnection,
+    bool IsPeriodComplete,
+    int ConnectedAccountCount,
+    DateTime PeriodStartUtc,
+    DateTime PeriodEndUtc,
+    DateTime RequiredThroughUtc,
+    DateTime? DataFromUtc,
+    DateTime? DataThroughUtc,
+    DateTime? MissingFromUtc,
+    DateTime? MissingToUtc,
+    string Message);
+
 public sealed record BankingOperationResult<T>(bool Success, bool Forbidden, string? Error, T? Value)
 {
     public static BankingOperationResult<T> Ok(T value) => new(true, false, null, value);
@@ -91,7 +108,9 @@ public sealed record ProviderConnectionResult(
     DateTime? ConsentExpiresAtUtc,
     string ConsentScope,
     IReadOnlyList<ProviderAccount> Accounts,
-    IReadOnlyList<ProviderTransaction> Transactions);
+    IReadOnlyList<ProviderTransaction> Transactions,
+    DateTime? FromDateUtc,
+    DateTime? ToDateUtc);
 
 public sealed record ProviderSyncResult(
     IReadOnlyList<ProviderAccount> Accounts,
@@ -110,6 +129,7 @@ public interface IBankDataProvider
 public interface IBankingService
 {
     Task<BankingOperationResult<BankingOverviewDto>> GetOverviewAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default);
+    Task<BankingOperationResult<MonthlyPackBankingStatusDto>> GetMonthlyPackStatusAsync(Guid clientId, int year, int month, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> ConnectSandboxAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> SyncAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<BankingOverviewDto>> DisconnectAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default);
