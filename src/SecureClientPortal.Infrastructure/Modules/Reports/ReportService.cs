@@ -26,10 +26,11 @@ public sealed class ReportService : IReportService
 
     static ReportService()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            GlobalFontSettings.UseWindowsFontsUnderWindows = true;
-        }
+        GlobalFontSettings.FontResolver ??= new ReportFontResolver();
+        MigraDoc.PredefinedFontsAndChars.ErrorFontName = ReportFontResolver.Family;
+        MigraDoc.PredefinedFontsAndChars.Bullets.Level1FontName = ReportFontResolver.Family;
+        MigraDoc.PredefinedFontsAndChars.Bullets.Level2FontName = ReportFontResolver.Family;
+        MigraDoc.PredefinedFontsAndChars.Bullets.Level3FontName = ReportFontResolver.Family;
     }
 
     public async Task<(bool forbidden, object? report)> GetFirmReportsAsync(ClaimsPrincipal user, CancellationToken ct = default)
@@ -677,7 +678,7 @@ public sealed class ReportService : IReportService
         document.Info.Title = "Compliance report";
         document.Info.Subject = "Current compliance register and controlled history";
         var normal = document.Styles[StyleNames.Normal]!;
-        normal.Font.Name = "Arial";
+        normal.Font.Name = ReportFontResolver.Family;
         normal.Font.Size = 9;
 
         var section = document.AddSection();

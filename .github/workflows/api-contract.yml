@@ -17,4 +17,10 @@ jobs:
       - run: dotnet run --project tools/ContractMetadata/ContractMetadata.csproj --configuration Release -- . --check
       - run: dotnet src/SecureClientPortal.Api/bin/Release/net8.0/SecureClientPortal.Api.dll --export-openapi openapi/portal-api.json
       - run: git diff --exit-code -- openapi/portal-api.json
-      - run: dotnet test test/SecureClientPortal.Tests/SecureClientPortal.Tests.csproj --configuration Release --verbosity quiet
+      - run: dotnet test test/SecureClientPortal.Tests/SecureClientPortal.Tests.csproj --configuration Release --verbosity normal --logger "trx;LogFileName=backend-tests.trx" --results-directory TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore

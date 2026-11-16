@@ -28,4 +28,7 @@
     <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Modules/Reports/Fonts/*.ttf" LogicalName="Portal.ReportFonts.%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
