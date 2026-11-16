@@ -20,12 +20,14 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.read")]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
         return Ok(await _service.GetAllAsync(ct));
     }
 
     [HttpPost]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.create")]
     public async Task<IActionResult> Create([FromBody] CreateUserRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>
@@ -42,12 +44,14 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id}/activate")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.activate")]
     public async Task<IActionResult> Activate(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateActivationAsync(id, new UpdateUserActivationRequest(true, null), User, ct)));
     }
 
     [HttpPost("{id}/deactivate")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.deactivate")]
     public async Task<IActionResult> Deactivate(string id, [FromBody] UpdateUserActivationRequest? request = null, CancellationToken ct = default)
     {
         var payload = new UpdateUserActivationRequest(false, request?.Reason);

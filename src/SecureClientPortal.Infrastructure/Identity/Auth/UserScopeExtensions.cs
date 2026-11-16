@@ -11,15 +11,11 @@ public static class UserScopeExtensions
     public static bool HasPermission(this ClaimsPrincipal user, string permission)
     {
         var explicitPermissions = user.FindAll("permission").Select(x => x.Value).ToArray();
-        if (explicitPermissions.Any(x => string.Equals(x, permission, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
+        if (explicitPermissions.Length > 0 || user.HasClaim(RolePermissions.AuthoritativeClaimType, "true"))
+            return explicitPermissions.Contains(permission, StringComparer.OrdinalIgnoreCase);
 
-        if (explicitPermissions.Any(x => string.Equals(x, "access.admin", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
+        // Legacy role-only principals are retained for internal callers. Authenticated API
+        // requests always receive authoritative database-backed claims before authorization.
 
         var effectiveRole = GetEffectiveRole(user);
         if (string.Equals(effectiveRole, "admin", StringComparison.OrdinalIgnoreCase))

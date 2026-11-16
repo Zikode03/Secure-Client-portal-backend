@@ -21,12 +21,14 @@ public class RolesController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.read")]
     public async Task<ActionResult<IEnumerable<object>>> GetAll()
     {
         return Ok(await _roles.GetAllAsync());
     }
 
     [HttpPost]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.create")]
     public async Task<IActionResult> Create([FromBody] CreateRoleRequest request)
     {
         try
@@ -46,6 +48,7 @@ public class RolesController : ControllerBase
     }
 
     [HttpPut("{name}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.update")]
     public async Task<IActionResult> Update(string name, [FromBody] UpdateRoleRequest request)
     {
         try
@@ -61,12 +64,14 @@ public class RolesController : ControllerBase
     }
 
     [HttpPost("{name}/activate")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.activate")]
     public async Task<IActionResult> Activate(string name)
     {
         return await UpdateActivationAsync(name, true);
     }
 
     [HttpPost("{name}/deactivate")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.deactivate")]
     public async Task<IActionResult> Deactivate(string name)
     {
         return await UpdateActivationAsync(name, false);

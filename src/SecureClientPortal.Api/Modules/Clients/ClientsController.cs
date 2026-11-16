@@ -19,6 +19,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.read")]
     public async Task<ActionResult<IEnumerable<Client>>> GetAll(CancellationToken ct)
     {
         var clients = await _clientService.GetAllAsync(User, ct);
@@ -26,6 +27,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.read")]
     public async Task<ActionResult<Client>> GetById(string id, CancellationToken ct)
     {
         var result = await _clientService.GetByIdAsync(id, User, ct);
@@ -44,6 +46,7 @@ public class ClientsController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.create")]
     public async Task<ActionResult<Client>> Create([FromBody] Client request, CancellationToken ct)
     {
         try
@@ -64,6 +67,7 @@ public class ClientsController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.update")]
     public async Task<ActionResult<Client>> Update(string id, [FromBody] Client request, CancellationToken ct)
     {
         var result = await _clientService.UpdateAsync(id, request, User, ct);
@@ -82,6 +86,7 @@ public class ClientsController : ControllerBase
 
     [HttpPut("{id}/status")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.status.update")]
     public async Task<ActionResult<Client>> UpdateStatus(string id, [FromBody] UpdateClientStatusRequest request, CancellationToken ct)
     {
         var result = await _clientService.UpdateStatusAsync(id, request, User, ct);
@@ -99,12 +104,14 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id}/profile")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.read")]
     public async Task<IActionResult> GetBusinessProfile(string id, CancellationToken ct)
     {
         return FromResult(await _clientService.GetBusinessProfileAsync(id, User, ct));
     }
 
     [HttpPut("{id}/profile")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.profile.update")]
     public async Task<IActionResult> UpdateBusinessProfile(string id, [FromBody] UpdateClientBusinessProfileRequest request, CancellationToken ct)
     {
         return FromResult(await _clientService.UpdateBusinessProfileAsync(id, request, User, ct));
@@ -112,6 +119,7 @@ public class ClientsController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "AdminOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("clients.delete")]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         var deleted = await _clientService.DeleteAsync(id, ct);

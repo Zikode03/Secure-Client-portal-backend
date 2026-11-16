@@ -248,7 +248,10 @@ builder.Services
                     ((user.Role is "admin" or "accountant" || mfa?.MfaSecret is not null) && !session.MfaVerified))
                 {
                     context.Fail("Session has expired.");
+                    return;
                 }
+                var currentPermissions = await PermissionResolution.ResolvePermissionsAsync(db, role, user.Role, context.HttpContext.RequestAborted);
+                CurrentAuthorizationClaims.Replace(principal!, user, role, currentPermissions);
             }
         };
     });

@@ -20,7 +20,7 @@ public sealed class CurrentUserContextFactory : ICurrentUserContextFactory
             ?? "client";
         var role = user.FindFirst(ClaimTypes.Role)?.Value?.Trim().ToLowerInvariant() ?? roleScope;
 
-        var effectivePermissions = explicitPermissions.Length > 0
+        var effectivePermissions = explicitPermissions.Length > 0 || user.HasClaim(RolePermissions.AuthoritativeClaimType, "true")
             ? explicitPermissions
             : RolePermissions.ForRole(roleScope).ToArray();
 

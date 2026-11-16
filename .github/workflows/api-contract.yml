@@ -14,6 +14,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - run: dotnet build src/SecureClientPortal.Api/SecureClientPortal.Api.csproj --configuration Release
+      - name: Audit backend dependencies
+        shell: bash
+        run: |
+          dotnet list src/SecureClientPortal.Api/SecureClientPortal.Api.csproj package --vulnerable --include-transitive --no-restore --format json > dependency-audit.json
+          python3 -c 'import json; r=json.load(open("dependency-audit.json")); findings=[v for p in r.get("projects",[]) for f in p.get("frameworks",[]) for k in ("topLevelPackages","transitivePackages") for pkg in f.get(k,[]) for v in pkg.get("vulnerabilities",[])]; print(findings); raise SystemExit(bool(findings) or bool(r.get("errors")))'
       - run: dotnet run --project tools/ContractMetadata/ContractMetadata.csproj --configuration Release -- . --check
       - run: dotnet src/SecureClientPortal.Api/bin/Release/net8.0/SecureClientPortal.Api.dll --export-openapi openapi/portal-api.json
       - run: git diff --exit-code -- openapi/portal-api.json

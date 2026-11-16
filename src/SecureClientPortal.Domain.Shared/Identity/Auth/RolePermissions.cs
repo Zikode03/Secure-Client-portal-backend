@@ -2,6 +2,14 @@ namespace SecureClientPortal.Backend.Auth;
 
 public static class RolePermissions
 {
+    public const string AuthoritativeClaimType = "permissions_authoritative";
+    public static IReadOnlyList<string> AddedOperationPermissions(string role) => role.Trim().ToLowerInvariant() switch
+    {
+        "admin" => ["documents.read", "documents.upload", "documents.update", "documents.review", "documents.delete", "clients.delete", "clients.profile.update", "assignments.update", "compliance.read", "requests.read", "requests.create", "requests.comment", "requests.update", "requests.delete", "reports.export", "settings.read", "settings.update", "templates.update", "deadlines.update"],
+        "accountant" => ["documents.read", "documents.upload", "documents.update", "documents.review", "documents.delete", "clients.status.update", "clients.profile.update", "compliance.read", "requests.read", "requests.create", "requests.comment", "requests.update", "reports.export"],
+        "client" => ["documents.read", "documents.upload", "clients.profile.update", "requests.read", "requests.create", "requests.comment", "reports.export"],
+        _ => []
+    };
     public sealed record DefaultRoleDefinition(string Name, string DisplayName, string Scope, string[] Permissions);
 
     private static readonly IReadOnlyDictionary<string, DefaultRoleDefinition> DefaultsByRole =
@@ -66,13 +74,13 @@ public static class RolePermissions
                 ])
         };
 
-    public static IReadOnlyCollection<DefaultRoleDefinition> DefaultRoles => DefaultsByRole.Values.ToArray();
+    public static IReadOnlyCollection<DefaultRoleDefinition> DefaultRoles => DefaultsByRole.Values.Select(x => x with { Permissions = ForRole(x.Name).ToArray() }).ToArray();
 
     public static IReadOnlyList<string> ForRole(string role)
     {
         if (DefaultsByRole.TryGetValue(role.Trim(), out var definition))
         {
-            return definition.Permissions;
+            return NormalizePermissions(definition.Permissions.Concat(AddedOperationPermissions(role)));
         }
 
         return [];

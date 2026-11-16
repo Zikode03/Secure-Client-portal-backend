@@ -9,6 +9,7 @@ namespace SecureClientPortal.Backend.Api.Modules.Clients;
 [ApiController]
 [Route("api/clients/onboarding")]
 [Authorize(Policy = "AdminOnly")]
+[SecureClientPortal.Backend.Api.Security.RequirePermission("clients.create")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class ClientOnboardingController(IClientOnboardingService service) : ControllerBase
 {

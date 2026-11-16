@@ -58,6 +58,7 @@ public class DocumentSlotsController : ControllerBase
     }
 
     [HttpPost("{slotId}/submit")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.upload")]
     public async Task<ActionResult<DocumentSlotResponse>> Submit(string slotId, CancellationToken ct)
     {
         var result = await _documentSlotService.SubmitAsync(slotId, User, ct);
@@ -87,6 +88,7 @@ public class DocumentSlotsController : ControllerBase
     }
 
     [HttpGet("{slotId}/versions")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetVersions(string slotId, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.GetVersionsAsync(slotId, User, HttpContext, ct)));
@@ -94,6 +96,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpGet("{slotId}/workspace")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetWorkspace(string slotId, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.GetWorkspaceAsync(slotId, User, HttpContext, ct)));
@@ -101,6 +104,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpPost("{slotId}/start-review")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> StartReview(string slotId, [FromBody] StartDocumentSlotReviewRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.StartReviewAsync(slotId, request, User, ct)));
@@ -108,6 +112,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpPost("{slotId}/approve")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> Approve(string slotId, [FromBody] ApproveDocumentSlotRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.ApproveAsync(slotId, request, User, ct)));
@@ -115,6 +120,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpPost("{slotId}/reject")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> Reject(string slotId, [FromBody] RejectDocumentSlotRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.RejectAsync(slotId, request, User, ct)));
@@ -122,6 +128,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpPost("{slotId}/request-reupload")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> RequestReupload(string slotId, [FromBody] RequestDocumentSlotReuploadRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentSlotService.RequestReuploadAsync(slotId, request, User, ct)));
@@ -129,6 +136,7 @@ public class DocumentSlotsController : ControllerBase
 
     [HttpPost("{slotId}/not-applicable")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<ActionResult<DocumentSlotResponse>> MarkNotApplicable(string slotId, CancellationToken ct)
     {
         var result = await _documentSlotService.MarkNotApplicableAsync(slotId, User, ct);

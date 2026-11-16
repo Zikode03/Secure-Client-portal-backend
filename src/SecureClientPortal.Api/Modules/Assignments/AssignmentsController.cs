@@ -21,6 +21,7 @@ public class AssignmentsController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.read")]
     public async Task<ActionResult<IEnumerable<object>>> GetAll([FromQuery] string? clientId = null)
     {
         var result = await _assignments.GetAllAsync(User, clientId);
@@ -29,6 +30,7 @@ public class AssignmentsController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "AdminOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.create")]
     public async Task<IActionResult> Create([FromBody] CreateAssignmentRequest request)
     {
         try
@@ -44,6 +46,7 @@ public class AssignmentsController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "AdminOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.delete")]
     public async Task<IActionResult> Delete(string id)
     {
         try
@@ -59,6 +62,7 @@ public class AssignmentsController : ControllerBase
 
     [HttpPost("reassign")]
     [Authorize(Policy = "AdminOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.update")]
     public async Task<IActionResult> Reassign([FromBody] ReassignAccountantRequest request)
     {
         try
@@ -73,6 +77,7 @@ public class AssignmentsController : ControllerBase
 
     [HttpPost("{id}/make-primary")]
     [Authorize(Policy = "AdminOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.update")]
     public async Task<IActionResult> MakePrimary(string id)
     {
         try

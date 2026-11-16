@@ -40,6 +40,7 @@ public sealed class ClientService : IClientService
 
     public async Task<(bool forbidden, Client created)> CreateAsync(Client request, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!user.HasPermission("clients.create")) return (true, null!);
         var actorId = user.GetUserId();
         var normalizedAssignedAccountantId = request.AssignedAccountantId;
 

@@ -18,6 +18,7 @@ public class AuditLogsController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("audit_logs.read")]
     public async Task<ActionResult<IEnumerable<AuditLog>>> GetAll([FromQuery] string? clientId = null, [FromQuery] int limit = 200, CancellationToken ct = default)
     {
         var result = await _auditLogService.GetAllAsync(User, clientId, limit, ct);

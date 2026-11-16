@@ -20,6 +20,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("users")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.read")]
     public async Task<IActionResult> GetUsers(CancellationToken ct)
     {
         return Ok(await _service.GetUsersAsync(ct));
@@ -32,12 +33,14 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("users/{id}/role")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
     public async Task<IActionResult> UpdateUserRole(string id, [FromBody] AdminUpdateRoleRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateUserRoleAsync(id, request, User, ct)));
     }
 
     [HttpPut("users/{id}/status")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
     public async Task<IActionResult> UpdateUserStatus(string id, [FromBody] AdminUpdateStatusRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateUserStatusAsync(id, request, User, ct)));
@@ -56,24 +59,28 @@ public class AdminController : ControllerBase
     }
 
     [HttpPost("users/{id}/reset-access")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
     public async Task<IActionResult> ResetUserAccess(string id, [FromBody] AdminResetAccessRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.ResetUserAccessAsync(id, request, User, ct)));
     }
 
     [HttpPost("users/{id}/reset-password")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
     public async Task<IActionResult> ResetPassword(string id, [FromBody] AdminResetPasswordRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.ResetPasswordAsync(id, request, User, ct)));
     }
 
     [HttpGet("settings/{key}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<IActionResult> GetSetting(string key, CancellationToken ct)
     {
         return Ok(await _service.GetSettingAsync(key, ct));
     }
 
     [HttpPut("settings/{key}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> PutSetting(string key, [FromBody] AdminSettingRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => Ok(await _service.PutSettingAsync(key, request, ct)));

@@ -573,6 +573,7 @@ public sealed partial class AuthService : IAuthService
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Role, user.Role),
             new("role_scope", scope),
+            new(RolePermissions.AuthoritativeClaimType, "true"),
         };
 
         foreach (var permission in permissions)

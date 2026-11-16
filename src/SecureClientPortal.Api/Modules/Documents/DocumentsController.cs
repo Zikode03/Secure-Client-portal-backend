@@ -19,12 +19,14 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
         return Ok(await _service.GetAllAsync(User, ct));
     }
 
     [HttpGet("filing-register")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetFilingRegister([FromQuery] string? clientId = null, CancellationToken ct = default)
     {
         return FromResult(await _service.GetFilingRegisterAsync(User, clientId, ct));
@@ -32,6 +34,7 @@ public class DocumentsController : ControllerBase
 
     [HttpGet("filing-rules")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetFilingRules(CancellationToken ct)
     {
         return Ok(await _service.GetFilingRulesAsync(ct));
@@ -39,6 +42,7 @@ public class DocumentsController : ControllerBase
 
     [HttpPut("filing-rules/{category}")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> UpdateFilingRule(string category, [FromBody] FilingRuleUpdateRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateFilingRuleAsync(category, request, ct)));
@@ -47,6 +51,7 @@ public class DocumentsController : ControllerBase
     [HttpPost("upload")]
     [RequestSizeLimit(100_100_000)]
     [SecureClientPortal.Backend.Api.Security.StreamingMultipart]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.upload")]
     public async Task<IActionResult> UploadStream(CancellationToken ct)
     {
         return await ExecuteAsync(async () => {
@@ -81,6 +86,7 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPost]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.upload")]
     public async Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>
@@ -96,12 +102,14 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetById(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.GetByIdAsync(id, User, HttpContext, ct)));
     }
 
     [HttpGet("{id}/versions")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetVersions(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.GetVersionsAsync(id, User, HttpContext, ct)));
@@ -109,6 +117,7 @@ public class DocumentsController : ControllerBase
 
     [HttpGet("{id}/download")]
     [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("document-download")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> Download(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>
@@ -125,6 +134,7 @@ public class DocumentsController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.update")]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateDocumentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateAsync(id, request, User, ct)));
@@ -132,6 +142,7 @@ public class DocumentsController : ControllerBase
 
     [HttpPut("{id}/status")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> UpdateStatus(string id, [FromBody] UpdateDocumentStatusRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateStatusAsync(id, request, User, ct)));
@@ -139,6 +150,7 @@ public class DocumentsController : ControllerBase
 
     [HttpPost("{id}/review")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> Review(string id, [FromBody] AddReviewDecisionRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.ReviewAsync(id, request, User, ct)));
@@ -146,18 +158,21 @@ public class DocumentsController : ControllerBase
 
     [HttpPost("{id}/request-reupload")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> RequestReupload(string id, [FromBody] RequestReuploadRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.RequestReuploadAsync(id, request, User, ct)));
     }
 
     [HttpPost("{id}/comments")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.upload")]
     public async Task<IActionResult> AddComment(string id, [FromBody] AddDocumentCommentRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.AddCommentAsync(id, request, User, ct)));
     }
 
     [HttpGet("{id}/comments")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.read")]
     public async Task<IActionResult> GetComments(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.GetCommentsAsync(id, User, ct)));
@@ -165,6 +180,7 @@ public class DocumentsController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "AccountantOnly")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.delete")]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () =>

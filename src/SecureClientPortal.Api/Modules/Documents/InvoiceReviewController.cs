@@ -19,6 +19,7 @@ public sealed class InvoiceReviewController(InvoiceReviewService service) : Cont
 
     [HttpPost("corrections")]
     [RequestSizeLimit(100_000)]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public Task<ActionResult<InvoiceReviewResponse>> Save(Guid documentId, SaveInvoiceReviewRequest request, CancellationToken ct) =>
         ExecuteAsync(() => service.SaveAsync(documentId, request, User, ct));
 

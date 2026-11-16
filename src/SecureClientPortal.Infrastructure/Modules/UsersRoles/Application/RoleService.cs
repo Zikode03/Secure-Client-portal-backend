@@ -78,7 +78,7 @@ public sealed class RoleService : IRoleService
 
         var normalizedScope = ValidateScope(request.Scope);
         var normalizedPermissions = RolePermissions.NormalizePermissions(
-            request.Permissions?.Length > 0 ? request.Permissions : RolePermissions.ForRole(normalizedScope));
+            request.Permissions ?? RolePermissions.ForRole(normalizedScope));
 
         var role = RoleDefinition.Create(
             roleName,
@@ -122,7 +122,7 @@ public sealed class RoleService : IRoleService
 
         var normalizedScope = ValidateScope(request.Scope);
         var normalizedPermissions = RolePermissions.NormalizePermissions(
-            request.Permissions?.Length > 0 ? request.Permissions : RolePermissions.ForRole(normalizedScope));
+            request.Permissions ?? RolePermissions.ParsePermissions(role.PermissionsJson));
 
         role.UpdateDefinition(
             string.IsNullOrWhiteSpace(request.DisplayName) ? role.DisplayName : request.DisplayName,
@@ -132,6 +132,7 @@ public sealed class RoleService : IRoleService
 
         await UpsertPermissionsAsync(normalizedPermissions, false, ct);
         await ReplaceRolePermissionsAsync(role.Name, normalizedPermissions, ct);
+        await RevokeRoleSessionsAsync(role.Name, "role_permissions_changed", ct);
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor.UserId,
@@ -162,6 +163,7 @@ public sealed class RoleService : IRoleService
         }
 
         role.SetActivation(isActive);
+        if (!isActive) await RevokeRoleSessionsAsync(role.Name, "role_deactivated", ct);
         await _db.SaveChangesAsync(ct);
         await _db.WriteAuditLogAsync(
             actor.UserId,
@@ -174,6 +176,13 @@ public sealed class RoleService : IRoleService
             ct);
 
         return new { role.Name, role.IsActive };
+    }
+
+    private async Task RevokeRoleSessionsAsync(string roleName, string reason, CancellationToken ct)
+    {
+        var ids = _db.Users.Where(x => x.Role == roleName).Select(x => x.Id);
+        var sessions = await _db.UserSessions.Where(x => ids.Contains(x.UserId) && x.RevokedAtUtc == null).ToListAsync(ct);
+        foreach (var session in sessions) session.Revoke(reason);
     }
 
     private static string ValidateScope(string scope)

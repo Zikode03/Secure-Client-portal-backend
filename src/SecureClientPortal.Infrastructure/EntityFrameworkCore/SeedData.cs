@@ -236,8 +236,13 @@ public static class SeedData
             }
             else
             {
-                // Administrators own existing role definitions and activation state.
-                continue;
+                var configured = RolePermissions.ParsePermissions(existing.PermissionsJson);
+                var legacyDefaults = normalizedPermissions.Except(RolePermissions.AddedOperationPermissions(defaultRole.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!existing.IsSystemRole || existing.Scope != defaultRole.Scope || !legacyDefaults.SetEquals(configured)) continue;
+                existing.UpdateDefinition(existing.DisplayName, existing.Scope, RolePermissions.SerializePermissions(normalizedPermissions), existing.IsSystemRole);
+                var ids = db.Users.Where(x => x.Role == existing.Name).Select(x => x.Id);
+                foreach (var session in await db.UserSessions.Where(x => ids.Contains(x.UserId) && x.RevokedAtUtc == null).ToListAsync())
+                    session.Revoke("permission_policy_updated");
             }
 
             await UpsertPermissionsAsync(db, normalizedPermissions, true);

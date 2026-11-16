@@ -38,6 +38,7 @@ public class ReviewQueueController : ControllerBase
     }
 
     [HttpPost("{documentId}/review")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     public async Task<IActionResult> Review(string documentId, [FromBody] AddReviewDecisionRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _documentWorkflowService.ReviewAsync(documentId, request, User, ct)));

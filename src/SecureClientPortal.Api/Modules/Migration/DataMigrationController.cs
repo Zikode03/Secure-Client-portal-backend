@@ -7,6 +7,8 @@ namespace SecureClientPortal.Backend.Api.Modules.Migration;
 
 [ApiController,Route("api/admin/migrations"),Authorize(Policy="AdminOnly")]
 [ResponseCache(NoStore=true,Location=ResponseCacheLocation.None)]
+[SecureClientPortal.Backend.Api.Security.RequirePermission("clients.create")]
+[SecureClientPortal.Backend.Api.Security.RequirePermission("documents.upload")]
 public sealed class DataMigrationController(DataMigrationService service):ControllerBase
 {
     [HttpGet] public async Task<ActionResult<MigrationSummary[]>> List(CancellationToken ct)=>Ok(await service.ListAsync(User,ct));

@@ -59,6 +59,7 @@ public class ReportsController : ControllerBase
     }
 
     [HttpGet("compliance.pdf")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("reports.export")]
     public async Task<IActionResult> DownloadCompliancePdf([FromQuery] string? clientId = null, CancellationToken ct = default)
     {
         var result = await _reportService.GenerateCompliancePdfAsync(User, clientId, ct);
@@ -73,6 +74,7 @@ public class ReportsController : ControllerBase
     }
 
     [HttpPost("schedules")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("reports.export")]
     public async Task<IActionResult> CreateSchedule([FromBody] CreateReportScheduleRequest request, CancellationToken ct)
     {
         var result = await _reportService.CreateScheduleAsync(request, User, ct);
@@ -81,12 +83,14 @@ public class ReportsController : ControllerBase
     }
 
     [HttpPut("schedules/{id:guid}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("reports.export")]
     public async Task<IActionResult> UpdateSchedule(Guid id, [FromBody] UpdateReportScheduleRequest request, CancellationToken ct)
     {
         return FromResult(await _reportService.UpdateScheduleAsync(id.ToString(), request, User, ct));
     }
 
     [HttpDelete("schedules/{id:guid}")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("reports.export")]
     public async Task<IActionResult> DeleteSchedule(Guid id, CancellationToken ct)
     {
         var result = await _reportService.DeleteScheduleAsync(id.ToString(), User, ct);
