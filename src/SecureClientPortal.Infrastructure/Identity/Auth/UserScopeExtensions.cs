@@ -69,15 +69,6 @@ public static class UserScopeExtensions
 
         if (user.IsClient())
         {
-            var claimClientIds = user.FindAll("client_id")
-                .Select(x => Guid.TryParse(x.Value, out var clientId) ? clientId : Guid.Empty)
-                .Where(x => x != Guid.Empty)
-                .ToHashSet();
-            if (claimClientIds.Count > 0)
-            {
-                return claimClientIds;
-            }
-
             var userRow = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, ct);
             if (userRow is null || string.IsNullOrWhiteSpace(userRow.ClientIdsJson))
             {

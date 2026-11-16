@@ -22,4 +22,12 @@ CI now checks dependency advisories alongside builds, contracts and tests. Front
 
 316 backend tests and 382 frontend tests passed locally. Negative tests cover denied read-only operations, empty permissions, no administrator wildcard, current-claim replacement, role edit/disable revocation, unrelated sessions, alternate review entry points, direct client-service denial and preservation of edited builtin roles. The updated isolated security reproductions also pass. Build and OpenAPI contract checks pass.
 
-The other review items, including complete backup/restore verification and deployment-specific security validation, are not closed by these changes.
+Deployment-specific security validation remains required. Recovery changes are documented below.
+
+## Current membership and complete recovery
+
+Client scope checks now read current database membership on every check, including direct service calls. Stale token membership never grants access. Regression tests cover removed membership, malformed membership and deleted users.
+
+The recovery tool creates an encrypted bundle containing a coordinated SQL backup, the complete document root, Data Protection key ring and required private-key certificates. Verification checks integrity and document decryption. Restore refuses existing databases/directories, runs DBCC CHECKDB and invalidates restored sessions/access tokens. See docs/full-recovery.md for offline operation, secret custody and deployment prerequisites.
+
+All 327 backend tests pass locally. CI additionally rehearses a real SQL restore and document decryption after deleting the generated source database/files. Production restore, backup scheduling and offsite retention remain operational responsibilities; deployment-specific validation is still required.

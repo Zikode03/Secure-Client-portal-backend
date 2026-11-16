@@ -29,3 +29,24 @@ jobs:
           name: backend-test-results
           path: TestResults/*.trx
           if-no-files-found: ignore
+      - name: Prepare isolated SQL recovery rehearsal
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          secret="$(openssl rand -hex 24)Aa1!"
+          echo "::add-mask::$secret"
+          echo "SQLCMDPASSWORD=$secret" >> "$GITHUB_ENV"
+          export MSSQL_SA_PASSWORD="$secret"
+          mkdir -p "$RUNNER_TEMP/portal-recovery-sql"
+          chmod 700 "$RUNNER_TEMP/portal-recovery-sql"
+          docker run -d --name portal-recovery-sql --user "$(id -u):0" -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e MSSQL_SA_PASSWORD -p 127.0.0.1:14433:1433 -v "$RUNNER_TEMP/portal-recovery-sql:/var/opt/mssql/backup" mcr.microsoft.com/mssql/server:2022-latest
+      - name: Prove full recovery from encrypted bundle
+        timeout-minutes: 5
+        shell: bash
+        run: dotnet run --project tools/PortalRecovery/PortalRecovery.csproj -c Release -- smoke --server localhost,14433 --user sa --trust-server-certificate --sql-staging /var/opt/mssql/backup --local-staging "$RUNNER_TEMP/portal-recovery-sql"
+      - name: Recovery SQL diagnostics
+        if: failure()
+        run: docker logs portal-recovery-sql 2>&1 | tail -60 || true
+      - name: Remove isolated recovery SQL server
+        if: always()
+        run: docker rm --force portal-recovery-sql || true

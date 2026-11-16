@@ -17,3 +17,10 @@
 **/App_Data/
 artifacts/
 .tmp/
+
+# Private recovery outputs and test results
+*.scpbak
+*.partial
+database/backups/
+TestResults/
+dependency-audit.json

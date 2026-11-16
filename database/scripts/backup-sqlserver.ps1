@@ -1,26 +1,26 @@
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Server,
-    [Parameter(Mandatory = $true)]
-    [string]$Database,
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)][string]$Server,
+    [Parameter(Mandatory)][string]$Database,
+    [Parameter(Mandatory)][string]$DocumentsPath,
+    [Parameter(Mandatory)][string]$KeyRingPath,
+    [Parameter(Mandatory)][string[]]$CertificateFiles,
+    [Parameter(Mandatory)][string]$SqlStagingPath,
+    [Parameter(Mandatory)][string]$LocalStagingPath,
+    [Parameter(Mandatory)][string]$OutputBundle,
+    [Parameter(Mandatory)][switch]$OfflineAcknowledged,
     [string]$User,
-    [Parameter(Mandatory = $true)]
-    [string]$Password,
-    [string]$BackupDirectory = ".\database\backups"
+    [switch]$TrustServerCertificate
 )
-
 $ErrorActionPreference = "Stop"
-
-if (-not (Test-Path $BackupDirectory)) {
-    New-Item -ItemType Directory -Path $BackupDirectory | Out-Null
-}
-
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$backupPath = Join-Path $BackupDirectory "$Database`_$timestamp.bak"
-
-$query = "BACKUP DATABASE [$Database] TO DISK = N'$backupPath' WITH INIT, COMPRESSION, STATS = 10;"
-
-sqlcmd -S $Server -U $User -P $Password -Q $query
-
-Write-Host "Backup complete: $backupPath"
+if (-not $OfflineAcknowledged) { throw "Stop every API instance and background worker before continuing." }
+$project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../../tools/PortalRecovery/PortalRecovery.csproj"))
+$recoveryArgs = @("backup", "--offline", "--server", $Server, "--database", $Database,
+    "--documents", $DocumentsPath, "--keys", $KeyRingPath,
+    "--sql-staging", $SqlStagingPath, "--local-staging", $LocalStagingPath, "--output", $OutputBundle)
+foreach ($certificate in $CertificateFiles) { $recoveryArgs += @("--certificate", $certificate) }
+if ($User) { $recoveryArgs += @("--user", $User) }
+if ($TrustServerCertificate) { $recoveryArgs += "--trust-server-certificate" }
+# Secrets are read from the environment by the tool, never placed on a command line.
+& dotnet run --project $project --configuration Release -- @recoveryArgs
+if ($LASTEXITCODE -ne 0) { throw "Full portal backup failed (exit $LASTEXITCODE). No successful backup is being reported." }

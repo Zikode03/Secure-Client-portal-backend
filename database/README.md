@@ -20,19 +20,9 @@ dotnet ef migrations add <MigrationName> --project backend/SecureClientPortal.Ba
 dotnet ef database update --project backend/SecureClientPortal.Backend
 ```
 
-## Backup / Restore (SQL Server)
+## Backup / Restore
 
-- Backup:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File database/scripts/backup-sqlserver.ps1 -Server "localhost,1433" -Database "SecureClientPortal_Dev" -User "sa" -Password "<password>"
-```
-
-- Restore:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File database/scripts/restore-sqlserver.ps1 -Server "localhost,1433" -Database "SecureClientPortal_Dev" -User "sa" -Password "<password>" -BackupFile "database/backups/SecureClientPortal_Dev_YYYYMMDD_HHMMSS.bak"
-```
+Use the complete encrypted recovery workflow in [docs/full-recovery.md](../docs/full-recovery.md). The scripts now coordinate the SQL database, document volume, key ring and private certificates. Passwords come from the secret environment, never command arguments. Restore refuses existing databases and non-empty/existing destinations.
 
 ## Filing Register Update
 

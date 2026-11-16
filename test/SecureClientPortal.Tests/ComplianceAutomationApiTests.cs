@@ -19,8 +19,9 @@ public sealed class ComplianceAutomationApiTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly Guid ClientId = Guid.NewGuid();
     private static readonly Guid ActorId = Guid.NewGuid();
+    private static readonly Guid ClientActorId = Guid.NewGuid();
     private static ClaimsPrincipal Actor(string role, Guid? clientId = null) => new(new ClaimsIdentity([
-        new Claim(ClaimTypes.NameIdentifier, ActorId.ToString()), new Claim(ClaimTypes.Role, role),
+        new Claim(ClaimTypes.NameIdentifier, (role == "client" ? (clientId.HasValue && clientId != ClientId ? Guid.NewGuid() : ClientActorId) : ActorId).ToString()), new Claim(ClaimTypes.Role, role),
         new Claim("client_id", (clientId ?? ClientId).ToString())
     ], "test"));
     private static PortalDbContext Database()
@@ -29,6 +30,7 @@ public sealed class ComplianceAutomationApiTests
         var client = Client.Create(ClientId, "Business", "Pty Ltd", "Contact", "client@example.test", ClientStatus.Active);
         client.AssignAccountant(ActorId);
         db.Clients.Add(client);
+        db.Users.Add(User.CreateInvited(ClientActorId,"Test client","client@example.invalid",UserRole.Client,"hash",JsonSerializer.Serialize(new[]{ClientId}),null));
         db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(), ActorId, ClientId));
         db.SaveChanges();
         return db;

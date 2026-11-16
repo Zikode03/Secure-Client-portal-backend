@@ -26,7 +26,7 @@ public class MonthlyPacksModuleTests
 
         var controller = new MonthlyPacksController(new MonthlyPackService(db))
         {
-            ControllerContext = BuildControllerContext(BuildUser(AccountantOneId, "accountant"))
+            ControllerContext = BuildControllerContext(BuildUser(db, AccountantOneId, "accountant"))
         };
 
         var createdResult = await controller.Create(
@@ -52,7 +52,7 @@ public class MonthlyPacksModuleTests
         await using var db = BuildDb();
         Seed(db);
         var clientUserId = Guid.NewGuid();
-        var clientUser = BuildUser(clientUserId, "client", [ClientAlphaId]);
+        var clientUser = BuildUser(db, clientUserId, "client", [ClientAlphaId]);
         var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 6);
         var bankStatement = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
         var salesInvoices = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "sales_invoices", "Sales Invoices", true, null);
@@ -101,7 +101,7 @@ public class MonthlyPacksModuleTests
     {
         await using var db = BuildDb();
         Seed(db);
-        var clientUser = BuildUser(Guid.NewGuid(), "client", [ClientAlphaId]);
+        var clientUser = BuildUser(db, Guid.NewGuid(), "client", [ClientAlphaId]);
         var pack = MonthlyPack.Create(Guid.NewGuid(), ClientAlphaId, 2026, 5);
         var bankStatement = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "bank_statement", "Bank Statement", true, null);
         var salesInvoices = DocumentSlot.Create(Guid.NewGuid(), pack.Id, ClientAlphaId, "sales_invoices", "Sales Invoices", true, null);
@@ -185,7 +185,7 @@ public class MonthlyPacksModuleTests
             DateTime.UtcNow));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
+        var controller = CreateDocumentSlotsController(db, BuildUser(db, AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var submitResult = await controller.Submit(bankStatementSlot.Id.ToString(), TestContext.Current.CancellationToken);
 
@@ -254,7 +254,7 @@ public class MonthlyPacksModuleTests
             null));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
+        var controller = CreateDocumentSlotsController(db, BuildUser(db, AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var result = await controller.GetByMonthlyPackId(pack.Id.ToString(), TestContext.Current.CancellationToken);
 
@@ -275,7 +275,7 @@ public class MonthlyPacksModuleTests
         db.DocumentSlots.AddRange(requiredSlot, optionalSlot);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), new InMemoryFileStorage());
+        var controller = CreateDocumentSlotsController(db, BuildUser(db, AccountantOneId, "accountant"), new InMemoryFileStorage());
 
         var result = await controller.MarkNotApplicable(optionalSlot.Id.ToString(), TestContext.Current.CancellationToken);
 
@@ -305,7 +305,7 @@ public class MonthlyPacksModuleTests
 
         var controller = new MonthlyPacksController(new MonthlyPackService(db))
         {
-            ControllerContext = BuildControllerContext(BuildUser(AccountantOneId, "accountant"))
+            ControllerContext = BuildControllerContext(BuildUser(db, AccountantOneId, "accountant"))
         };
 
         var result = await controller.Close(pack.Id.ToString(), TestContext.Current.CancellationToken);
@@ -377,7 +377,7 @@ public class MonthlyPacksModuleTests
         db.DocumentSlots.Add(slot);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var clientController = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), storage);
+        var clientController = CreateDocumentSlotsController(db, BuildUser(db, AccountantOneId, "accountant"), storage);
 
         var firstUpload = await clientController.Upload(
             slot.Id.ToString(),
@@ -431,7 +431,7 @@ public class MonthlyPacksModuleTests
         db.DocumentSlots.Add(slot);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var controller = CreateDocumentSlotsController(db, BuildUser(AccountantOneId, "accountant"), storage);
+        var controller = CreateDocumentSlotsController(db, BuildUser(db, AccountantOneId, "accountant"), storage);
 
         await controller.Upload(slot.Id.ToString(), new UploadDocumentSlotRequest { File = BuildFormFile("statement.pdf", "v1") }, TestContext.Current.CancellationToken);
         await controller.Submit(slot.Id.ToString(), TestContext.Current.CancellationToken);
@@ -470,8 +470,14 @@ public class MonthlyPacksModuleTests
         };
     }
 
-    private static ClaimsPrincipal BuildUser(Guid userId, string role, IEnumerable<Guid>? clientIds = null)
+    private static ClaimsPrincipal BuildUser(PortalDbContext db, Guid userId, string role, IEnumerable<Guid>? clientIds = null)
     {
+        if(role=="client") {
+            var row=db.Users.Find(userId);
+            if(row is null) { row=User.CreateInvited(userId,"Test client",userId+"@example.invalid",UserRole.Client,"hash","[]",null);db.Users.Add(row); }
+            row.SetClientIdsJson(System.Text.Json.JsonSerializer.Serialize(clientIds ?? []));db.SaveChanges();
+        }
+
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),

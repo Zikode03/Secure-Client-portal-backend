@@ -26,7 +26,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var clientUser = BuildUser(Guid.NewGuid(), "client", clientId);
+        var clientUser = BuildUser(db, Guid.NewGuid(), "client", clientId);
 
         var added = await service.AddItemAsync(
             clientId,
@@ -49,7 +49,7 @@ public class ClientMonthlyPackProfileTests
             beforeApproval.Value.RecurringItems,
             item => item.Label == "Fuel Card Statement");
 
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         var approved = await service.ApproveRecurringAsync(
             clientId,
             added.Value.RecurringRequestId!.Value,
@@ -83,7 +83,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var clientUser = BuildUser(Guid.NewGuid(), "client", clientId);
+        var clientUser = BuildUser(db, Guid.NewGuid(), "client", clientId);
 
         await service.AddItemAsync(
             clientId,
@@ -139,7 +139,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var profileService = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         await profileService.UpdateAsync(
             clientId,
             new UpdateClientMonthlyPackProfileRequest(
@@ -203,7 +203,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var profileService = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         await profileService.UpdateAsync(
             clientId,
             new UpdateClientMonthlyPackProfileRequest(transportTemplate.Id, []),
@@ -246,7 +246,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
             new UpdateClientMonthlyPackProfileRequest(
@@ -294,7 +294,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
             new UpdateClientMonthlyPackProfileRequest(
@@ -325,7 +325,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
             new UpdateClientMonthlyPackProfileRequest(
@@ -366,7 +366,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
 
         Assert.Equal(expected.Id, profile.Value!.RecommendedTemplateId);
@@ -387,7 +387,7 @@ public class ClientMonthlyPackProfileTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var admin = BuildUser(Guid.NewGuid(), "admin");
+        var admin = BuildUser(db, Guid.NewGuid(), "admin");
         var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
 
         Assert.Null(profile.Value!.RecommendedTemplateId);
@@ -433,8 +433,14 @@ public class ClientMonthlyPackProfileTests
         return client;
     }
 
-    private static ClaimsPrincipal BuildUser(Guid userId, string role, Guid? clientId = null)
+    private static ClaimsPrincipal BuildUser(PortalDbContext db, Guid userId, string role, Guid? clientId = null)
     {
+        if(role=="client") {
+            var row=db.Users.Find(userId);
+            if(row is null) { row=User.CreateInvited(userId,"Test client",userId+"@example.invalid",UserRole.Client,"hash","[]",null);db.Users.Add(row); }
+            row.SetClientIdsJson(System.Text.Json.JsonSerializer.Serialize(new[]{clientId}));db.SaveChanges();
+        }
+
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, userId.ToString()),
@@ -460,7 +466,7 @@ public class ClientMonthlyPackProfileTests
         var pack = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 8); db.MonthlyPacks.Add(pack);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
-        var actor = BuildUser(Guid.NewGuid(), "client", clientId);
+        var actor = BuildUser(db, Guid.NewGuid(), "client", clientId);
         var result = await service.AddItemAsync(clientId, new(null, "Fuel card statement", false, recurrence, null), actor, TestContext.Current.CancellationToken);
         Assert.Null(result.Error); Assert.NotNull(result.Value);
         var slot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
@@ -473,7 +479,7 @@ public class ClientMonthlyPackProfileTests
     {
         await using var db = BuildDb(); var clientId=Guid.NewGuid(); db.Clients.Add(BuildClient(clientId));
         db.MonthlyPacks.Add(MonthlyPack.Create(Guid.NewGuid(),clientId,2026,8)); await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var service=new ClientMonthlyPackProfileService(db,timeProvider:new FixedProfileTimeProvider()); var actor=BuildUser(Guid.NewGuid(),"client",clientId);
+        var service=new ClientMonthlyPackProfileService(db,timeProvider:new FixedProfileTimeProvider()); var actor=BuildUser(db, Guid.NewGuid(),"client",clientId);
         var invalid=await service.AddItemAsync(clientId,new(null," ",false,"this_month",null),actor,TestContext.Current.CancellationToken);
         Assert.NotNull(invalid.Error); Assert.Empty(db.DocumentSlots);
         var result=await service.AddItemAsync(clientId,new(null,new string('a',180),false,"this_month",null),actor,TestContext.Current.CancellationToken);

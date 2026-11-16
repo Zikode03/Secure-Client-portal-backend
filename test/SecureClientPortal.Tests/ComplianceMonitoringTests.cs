@@ -11,12 +11,13 @@ public sealed class ComplianceMonitoringTests
 {
     private static readonly Guid BusinessId = Guid.Parse("b1000000-0000-0000-0000-000000000010");
     private static readonly Guid StaffId = Guid.Parse("a1000000-0000-0000-0000-000000000010");
+    private static readonly Guid ClientActorId = Guid.NewGuid();
     private static readonly string[] Codes = ["cipc_registration", "cipc_annual_returns", "cipc_beneficial_ownership", "sars_tcs", "csd_registration"];
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static ClaimsPrincipal Actor(string role, Guid? businessId = null, Guid? actorId = null)
     {
-        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, (actorId ?? StaffId).ToString()), new(ClaimTypes.Role, role) };
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, (actorId ?? (role == "client" ? (businessId.HasValue && businessId != BusinessId ? Guid.NewGuid() : ClientActorId) : StaffId)).ToString()), new(ClaimTypes.Role, role) };
         if (businessId.HasValue) claims.Add(new("client_id", businessId.Value.ToString()));
         return new(new ClaimsIdentity(claims, "test"));
     }
@@ -29,6 +30,7 @@ public sealed class ComplianceMonitoringTests
         db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(), StaffId, BusinessId));
         var staff = User.CreateInvited(StaffId, "Accountant", "staff@example.test", UserRole.Accountant, "hash", "[]", null);
         staff.CompleteSetup("Accountant", "hash"); db.Users.Add(staff);
+        db.Users.Add(User.CreateInvited(ClientActorId,"Test client","client@example.invalid",UserRole.Client,"hash",System.Text.Json.JsonSerializer.Serialize(new[]{BusinessId}),null));
         db.SaveChanges();
         return db;
     }
