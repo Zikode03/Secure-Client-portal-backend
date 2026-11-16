@@ -38,8 +38,10 @@ jobs:
           echo "SQLCMDPASSWORD=$secret" >> "$GITHUB_ENV"
           export MSSQL_SA_PASSWORD="$secret"
           mkdir -p "$RUNNER_TEMP/portal-recovery-sql"
+          command -v setfacl >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y acl; }
           chmod 700 "$RUNNER_TEMP/portal-recovery-sql"
-          docker run -d --name portal-recovery-sql --user "$(id -u):0" -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e MSSQL_SA_PASSWORD -p 127.0.0.1:14433:1433 -v "$RUNNER_TEMP/portal-recovery-sql:/var/opt/mssql/backup" mcr.microsoft.com/mssql/server:2022-latest
+          setfacl -m "u:10001:rwx,d:u:10001:rwx,d:u:$(id -u):rwx,d:u::rwx,d:g::---,d:o::---" "$RUNNER_TEMP/portal-recovery-sql"
+          docker run -d --name portal-recovery-sql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e MSSQL_SA_PASSWORD -p 127.0.0.1:14433:1433 -v "$RUNNER_TEMP/portal-recovery-sql:/var/opt/mssql/backup" mcr.microsoft.com/mssql/server:2022-latest
       - name: Prove full recovery from encrypted bundle
         timeout-minutes: 5
         shell: bash
