@@ -11,7 +11,7 @@ using System.Text.Json;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.UsersRoles.Application;
 
-public sealed class AdminService : IAdminService
+public sealed partial class AdminService : IAdminService
 {
     private readonly PortalDbContext _db;
     private readonly IAccessEmailSender _accessEmailSender;
@@ -124,6 +124,7 @@ public sealed class AdminService : IAdminService
 
     public async Task<ServiceResult<object>> UpdateUserRoleAsync(string id, AdminUpdateRoleRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
         IdentityValidators.ValidateAdminUpdateRole(request);
 
         if (!Guid.TryParse(id, out var userId))
@@ -150,6 +151,8 @@ public sealed class AdminService : IAdminService
             return ServiceResult<object>.Success(new { user.Id, user.Role });
         }
 
+        if (user.Role == "admin" && roleName != "admin" && !await HasOtherActiveAdminAsync(user.Id, ct))
+            return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator before changing this role.");
         user.AssignRole(IdentityDomainValues.ToUserRole(roleName));
         var activeSessions = await _db.UserSessions
             .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
@@ -174,6 +177,7 @@ public sealed class AdminService : IAdminService
 
     public async Task<ServiceResult<object>> UpdateUserStatusAsync(string id, AdminUpdateStatusRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
         IdentityValidators.ValidateAdminUpdateStatus(request);
 
         if (!Guid.TryParse(id, out var userId))
@@ -188,6 +192,8 @@ public sealed class AdminService : IAdminService
         }
 
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+        if (user.Role == "admin" && normalizedStatus != "active" && !await HasOtherActiveAdminAsync(user.Id, ct))
+            return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator before disabling this account.");
         user.SetSecurityStatus(IdentityDomainValues.ToSecurityStatus(normalizedStatus));
 
         if (normalizedStatus is "disabled" or "locked")
@@ -302,6 +308,12 @@ public sealed class AdminService : IAdminService
             string.IsNullOrWhiteSpace(request.Reason) ? "admin_password_reset" : request.Reason), actor, ct);
     }
 
+    private async Task<bool> HasOtherActiveAdminAsync(Guid except, CancellationToken ct)
+    {
+        var candidates = await _db.Users.Where(x => x.Role == "admin" && x.Id != except).Select(x => x.SecurityJson).ToListAsync(ct);
+        return candidates.Any(json => UserSecurityProfile.GetStatus(json) == "active");
+    }
+
     public async Task<object> GetSettingAsync(string key, CancellationToken ct = default)
     {
         var item = await _db.SystemSettings.FindAsync([key], ct);
@@ -310,9 +322,12 @@ public sealed class AdminService : IAdminService
             : new { key = item.Key, valueJson = item.ValueJson };
     }
 
-    public async Task<object> PutSettingAsync(string key, AdminSettingRequest request, CancellationToken ct = default)
+    public async Task<object> PutSettingAsync(string key, AdminSettingRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
         IdentityValidators.ValidateAdminSetting(request);
+        if (!actor.HasPermission("settings.update")) throw new AppValidationException("Settings update permission is required.");
+        if (key.StartsWith("operations.", StringComparison.OrdinalIgnoreCase)) throw new AppValidationException("Operational results are read-only.");
+        if (key == "firm.profile") FirmBranding.Validate(request.ValueJson);
 
         var item = await _db.SystemSettings.FindAsync([key], ct);
         if (item is null)
@@ -326,6 +341,7 @@ public sealed class AdminService : IAdminService
         }
 
         await _db.SaveChangesAsync(ct);
+        await _db.WriteAuditLogAsync(actor, "settings.updated", "system_setting", new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key))[..16]), null, JsonSerializer.Serialize(new { key }), ct);
         return new { key = item.Key, valueJson = item.ValueJson };
     }
 }

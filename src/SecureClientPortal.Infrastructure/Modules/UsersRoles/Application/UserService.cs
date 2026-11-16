@@ -155,6 +155,7 @@ public sealed class UserService : IUserService
 
     public async Task<ServiceResult<object>> UpdateActivationAsync(string id, UpdateUserActivationRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default)
     {
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
         IdentityValidators.ValidateUpdateUserActivation(request);
 
         if (!Guid.TryParse(id, out var userId))
@@ -168,6 +169,11 @@ public sealed class UserService : IUserService
             return ServiceResult<object>.NotFoundResult();
         }
 
+        if (!request.IsActive && user.Role == "admin")
+        {
+            var otherAdmins = await _db.Users.Where(x => x.Role == "admin" && x.Id != user.Id).Select(x => x.SecurityJson).ToListAsync(ct);
+            if (!otherAdmins.Any(json => UserSecurityProfile.GetStatus(json) == "active")) return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator.");
+        }
         user.SetSecurityStatus(request.IsActive ? SecurityStatus.Active : SecurityStatus.Disabled, request.Reason);
 
         if (!request.IsActive)

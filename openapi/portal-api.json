@@ -107,6 +107,22 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "firmName": {
+            "type": "string"
+          },
+          "logoDataUrl": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "firmName"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.CreateAssignmentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2846,6 +2862,93 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accessEmailEnabled": {
+            "type": "boolean"
+          },
+          "automationEnabled": {
+            "type": "boolean"
+          },
+          "automationLastRun": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+          },
+          "checkedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deploymentMode": {
+            "type": "string"
+          },
+          "emailFailed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "emailPending": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lastBackup": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+          },
+          "lastRestore": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+          },
+          "missingDocuments": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "notificationEmailEnabled": {
+            "type": "boolean"
+          },
+          "overdueDocuments": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "overdueRequests": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "packsClosed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "packsUnderReview": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "storageAvailable": {
+            "type": "boolean"
+          },
+          "storageBytes": {
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "storageQuotaBytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accessEmailEnabled",
+          "automationEnabled",
+          "checkedAtUtc",
+          "deploymentMode",
+          "emailFailed",
+          "emailPending",
+          "missingDocuments",
+          "notificationEmailEnabled",
+          "overdueDocuments",
+          "overdueRequests",
+          "packsClosed",
+          "packsUnderReview",
+          "storageAvailable",
+          "storageQuotaBytes"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminResetAccessRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2968,6 +3071,26 @@
           "email",
           "fullName",
           "role"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "atUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "atUtc",
+          "status"
         ],
         "type": "object"
       },
@@ -4572,6 +4695,17 @@
         ],
         "type": "object"
       },
+      "Source.Anonymous_663DA7957586995E": {
+        "properties": {
+          "revokedSessions": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revokedSessions"
+        ],
+        "type": "object"
+      },
       "Source.Anonymous_6936B768DF90D6B3": {
         "properties": {
           "complianceScore": {
@@ -5323,6 +5457,32 @@
         ],
         "type": "object"
       },
+      "Source.Anonymous_B9BF36DE1611F5FA": {
+        "properties": {
+          "delivery": {
+            "type": "string"
+          },
+          "deliveryError": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expiresAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery",
+          "deliveryError",
+          "expiresAtUtc",
+          "id"
+        ],
+        "type": "object"
+      },
       "Source.Anonymous_B9D995E5CB0B554E": {
         "properties": {
           "accountants": {
@@ -5903,6 +6063,22 @@
         },
         "required": [
           "requestToken"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse": {
+        "properties": {
+          "firmName": {
+            "type": "string"
+          },
+          "logoDataUrl": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "firmName",
+          "logoDataUrl"
         ],
         "type": "object"
       },
@@ -8787,6 +8963,122 @@
         ],
         "type": "object"
       },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse": {
+        "properties": {
+          "accessEmailEnabled": {
+            "type": "boolean"
+          },
+          "automationEnabled": {
+            "type": "boolean"
+          },
+          "automationLastRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+              }
+            ],
+            "nullable": true
+          },
+          "checkedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deploymentMode": {
+            "type": "string"
+          },
+          "emailFailed": {
+            "type": "integer"
+          },
+          "emailPending": {
+            "type": "integer"
+          },
+          "lastBackup": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+              }
+            ],
+            "nullable": true
+          },
+          "lastRestore": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult"
+              }
+            ],
+            "nullable": true
+          },
+          "missingDocuments": {
+            "type": "integer"
+          },
+          "notificationEmailEnabled": {
+            "type": "boolean"
+          },
+          "overdueDocuments": {
+            "type": "integer"
+          },
+          "overdueRequests": {
+            "type": "integer"
+          },
+          "packsClosed": {
+            "type": "integer"
+          },
+          "packsUnderReview": {
+            "type": "integer"
+          },
+          "storageAvailable": {
+            "type": "boolean"
+          },
+          "storageBytes": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "storageQuotaBytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accessEmailEnabled",
+          "automationEnabled",
+          "automationLastRun",
+          "checkedAtUtc",
+          "deploymentMode",
+          "emailFailed",
+          "emailPending",
+          "lastBackup",
+          "lastRestore",
+          "missingDocuments",
+          "notificationEmailEnabled",
+          "overdueDocuments",
+          "overdueRequests",
+          "packsClosed",
+          "packsUnderReview",
+          "storageAvailable",
+          "storageBytes",
+          "storageQuotaBytes"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult": {
+        "properties": {
+          "atUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "atUtc",
+          "status",
+          "verified"
+        ],
+        "type": "object"
+      },
       "Source.SecureClientPortal.Backend.Application.Modules.Banking.BankAccountDto": {
         "properties": {
           "accountName": {
@@ -11635,6 +11927,47 @@
         ]
       }
     },
+    "/api/admin/operations": {
+      "get": {
+        "operationId": "AdminOperations_Get_GET_api_admin_operations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "AdminOperations"
+        ]
+      }
+    },
     "/api/admin/settings/{key}": {
       "get": {
         "operationId": "Admin_GetSetting_GET_api_admin_settings_key",
@@ -12017,6 +12350,48 @@
         ]
       }
     },
+    "/api/admin/users/{id}/resend-invitation": {
+      "post": {
+        "operationId": "Admin_ResendInvitation_POST_api_admin_users_id_resend_invitation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source.Anonymous_B9BF36DE1611F5FA"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
     "/api/admin/users/{id}/reset-access": {
       "post": {
         "operationId": "Admin_ResetUserAccess_POST_api_admin_users_id_reset_access",
@@ -12118,6 +12493,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Source.Anonymous_396FBB4D6D8C23E7"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/revoke-sessions": {
+      "post": {
+        "operationId": "Admin_RevokeSessions_POST_api_admin_users_id_revoke_sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source.Anonymous_663DA7957586995E"
                 }
               }
             },
@@ -17428,6 +17845,47 @@
         ],
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/firm-branding": {
+      "get": {
+        "operationId": "FirmBranding_Get_GET_api_firm_branding",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "FirmBranding"
         ]
       }
     },

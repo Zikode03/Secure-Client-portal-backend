@@ -278,7 +278,7 @@ public sealed class MonthlyPackService : IMonthlyPackService
             return (true, false, null, null);
         }
 
-        if (!user.IsAdmin() && !user.IsAccountant())
+        if (!user.HasPermission("documents.review"))
         {
             return (true, false, null, null);
         }

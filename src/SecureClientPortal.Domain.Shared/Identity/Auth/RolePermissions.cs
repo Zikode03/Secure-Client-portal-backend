@@ -5,7 +5,7 @@ public static class RolePermissions
     public const string AuthoritativeClaimType = "permissions_authoritative";
     public static IReadOnlyList<string> AddedOperationPermissions(string role) => role.Trim().ToLowerInvariant() switch
     {
-        "admin" => ["documents.read", "documents.upload", "documents.update", "documents.review", "documents.delete", "clients.delete", "clients.profile.update", "assignments.update", "compliance.read", "requests.read", "requests.create", "requests.comment", "requests.update", "requests.delete", "reports.export", "settings.read", "settings.update", "templates.update", "deadlines.update"],
+        "admin" => ["documents.read", "documents.upload", "documents.update", "documents.delete", "clients.delete", "clients.profile.update", "assignments.update", "compliance.read", "requests.read", "requests.create", "requests.comment", "requests.update", "requests.delete", "reports.export", "settings.read", "settings.update", "templates.update", "deadlines.update"],
         "accountant" => ["documents.read", "documents.upload", "documents.update", "documents.review", "documents.delete", "clients.status.update", "clients.profile.update", "compliance.read", "requests.read", "requests.create", "requests.comment", "requests.update", "reports.export"],
         "client" => ["documents.read", "documents.upload", "clients.profile.update", "requests.read", "requests.create", "requests.comment", "reports.export"],
         _ => []
@@ -21,8 +21,6 @@ public static class RolePermissions
                 "admin",
                 [
                     "access.admin",
-                    "access.accountant",
-                    "access.client",
                     "auth.login",
                     "auth.logout",
                     "auth.me",

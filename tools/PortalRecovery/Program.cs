@@ -61,7 +61,13 @@ try
         }
         else throw new ArgumentException("Unknown recovery command.");
     }
+    catch
+    {
+        try { await sql.RecordRecoveryAsync(db, command, ct, "failed"); } catch { /* Do not hide the original recovery error. */ }
+        throw;
+    }
     finally {if(File.Exists(localFile))File.Delete(localFile);}
+    await sql.RecordRecoveryAsync(db, command, ct);
     Console.WriteLine(completion);
     return 0;
 }
@@ -111,6 +117,12 @@ public sealed class RecoverySql
         // No WITH REPLACE and no switching an existing database into single-user mode.
         await ExecuteAsync($"RESTORE DATABASE {Identifier(db)} FROM DISK={Literal(file)} WITH {string.Join(",",moves)},CHECKSUM,RECOVERY; DBCC CHECKDB ({Identifier(db)}) WITH NO_INFOMSGS,ALL_ERRORMSGS;",ct);
         await ExecuteAsync($"USE {Identifier(db)}; IF OBJECT_ID('dbo.AppUserSessions') IS NOT NULL UPDATE dbo.AppUserSessions SET RevokedAtUtc=SYSUTCDATETIME(),RevokedReason='disaster_recovery' WHERE RevokedAtUtc IS NULL; IF OBJECT_ID('dbo.AppUserAccessTokens') IS NOT NULL UPDATE dbo.AppUserAccessTokens SET ConsumedAtUtc=SYSUTCDATETIME() WHERE ConsumedAtUtc IS NULL;",ct);
+    }
+    public async Task RecordRecoveryAsync(string db, string kind, CancellationToken ct, string status = "succeeded")
+    {
+        var key = "operations." + kind;
+        var json = JsonSerializer.Serialize(new { status, atUtc = DateTime.UtcNow, verified = status == "succeeded" });
+        await ExecuteAsync($"USE {Identifier(db)}; IF OBJECT_ID('dbo.AppSystemSettings') IS NOT NULL BEGIN UPDATE dbo.AppSystemSettings SET ValueJson={Literal(json)},UpdatedAtUtc=SYSUTCDATETIME() WHERE [Key]={Literal(key)}; IF @@ROWCOUNT=0 INSERT dbo.AppSystemSettings([Key],ValueJson,UpdatedAtUtc) VALUES({Literal(key)},{Literal(json)},SYSUTCDATETIME()); END", ct);
     }
     public async Task CheckReferencesAsync(string db,string documents,CancellationToken ct)
     {

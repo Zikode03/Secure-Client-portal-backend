@@ -1,0 +1,3 @@
+namespace SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles;
+public sealed record OperationResult(string Status, DateTime AtUtc, bool Verified = false);
+public sealed record AdminOperationsResponse(DateTime CheckedAtUtc, string DeploymentMode, int MissingDocuments, int OverdueDocuments, int OverdueRequests, int PacksUnderReview, int PacksClosed, int EmailPending, int EmailFailed, bool AccessEmailEnabled, bool NotificationEmailEnabled, bool StorageAvailable, long? StorageBytes, long StorageQuotaBytes, bool AutomationEnabled, OperationResult? AutomationLastRun, OperationResult? LastBackup, OperationResult? LastRestore);

@@ -14,6 +14,10 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Platform;
 
 public sealed class AutomationWorkflowService : IAutomationWorkflowService
 {
+    public static string RenderReminder(string template, string item, DateTime dueDate) => template
+        .Replace("{item}", item, StringComparison.OrdinalIgnoreCase)
+        .Replace("{dueDate}", dueDate.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
+
     private const string SystemActorRole = "system";
     private const string EscalationRulesKey = "firm.escalation_rules";
 
@@ -353,7 +357,7 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
                     rule.AudienceRole,
                     "monthly_pack.deadline_approaching",
                     "Monthly pack due soon",
-                    $"Monthly pack {pack.Year:D4}-{pack.Month:D2} is due on {dueDate:yyyy-MM-dd}.",
+                    RenderReminder(rule.MessageTemplate, $"Monthly pack {pack.Year:D4}-{pack.Month:D2}", dueDate),
                     $"/monthly-packs/{pack.Id}",
                     new { monthlyPackId = pack.Id, reminderRuleId = rule.Id, dueDate },
                     now,
@@ -488,7 +492,7 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
                         clientId: item.ClientId,
                         type: "compliance.deadline_approaching",
                         title: "Compliance deadline approaching",
-                        message: $"{item.Name} has a compliance deadline on {deadline.Value:yyyy-MM-dd}.",
+                        message: RenderReminder(rule.MessageTemplate, item.Name, deadline.Value),
                         linkUrl: $"/client/compliance/{item.Id}",
                         metadata: new { complianceItemId = item.Id, reminderRuleId = rule.Id, deadline = deadline.Value, reminder.Id },
                         ct: ct);

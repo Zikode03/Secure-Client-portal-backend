@@ -12,5 +12,7 @@ public interface IAdminService
     Task<ServiceResult<object>> ResetUserAccessAsync(string id, AdminResetAccessRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
     Task<ServiceResult<object>> ResetPasswordAsync(string id, AdminResetPasswordRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
     Task<object> GetSettingAsync(string key, CancellationToken ct = default);
-    Task<object> PutSettingAsync(string key, AdminSettingRequest request, CancellationToken ct = default);
+    Task<object> PutSettingAsync(string key, AdminSettingRequest request, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> ResendInvitationAsync(string id, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
+    Task<ServiceResult<object>> RevokeSessionsAsync(string id, System.Security.Claims.ClaimsPrincipal actor, CancellationToken ct = default);
 }

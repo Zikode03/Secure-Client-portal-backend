@@ -9,6 +9,7 @@ namespace SecureClientPortal.Backend.Api.Modules.Auth;
 
 [ApiController, Route("api/admin/smtp-verification"), Authorize(Policy = "AdminOnly")]
 [EnableRateLimiting("auth-account")]
+[SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
 public sealed class SmtpVerificationController(PortalDbContext db, AccessEmailSender sender, Microsoft.Extensions.Options.IOptions<AccessEmailOptions> options) : ControllerBase
 {
     [HttpGet]

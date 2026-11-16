@@ -17,6 +17,7 @@ public class AutomationController : ControllerBase
     }
 
     [HttpPost("run")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> Run(CancellationToken ct)
     {
         return Ok(await _automationWorkflowService.RunAsync(null, ct));

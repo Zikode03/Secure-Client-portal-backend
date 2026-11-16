@@ -27,10 +27,21 @@ public class AdminController : ControllerBase
     }
 
     [HttpPost("users")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.create")]
     public async Task<IActionResult> CreateUser([FromBody] AdminCreateUserRequest request, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.CreateUserAsync(request, User, ct)));
     }
+
+    [HttpPost("users/{id}/resend-invitation")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.create")]
+    public Task<IActionResult> ResendInvitation(string id, CancellationToken ct) =>
+        ExecuteAsync(async () => FromResult(await _service.ResendInvitationAsync(id, User, ct)));
+
+    [HttpPost("users/{id}/revoke-sessions")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
+    public Task<IActionResult> RevokeSessions(string id, CancellationToken ct) =>
+        ExecuteAsync(async () => FromResult(await _service.RevokeSessionsAsync(id, User, ct)));
 
     [HttpPut("users/{id}/role")]
     [SecureClientPortal.Backend.Api.Security.RequirePermission("users.update")]
@@ -47,12 +58,14 @@ public class AdminController : ControllerBase
     }
 
     [HttpPost("users/{id}/disable")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.deactivate")]
     public async Task<IActionResult> DisableUser(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateUserStatusAsync(id, new AdminUpdateStatusRequest("disabled"), User, ct)));
     }
 
     [HttpPost("users/{id}/enable")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("users.activate")]
     public async Task<IActionResult> EnableUser(string id, CancellationToken ct)
     {
         return await ExecuteAsync(async () => FromResult(await _service.UpdateUserStatusAsync(id, new AdminUpdateStatusRequest("active"), User, ct)));
@@ -83,7 +96,7 @@ public class AdminController : ControllerBase
     [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> PutSetting(string key, [FromBody] AdminSettingRequest request, CancellationToken ct)
     {
-        return await ExecuteAsync(async () => Ok(await _service.PutSettingAsync(key, request, ct)));
+        return await ExecuteAsync(async () => Ok(await _service.PutSettingAsync(key, request, User, ct)));
     }
 
     private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> action)

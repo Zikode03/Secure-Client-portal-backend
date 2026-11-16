@@ -36,10 +36,11 @@ public static class RecoverySmoke
             var proof=Encoding.UTF8.GetBytes("%PDF-1.7\nRecovery proof "+suffix+"\n%%EOF");
             var upload=new FormFile(new MemoryStream(proof),0,proof.Length,"file","proof.pdf"){Headers=new HeaderDictionary(),ContentType="application/pdf"};
             var saved=await storage.SaveAsync(upload,Guid.NewGuid().ToString(),ct);
-            await sql.ExecuteAsync($"USE {RecoverySql.Identifier(source)}; CREATE TABLE AppDocuments(StorageKey nvarchar(1000)); INSERT AppDocuments VALUES(N'{saved.StorageKey.Replace("'","''")}'); CREATE TABLE AppUserSessions(RevokedAtUtc datetime2 NULL,RevokedReason nvarchar(100));INSERT AppUserSessions VALUES(NULL,NULL);CREATE TABLE AppUserAccessTokens(ConsumedAtUtc datetime2 NULL);INSERT AppUserAccessTokens VALUES(NULL);",ct);
+            await sql.ExecuteAsync($"USE {RecoverySql.Identifier(source)}; CREATE TABLE AppDocuments(StorageKey nvarchar(1000)); INSERT AppDocuments VALUES(N'{saved.StorageKey.Replace("'","''")}'); CREATE TABLE AppSystemSettings([Key] nvarchar(120) PRIMARY KEY,ValueJson nvarchar(max),UpdatedAtUtc datetime2); CREATE TABLE AppUserSessions(RevokedAtUtc datetime2 NULL,RevokedReason nvarchar(100));INSERT AppUserSessions VALUES(NULL,NULL);CREATE TABLE AppUserAccessTokens(ConsumedAtUtc datetime2 NULL);INSERT AppUserAccessTokens VALUES(NULL);",ct);
             await sql.BackupAsync(source,serverFile,ct);
             var passphrase=Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));var bundle=Path.Combine(owned,"backup.scpbak");
             await RecoveryBundle.CreateAsync(bundle,source,localFile,docs,keys,[certFile],passphrase,[certPassword],ct);
+            await sql.RecordRecoveryAsync(source,"backup",ct);
             // Original source data is deliberately removed; recovery must work from the bundle alone.
             await sql.ExecuteAsync($"DROP DATABASE {RecoverySql.Identifier(source)}",ct);sourceCreated=false;
             Directory.Delete(data,true);File.Delete(localFile);
@@ -48,12 +49,13 @@ public static class RecoverySmoke
             File.Copy(Path.Combine(destination,"Database","database.bak"),localFile,false);
             targetCreated=true;await sql.RestoreAsync(target,serverFile,ct);
             await sql.CheckReferencesAsync(target,Path.Combine(destination,"Documents"),ct);
+            await sql.RecordRecoveryAsync(target,"restore",ct);
             using var restoredCert=new X509Certificate2(Path.Combine(destination,"Certificates","0.pfx"),certPassword,X509KeyStorageFlags.EphemeralKeySet);
             var restoredProvider=DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(destination,"KeyRing")),builder=>builder.SetApplicationName("SecureClientPortal").DisableAutomaticKeyGeneration().UnprotectKeysWithAnyCertificate(restoredCert));
             var restoredStorage=new LocalFileStorage(Options.Create(new StorageOptions {RootPath=Path.Combine(destination,"Documents")}),restoredProvider,new FileSecurityScanner());
             var content=await restoredStorage.OpenReadAsync(saved.StorageKey,ct)??throw new InvalidDataException("Missing recovered document.");
             await using(content.Stream) {using var bytes=new MemoryStream();await content.Stream.CopyToAsync(bytes,ct);if(!bytes.ToArray().SequenceEqual(proof))throw new CryptographicException("Recovered document differs from original.");}
-            await sql.ExecuteAsync($"USE {RecoverySql.Identifier(target)}; IF EXISTS(SELECT 1 FROM AppUserSessions WHERE RevokedAtUtc IS NULL) THROW 51000,'Restored session was not revoked',1; IF EXISTS(SELECT 1 FROM AppUserAccessTokens WHERE ConsumedAtUtc IS NULL) THROW 51000,'Restored access token was not invalidated',1;",ct);
+            await sql.ExecuteAsync($"USE {RecoverySql.Identifier(target)}; IF NOT EXISTS(SELECT 1 FROM AppSystemSettings WHERE [Key]='operations.restore' AND JSON_VALUE(ValueJson,'$.verified')='true') THROW 51000,'Verified recovery result was not recorded',1; IF EXISTS(SELECT 1 FROM AppUserSessions WHERE RevokedAtUtc IS NULL) THROW 51000,'Restored session was not revoked',1; IF EXISTS(SELECT 1 FROM AppUserAccessTokens WHERE ConsumedAtUtc IS NULL) THROW 51000,'Restored access token was not invalidated',1;",ct);
             Console.WriteLine("Full recovery smoke passed: SQL backup/VERIFYONLY, encrypted bundle, original-source removal, new database restore/CHECKDB, reference checks, document decryption and session/token invalidation.");
         }
         finally

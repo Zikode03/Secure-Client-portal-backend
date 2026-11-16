@@ -79,6 +79,7 @@ public class RolesController : ControllerBase
 
     private async Task<IActionResult> UpdateActivationAsync(string name, bool isActive)
     {
+        if (string.Equals(name, "admin", StringComparison.OrdinalIgnoreCase) && !isActive) return BadRequest(new { error = "The administrator role cannot be disabled." });
         var actor = _currentUserContextFactory.Create(User, HttpContext);
         var updated = await _roles.UpdateActivationAsync(name, isActive, actor);
         return updated is null ? NotFound() : Ok(updated);

@@ -54,7 +54,7 @@ public class PlatformAutomationTests
             .OrderBy(x => x.Type)
             .ToListAsync(TestContext.Current.CancellationToken);
         Assert.Contains(notifications, x => x.UserId == ClientUserId && x.Type == "monthly_pack.created");
-        Assert.Contains(notifications, x => x.UserId == ClientUserId && x.Type == "monthly_pack.deadline_approaching");
+        Assert.Contains(notifications, x => x.UserId == ClientUserId && x.Type == "monthly_pack.deadline_approaching" && x.Message == "Please complete Monthly pack 2026-07 by 2026-07-28.");
         Assert.Contains(notifications, x => x.UserId == ClientUserId && x.Type == "compliance.deadline_approaching");
         Assert.Contains(notifications, x => x.UserId == AccountantUserId && x.Type == "request.escalation");
         Assert.Contains(notifications, x => x.UserId == AdminUserId && x.Type == "request.escalation");
@@ -205,7 +205,7 @@ public class PlatformAutomationTests
             "deadline_approaching",
             7,
             "client",
-            "Deadline is approaching.",
+            "Please complete {item} by {dueDate}.",
             true));
         db.DeadlineRules.Add(DeadlineRule.Create(
             Guid.Parse("f8888888-8888-8888-8888-888888888881"),

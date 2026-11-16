@@ -124,6 +124,8 @@ public sealed class RoleService : IRoleService
         var normalizedPermissions = RolePermissions.NormalizePermissions(
             request.Permissions ?? RolePermissions.ParsePermissions(role.PermissionsJson));
 
+        if (role.Name == "admin" && (normalizedScope != "admin" || !normalizedPermissions.Contains("access.admin")))
+            throw new ArgumentException("The administrator role must retain administrator workspace access.");
         role.UpdateDefinition(
             string.IsNullOrWhiteSpace(request.DisplayName) ? role.DisplayName : request.DisplayName,
             normalizedScope,
@@ -162,6 +164,7 @@ public sealed class RoleService : IRoleService
             return null;
         }
 
+        if (role.Name == "admin" && !isActive) throw new ArgumentException("The administrator role cannot be disabled.");
         role.SetActivation(isActive);
         if (!isActive) await RevokeRoleSessionsAsync(role.Name, "role_deactivated", ct);
         await _db.SaveChangesAsync(ct);

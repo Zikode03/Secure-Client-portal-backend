@@ -23,10 +23,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("templates/required-documents")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<RequiredDocumentTemplateDto>>> GetRequiredDocumentTemplates()
         => Ok(await _firmManagement.GetRequiredDocumentTemplatesAsync());
 
     [HttpPut("templates/required-documents")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("templates.update")]
     public async Task<IActionResult> PutRequiredDocumentTemplates([FromBody] RequiredDocumentTemplateDto[] templates)
     {
         await _firmManagement.ReplaceRequiredDocumentTemplatesAsync(
@@ -36,10 +38,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("templates/monthly-pack")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<MonthlyPackTemplateDto>>> GetMonthlyPackTemplates()
         => Ok(await _firmManagement.GetMonthlyPackTemplatesAsync());
 
     [HttpPut("templates/monthly-pack")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("templates.update")]
     public async Task<IActionResult> PutMonthlyPackTemplates([FromBody] MonthlyPackTemplateDto[] templates)
     {
         await _firmManagement.ReplaceMonthlyPackTemplatesAsync(
@@ -49,10 +53,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("templates/requests")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<RequestTemplateDto>>> GetRequestTemplates()
         => Ok(await _firmManagement.GetRequestTemplatesAsync());
 
     [HttpPut("templates/requests")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("templates.update")]
     public async Task<IActionResult> PutRequestTemplates([FromBody] RequestTemplateDto[] templates)
     {
         await _firmManagement.ReplaceRequestTemplatesAsync(
@@ -62,10 +68,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("rules/reminders")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<ReminderRuleDto>>> GetReminderRules()
         => Ok(await _firmManagement.GetReminderRulesAsync());
 
     [HttpPut("rules/reminders")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> PutReminderRules([FromBody] ReminderRuleDto[] rules)
     {
         await _firmManagement.ReplaceReminderRulesAsync(
@@ -75,10 +83,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("rules/deadlines")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<DeadlineRuleDto>>> GetDeadlineRules()
         => Ok(await _firmManagement.GetDeadlineRulesAsync());
 
     [HttpPut("rules/deadlines")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("deadlines.update")]
     public async Task<IActionResult> PutDeadlineRules([FromBody] DeadlineRuleDto[] rules)
     {
         await _firmManagement.ReplaceDeadlineRulesAsync(
@@ -88,10 +98,12 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpGet("rules/escalations")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.read")]
     public async Task<ActionResult<IEnumerable<EscalationRuleDto>>> GetEscalationRules()
         => Ok(await _firmManagement.GetEscalationRulesAsync());
 
     [HttpPut("rules/escalations")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> PutEscalationRules([FromBody] EscalationRuleDto[] rules)
     {
         await _firmManagement.ReplaceEscalationRulesAsync(
@@ -101,6 +113,9 @@ public class FirmManagementController : ControllerBase
     }
 
     [HttpPost("seed-defaults")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("templates.update")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("deadlines.update")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("settings.update")]
     public async Task<IActionResult> SeedDefaults()
     {
         await _firmManagement.SeedDefaultsAsync(_currentUserContextFactory.Create(User, HttpContext));

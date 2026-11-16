@@ -83,6 +83,7 @@ public class MonthlyPacksController : ControllerBase
     }
 
     [HttpPost("{id}/close")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("documents.review")]
     [Authorize(Policy = "AccountantOnly")]
     public async Task<ActionResult<MonthlyPackResponse>> Close(string id, CancellationToken ct)
     {

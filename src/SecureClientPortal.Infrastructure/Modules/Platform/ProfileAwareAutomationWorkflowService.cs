@@ -29,6 +29,24 @@ public sealed class ProfileAwareAutomationWorkflowService : IAutomationWorkflowS
 
     public async Task<AutomationRunSummary> RunAsync(DateTime? utcNow = null, CancellationToken ct = default)
     {
+        async Task Record(string status)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(new { status, atUtc = DateTime.UtcNow });
+            var row = await _db.SystemSettings.FindAsync(["operations.automation"], ct);
+            if (row is null) _db.SystemSettings.Add(SecureClientPortal.Backend.Models.SystemSetting.Create("operations.automation", json)); else row.UpdateValue(json);
+            await _db.SaveChangesAsync(ct);
+        }
+        await Record("running");
+        try { var result = await RunCoreAsync(utcNow, ct); await Record("succeeded"); return result; }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            _db.ChangeTracker.Clear();
+            try { await Record("failed"); } catch { /* Preserve the original failure if the database is unavailable. */ }
+            throw;
+        }
+    }
+    private async Task<AutomationRunSummary> RunCoreAsync(DateTime? utcNow = null, CancellationToken ct = default)
+    {
         var now = utcNow?.ToUniversalTime() ?? DateTime.UtcNow;
 
         var packIdsBeforeRun = (await _db.MonthlyPacks.Select(x => x.Id).ToListAsync(ct)).ToHashSet();

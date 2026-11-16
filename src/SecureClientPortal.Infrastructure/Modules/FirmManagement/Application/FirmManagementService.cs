@@ -1,3 +1,4 @@
+using SecureClientPortal.Backend.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Application.Contracts.Modules.FirmManagement;
@@ -24,16 +25,12 @@ public sealed class FirmManagementService : IFirmManagementService
     public async Task<IReadOnlyList<RequiredDocumentTemplateDto>> GetRequiredDocumentTemplatesAsync(CancellationToken ct = default)
     {
         var items = await _db.RequiredDocumentTemplates.OrderBy(x => x.Name).ToListAsync(ct);
-        return items.Count == 0 ? DefaultRequiredDocumentTemplates() : items.Select(MapRequiredDocumentTemplateDto).ToArray();
+        return items.Select(MapRequiredDocumentTemplateDto).ToArray();
     }
 
     public async Task<IReadOnlyList<MonthlyPackTemplateDto>> GetMonthlyPackTemplatesAsync(CancellationToken ct = default)
     {
         var templates = await _db.MonthlyPackTemplates.OrderBy(x => x.Name).ToListAsync(ct);
-        if (templates.Count == 0)
-        {
-            return DefaultMonthlyPackTemplates();
-        }
 
         var templateIds = templates.Select(x => x.Id).ToArray();
         var items = await _db.MonthlyPackTemplateItems
@@ -53,19 +50,19 @@ public sealed class FirmManagementService : IFirmManagementService
     public async Task<IReadOnlyList<RequestTemplateDto>> GetRequestTemplatesAsync(CancellationToken ct = default)
     {
         var items = await _db.RequestTemplates.OrderBy(x => x.Name).ToListAsync(ct);
-        return items.Count == 0 ? DefaultRequestTemplates() : items.Select(MapRequestTemplateDto).ToArray();
+        return items.Select(MapRequestTemplateDto).ToArray();
     }
 
     public async Task<IReadOnlyList<ReminderRuleDto>> GetReminderRulesAsync(CancellationToken ct = default)
     {
         var items = await _db.ReminderRules.OrderBy(x => x.Name).ToListAsync(ct);
-        return items.Count == 0 ? DefaultReminderRules() : items.Select(MapReminderRuleDto).ToArray();
+        return items.Select(MapReminderRuleDto).ToArray();
     }
 
     public async Task<IReadOnlyList<DeadlineRuleDto>> GetDeadlineRulesAsync(CancellationToken ct = default)
     {
         var items = await _db.DeadlineRules.OrderBy(x => x.Name).ToListAsync(ct);
-        return items.Count == 0 ? DefaultDeadlineRules() : items.Select(MapDeadlineRuleDto).ToArray();
+        return items.Select(MapDeadlineRuleDto).ToArray();
     }
 
     public async Task<IReadOnlyList<EscalationRuleDto>> GetEscalationRulesAsync(CancellationToken ct = default)
@@ -86,109 +83,56 @@ public sealed class FirmManagementService : IFirmManagementService
         }
     }
 
+    private async Task SaveList<T>(DbSet<T> set, IEnumerable<T> source, Func<T, Guid> id, Action<T,T> update, CancellationToken ct) where T : class
+    {
+        var desired = source.ToArray();
+        if (desired.Select(id).Distinct().Count() != desired.Length) throw new AppValidationException("Each item must have a unique identifier.");
+        var existing = (await set.ToListAsync(ct)).ToDictionary(id);
+        var wanted = desired.Select(id).ToHashSet();
+        set.RemoveRange(existing.Values.Where(item => !wanted.Contains(id(item))));
+        foreach (var item in desired) { if (existing.TryGetValue(id(item), out var current)) update(current, item); else set.Add(item); }
+    }
     public async Task ReplaceRequiredDocumentTemplatesAsync(IEnumerable<RequiredDocumentTemplateDto> templates, CurrentUserContext actor, CancellationToken ct = default)
     {
-        _db.RequiredDocumentTemplates.RemoveRange(_db.RequiredDocumentTemplates);
-        foreach (var template in templates)
-        {
-            _db.RequiredDocumentTemplates.Add(RequiredDocumentTemplate.Create(
-                template.Id,
-                template.Name,
-                template.Description,
-                template.DocumentCategory,
-                template.IsRequired,
-                template.DefaultDueDayOfMonth,
-                true));
-        }
-
-        await _db.SaveChangesAsync(ct);
-        await WriteAuditAsync(actor, "firm.required_document_templates_updated", "required_document_templates", ct);
+        var desired = templates.Select(t => RequiredDocumentTemplate.Create(t.Id,t.Name,t.Description,t.DocumentCategory,t.IsRequired,t.DefaultDueDayOfMonth,true)).ToArray();
+        var wanted = desired.Select(x=>x.Id).ToArray();
+        if (await _db.MonthlyPackTemplateItems.AnyAsync(x=>!wanted.Contains(x.RequiredDocumentTemplateId),ct)) throw new AppValidationException("Remove a required document from its pack templates before deleting it.");
+        await SaveList(_db.RequiredDocumentTemplates,desired,x=>x.Id,(a,b)=>a.Update(b.Name,b.Description,b.DocumentCategory,b.IsRequired,b.DefaultDueDayOfMonth,b.IsActive),ct);
+        await WriteAuditAsync(actor,"firm.required_document_templates_updated","required_document_templates",ct);
     }
-
     public async Task ReplaceMonthlyPackTemplatesAsync(IEnumerable<MonthlyPackTemplateDto> templates, CurrentUserContext actor, CancellationToken ct = default)
     {
-        _db.MonthlyPackTemplateItems.RemoveRange(_db.MonthlyPackTemplateItems);
-        _db.MonthlyPackTemplates.RemoveRange(_db.MonthlyPackTemplates);
-
-        foreach (var template in templates)
+        var input = templates.ToArray();
+        var desired = input.Select(t=>MonthlyPackTemplate.Create(t.Id,t.Name,t.Description,t.AutoCreateDayOfMonth,true)).ToArray();
+        if(input.Any(t=>t.RequiredDocumentTemplateIds.Distinct().Count()!=t.RequiredDocumentTemplateIds.Length)) throw new AppValidationException("A document can appear only once in a pack template.");
+        var ids=input.SelectMany(t=>t.RequiredDocumentTemplateIds).Distinct().ToArray();
+        if(await _db.RequiredDocumentTemplates.CountAsync(x=>ids.Contains(x.Id),ct)!=ids.Length)throw new AppValidationException("Choose existing required documents for each pack template.");
+        var wanted=input.SelectMany(t=>t.RequiredDocumentTemplateIds.Select((id,index)=>(Key:(t.Id,id),Order:index+1))).ToDictionary(x=>x.Key,x=>x.Order);
+        var items=await _db.MonthlyPackTemplateItems.ToListAsync(ct);
+        _db.MonthlyPackTemplateItems.RemoveRange(items.Where(x=>!wanted.ContainsKey((x.MonthlyPackTemplateId,x.RequiredDocumentTemplateId))));
+        foreach(var entry in wanted)
         {
-            _db.MonthlyPackTemplates.Add(MonthlyPackTemplate.Create(
-                template.Id,
-                template.Name,
-                template.Description,
-                template.AutoCreateDayOfMonth,
-                true));
-
-            for (var index = 0; index < template.RequiredDocumentTemplateIds.Length; index++)
-            {
-                _db.MonthlyPackTemplateItems.Add(MonthlyPackTemplateItem.Create(
-                    DeterministicGuid($"mpti:{template.Id}:{index + 1}"),
-                    template.Id,
-                    template.RequiredDocumentTemplateIds[index],
-                    index + 1));
-            }
+            var current=items.FirstOrDefault(x=>(x.MonthlyPackTemplateId,x.RequiredDocumentTemplateId)==entry.Key);
+            if(current is not null)current.UpdateSortOrder(entry.Value);
+            else _db.MonthlyPackTemplateItems.Add(MonthlyPackTemplateItem.Create(Guid.NewGuid(),entry.Key.Item1,entry.Key.Item2,entry.Value));
         }
-
-        await _db.SaveChangesAsync(ct);
-        await WriteAuditAsync(actor, "firm.monthly_pack_templates_updated", "monthly_pack_templates", ct);
+        await SaveList(_db.MonthlyPackTemplates,desired,x=>x.Id,(a,b)=>a.Update(b.Name,b.Description,b.AutoCreateDayOfMonth,b.IsActive),ct);
+        await WriteAuditAsync(actor,"firm.monthly_pack_templates_updated","monthly_pack_templates",ct);
     }
-
     public async Task ReplaceRequestTemplatesAsync(IEnumerable<RequestTemplateDto> templates, CurrentUserContext actor, CancellationToken ct = default)
     {
-        _db.RequestTemplates.RemoveRange(_db.RequestTemplates);
-        foreach (var template in templates)
-        {
-            _db.RequestTemplates.Add(RequestTemplate.Create(
-                template.Id,
-                template.Name,
-                template.RequestType,
-                template.TitleTemplate,
-                template.DescriptionTemplate,
-                template.Priority,
-                template.DefaultDueInDays,
-                true));
-        }
-
-        await _db.SaveChangesAsync(ct);
-        await WriteAuditAsync(actor, "firm.request_templates_updated", "request_templates", ct);
+        await SaveList(_db.RequestTemplates,templates.Select(t=>RequestTemplate.Create(t.Id,t.Name,t.RequestType,t.TitleTemplate,t.DescriptionTemplate,t.Priority,t.DefaultDueInDays,true)),x=>x.Id,(a,b)=>a.Update(b.Name,b.RequestType,b.TitleTemplate,b.DescriptionTemplate,b.Priority,b.DefaultDueInDays,b.IsActive),ct);
+        await WriteAuditAsync(actor,"firm.request_templates_updated","request_templates",ct);
     }
-
     public async Task ReplaceReminderRulesAsync(IEnumerable<ReminderRuleDto> rules, CurrentUserContext actor, CancellationToken ct = default)
     {
-        _db.ReminderRules.RemoveRange(_db.ReminderRules);
-        foreach (var rule in rules)
-        {
-            _db.ReminderRules.Add(ReminderRule.Create(
-                rule.Id,
-                rule.Name,
-                rule.TriggerType,
-                rule.DaysBeforeDue,
-                rule.AudienceRole,
-                rule.MessageTemplate,
-                rule.IsEnabled));
-        }
-
-        await _db.SaveChangesAsync(ct);
-        await WriteAuditAsync(actor, "firm.reminder_rules_updated", "reminder_rules", ct);
+        await SaveList(_db.ReminderRules,rules.Select(t=>ReminderRule.Create(t.Id,t.Name,t.TriggerType,t.DaysBeforeDue,t.AudienceRole,t.MessageTemplate,t.IsEnabled)),x=>x.Id,(a,b)=>a.Update(b.Name,b.TriggerType,b.DaysBeforeDue,b.AudienceRole,b.MessageTemplate,b.IsEnabled),ct);
+        await WriteAuditAsync(actor,"firm.reminder_rules_updated","reminder_rules",ct);
     }
-
     public async Task ReplaceDeadlineRulesAsync(IEnumerable<DeadlineRuleDto> rules, CurrentUserContext actor, CancellationToken ct = default)
     {
-        _db.DeadlineRules.RemoveRange(_db.DeadlineRules);
-        foreach (var rule in rules)
-        {
-            _db.DeadlineRules.Add(DeadlineRule.Create(
-                rule.Id,
-                rule.Name,
-                rule.Scope,
-                rule.DueDayOfMonth,
-                rule.GraceDays,
-                rule.Priority,
-                rule.IsEnabled));
-        }
-
-        await _db.SaveChangesAsync(ct);
-        await WriteAuditAsync(actor, "firm.deadline_rules_updated", "deadline_rules", ct);
+        await SaveList(_db.DeadlineRules,rules.Select(t=>DeadlineRule.Create(t.Id,t.Name,t.Scope,t.DueDayOfMonth,t.GraceDays,t.Priority,t.IsEnabled)),x=>x.Id,(a,b)=>a.Update(b.Name,b.Scope,b.DueDayOfMonth,b.GraceDays,b.Priority,b.IsEnabled),ct);
+        await WriteAuditAsync(actor,"firm.deadline_rules_updated","deadline_rules",ct);
     }
 
     public async Task ReplaceEscalationRulesAsync(IEnumerable<EscalationRuleDto> rules, CurrentUserContext actor, CancellationToken ct = default)

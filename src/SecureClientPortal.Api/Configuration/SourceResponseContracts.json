@@ -869,6 +869,14 @@
         "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.Documents.InvoiceReviewResponse"
       }
     },
+    "SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingController|Get|ct": {
+      "status": 200,
+      "binary": false,
+      "empty": false,
+      "schema": {
+        "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse"
+      }
+    },
     "SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmManagementController|GetDeadlineRules|": {
       "status": 200,
       "binary": false,
@@ -1675,6 +1683,14 @@
         "$ref": "#/components/schemas/Source.Anonymous_7BB8020ADF3635C7"
       }
     },
+    "SecureClientPortal.Backend.Api.Modules.UsersRoles.AdminController|ResendInvitation|id,ct": {
+      "status": 200,
+      "binary": false,
+      "empty": false,
+      "schema": {
+        "$ref": "#/components/schemas/Source.Anonymous_B9BF36DE1611F5FA"
+      }
+    },
     "SecureClientPortal.Backend.Api.Modules.UsersRoles.AdminController|ResetPassword|id,request,ct": {
       "status": 200,
       "binary": false,
@@ -1689,6 +1705,14 @@
       "empty": false,
       "schema": {
         "$ref": "#/components/schemas/Source.Anonymous_396FBB4D6D8C23E7"
+      }
+    },
+    "SecureClientPortal.Backend.Api.Modules.UsersRoles.AdminController|RevokeSessions|id,ct": {
+      "status": 200,
+      "binary": false,
+      "empty": false,
+      "schema": {
+        "$ref": "#/components/schemas/Source.Anonymous_663DA7957586995E"
       }
     },
     "SecureClientPortal.Backend.Api.Modules.UsersRoles.AdminController|UpdateUserRole|id,request,ct": {
@@ -1712,6 +1736,14 @@
       "empty": false,
       "schema": {
         "$ref": "#/components/schemas/Source.Anonymous_E2705C7C191DDE6C"
+      }
+    },
+    "SecureClientPortal.Backend.Api.Modules.UsersRoles.AdminOperationsController|Get|ct": {
+      "status": 200,
+      "binary": false,
+      "empty": false,
+      "schema": {
+        "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse"
       }
     },
     "SecureClientPortal.Backend.Api.Modules.UsersRoles.RolesController|Activate|name": {
@@ -2430,6 +2462,17 @@
         "criticalRisk",
         "expired",
         "expiringSoon"
+      ]
+    },
+    "Source.Anonymous_663DA7957586995E": {
+      "type": "object",
+      "properties": {
+        "revokedSessions": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revokedSessions"
       ]
     },
     "Source.Anonymous_6936B768DF90D6B3": {
@@ -3183,6 +3226,32 @@
         "total"
       ]
     },
+    "Source.Anonymous_B9BF36DE1611F5FA": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "type": "string"
+        },
+        "deliveryError": {
+          "type": "string",
+          "nullable": true
+        },
+        "expiresAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "delivery",
+        "deliveryError",
+        "expiresAtUtc",
+        "id"
+      ]
+    },
     "Source.Anonymous_B9D995E5CB0B554E": {
       "type": "object",
       "properties": {
@@ -3764,6 +3833,22 @@
       },
       "required": [
         "requestToken"
+      ]
+    },
+    "Source.SecureClientPortal.Backend.Api.Modules.FirmManagement.FirmBrandingResponse": {
+      "type": "object",
+      "properties": {
+        "firmName": {
+          "type": "string"
+        },
+        "logoDataUrl": {
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "required": [
+        "firmName",
+        "logoDataUrl"
       ]
     },
     "Source.SecureClientPortal.Backend.Application.Contracts.Modules.Auth.SecuritySessionResponse": {
@@ -6629,6 +6714,110 @@
         "item",
         "reviewHistory",
         "versions"
+      ]
+    },
+    "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse": {
+      "type": "object",
+      "properties": {
+        "accessEmailEnabled": {
+          "type": "boolean"
+        },
+        "automationEnabled": {
+          "type": "boolean"
+        },
+        "automationLastRun": {
+          "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult",
+          "nullable": true
+        },
+        "checkedAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deploymentMode": {
+          "type": "string"
+        },
+        "emailFailed": {
+          "type": "integer"
+        },
+        "emailPending": {
+          "type": "integer"
+        },
+        "lastBackup": {
+          "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult",
+          "nullable": true
+        },
+        "lastRestore": {
+          "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult",
+          "nullable": true
+        },
+        "missingDocuments": {
+          "type": "integer"
+        },
+        "notificationEmailEnabled": {
+          "type": "boolean"
+        },
+        "overdueDocuments": {
+          "type": "integer"
+        },
+        "overdueRequests": {
+          "type": "integer"
+        },
+        "packsClosed": {
+          "type": "integer"
+        },
+        "packsUnderReview": {
+          "type": "integer"
+        },
+        "storageAvailable": {
+          "type": "boolean"
+        },
+        "storageBytes": {
+          "type": "integer",
+          "nullable": true
+        },
+        "storageQuotaBytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accessEmailEnabled",
+        "automationEnabled",
+        "automationLastRun",
+        "checkedAtUtc",
+        "deploymentMode",
+        "emailFailed",
+        "emailPending",
+        "lastBackup",
+        "lastRestore",
+        "missingDocuments",
+        "notificationEmailEnabled",
+        "overdueDocuments",
+        "overdueRequests",
+        "packsClosed",
+        "packsUnderReview",
+        "storageAvailable",
+        "storageBytes",
+        "storageQuotaBytes"
+      ]
+    },
+    "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult": {
+      "type": "object",
+      "properties": {
+        "atUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "atUtc",
+        "status",
+        "verified"
       ]
     },
     "Source.SecureClientPortal.Backend.Application.Modules.Banking.BankAccountDto": {

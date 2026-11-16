@@ -20,6 +20,10 @@ public static class SeedData
 
         await UpsertDefaultRoles(db);
 
+        var initialized = await db.SystemSettings.AnyAsync(x=>x.Key=="firm.defaults_initialized");
+        var hasConfiguration = await db.RequiredDocumentTemplates.AnyAsync() || await db.MonthlyPackTemplates.AnyAsync() || await db.RequestTemplates.AnyAsync() || await db.ReminderRules.AnyAsync() || await db.DeadlineRules.AnyAsync();
+        if (!initialized && !hasConfiguration)
+        {
         await UpsertFilingRule(db, FilingRule.Create(
             SeedGuid("filing_bank_statement"),
             "bank_statement",
@@ -172,6 +176,9 @@ public static class SeedData
 
         await db.SaveChangesAsync();
 
+        }
+        if (!initialized) db.SystemSettings.Add(SystemSetting.Create("firm.defaults_initialized","true"));
+
         await UpsertComplianceCategory(db, ComplianceCategory.Create(
             SeedGuid("cc_tax_compliance"),
             "Tax Compliance",
@@ -238,7 +245,11 @@ public static class SeedData
             {
                 var configured = RolePermissions.ParsePermissions(existing.PermissionsJson);
                 var legacyDefaults = normalizedPermissions.Except(RolePermissions.AddedOperationPermissions(defaultRole.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (!existing.IsSystemRole || existing.Scope != defaultRole.Scope || !legacyDefaults.SetEquals(configured)) continue;
+                var previousAdminDefaults = normalizedPermissions.Concat(new[] { "access.accountant", "access.client", "documents.review" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var originalAdminDefaults = legacyDefaults.Concat(new[] { "access.accountant", "access.client" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var untouched = legacyDefaults.SetEquals(configured) || (defaultRole.Name == "admin" &&
+                    (previousAdminDefaults.SetEquals(configured) || originalAdminDefaults.SetEquals(configured)));
+                if (!existing.IsSystemRole || existing.Scope != defaultRole.Scope || !untouched) continue;
                 existing.UpdateDefinition(existing.DisplayName, existing.Scope, RolePermissions.SerializePermissions(normalizedPermissions), existing.IsSystemRole);
                 var ids = db.Users.Where(x => x.Role == existing.Name).Select(x => x.Id);
                 foreach (var session in await db.UserSessions.Where(x => ids.Contains(x.UserId) && x.RevokedAtUtc == null).ToListAsync())

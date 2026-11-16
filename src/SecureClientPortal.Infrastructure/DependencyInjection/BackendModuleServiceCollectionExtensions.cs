@@ -70,6 +70,7 @@ public static class BackendModuleServiceCollectionExtensions
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IAdminService, AdminService>();
+        services.AddScoped<AdminOperationsService>();
         return services;
     }
 

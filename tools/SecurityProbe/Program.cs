@@ -113,6 +113,26 @@ try
     using (var c = Client(url)) await Status(c, "/api/auth/complete-invite", 401, "Fabricated setup token rejected", HttpMethod.Post, JsonContent.Create(new { email = "a@example.invalid", token = "fabricated-security-test-token", fullName = "Security test", password }), true);
     using (var c = Client(url)) await Status(c, "/api/auth/mfa/verify", 401, "Fabricated MFA challenge rejected", HttpMethod.Post, JsonContent.Create(new { challengeToken = "fabricated-security-test-token", code = "123456" }), true);
     await using (var db = Db()) { var unverified = UserSession.Start(Guid.NewGuid(), staffId, Guid.NewGuid(), DateTime.UtcNow.AddMinutes(30), null, null); db.UserSessions.Add(unverified); await db.SaveChangesAsync(); using var c = Client(url, Token(staffId, unverified.JwtId)); await Status(c, "/api/auth/me", 401, "Staff session requires verified MFA"); }
+    await Status(admin,"/api/admin/operations",200,"Administrator can view live operations");
+    await Status(staff,"/api/admin/operations",403,"Accountant cannot inspect admin operational status");
+    await Status(ca,"/api/admin/operations",403,"Client cannot inspect admin operational status");
+    await Status(admin,$"/api/documents/{docA}/review",403,"Default administrator cannot approve documents",HttpMethod.Post,JsonContent.Create(new{decision="accepted"}),true);
+    await Status(admin,$"/api/monthly-packs/{paId}/close",403,"Default administrator cannot close months",HttpMethod.Post,null,true);
+    foreach(var section in new[]{"templates/required-documents","templates/monthly-pack","templates/requests","rules/reminders","rules/deadlines"})
+    {
+        var saved=await admin.GetFromJsonAsync<JsonElement>("/api/admin/firm-management/"+section);
+        await Status(admin,"/api/admin/firm-management/"+section,200,"Existing admin configuration saves: "+section,HttpMethod.Put,JsonContent.Create(saved),true);
+    }
+    await Status(admin,"/api/admin/settings/firm.profile",200,"Firm identity settings save",HttpMethod.Put,JsonContent.Create(new{valueJson="{\"firmName\":\"Isolated firm\",\"email\":\"private@example.invalid\"}"}),true);
+    var brand=await ca.GetFromJsonAsync<JsonElement>("/api/firm-branding");Check("Client branding excludes private firm details",brand.GetProperty("firmName").GetString()=="Isolated firm"&&!brand.TryGetProperty("email",out _),"Safe identity fields only");
+    await Status(admin,"/api/admin/settings/operations.backup",400,"Backup status cannot be forged through settings",HttpMethod.Put,JsonContent.Create(new{valueJson="{\"status\":\"succeeded\",\"verified\":true}"}),true);
+    await Status(admin,$"/api/admin/users/{adminId}/disable",403,"Last administrator cannot disable own access",HttpMethod.Post,JsonContent.Create(new{}),true);
+    await Status(admin,$"/api/admin/users/{uaId}/resend-invitation",409,"Invitation resend cannot reset an active account",HttpMethod.Post,JsonContent.Create(new{}),true);
+    await using(var db=Db()){var role=await db.RoleDefinitions.SingleAsync(x=>x.Name=="admin");role.UpdateDefinition("Read-only admin","admin","[\"access.admin\",\"settings.read\"]",true);await db.SaveChangesAsync();}
+    await Status(admin,"/api/admin/operations",200,"Read-only admin retains operations access");
+    await Status(admin,"/api/admin/firm-management/rules/reminders",403,"Read-only admin cannot change reminder rules",HttpMethod.Put,JsonContent.Create(Array.Empty<object>()),true);
+    await Status(admin,"/api/admin/users",403,"Read-only admin cannot create users",HttpMethod.Post,JsonContent.Create(new{}),true);
+    await using(var db=Db()){var role=await db.RoleDefinitions.SingleAsync(x=>x.Name=="admin");role.UpdateDefinition("Admin","admin",RolePermissions.SerializePermissions(RolePermissions.ForRole("admin")),true);await db.SaveChangesAsync();}
     await using (var db = Db()) { (await db.Users.FindAsync(uaId))!.SetClientIdsJson("[]"); await db.SaveChangesAsync(); }
     await Status(ca, $"/api/documents/{docA}", 403, "Membership removal blocks existing token immediately");
     await using (var db = Db()) { db.ClientAssignments.RemoveRange(db.ClientAssignments.Where(x => x.AccountantUserId == staffId)); await db.SaveChangesAsync(); }
