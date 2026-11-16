@@ -13,6 +13,7 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExce
         {
             var (status, code, message) = ex switch
             {
+                Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException => (409, "REVIEW_CHANGED", "This document changed in another session. Refresh before trying again."),
                 AppValidationException validation => (400, "VALIDATION_ERROR", validation.Message),
                 DomainRuleException domain => (400, "DOMAIN_RULE", domain.Message),
                 BadHttpRequestException bad => (bad.StatusCode, "INVALID_REQUEST", "The request could not be processed."),

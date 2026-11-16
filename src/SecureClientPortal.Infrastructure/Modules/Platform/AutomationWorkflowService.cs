@@ -31,6 +31,7 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
         var packResult = await AutoCreateMonthlyPacksAsync(now, ct);
         var autoSubmissionResult = await AutoSubmitClosedMonthDraftsAsync(now, ct);
         var monthlyReminderNotifications = await SendMonthlyPackDeadlineRemindersAsync(now, ct);
+        var documentReminderNotifications = await SendDocumentRequirementRemindersAsync(now, ct);
         var overdueResult = await ProcessOverdueRequestEscalationsAsync(now, ct);
         var complianceResult = await ProcessComplianceDeadlinesAsync(now, ct);
 
@@ -44,7 +45,8 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
             overdueResult.OverdueRequestsMarked,
             overdueResult.NotificationsSent,
             complianceResult.ComplianceItemsUpdated,
-            complianceResult.NotificationsSent);
+            complianceResult.NotificationsSent,
+            documentReminderNotifications);
     }
 
     private async Task<(int DraftSlotsSubmitted, int NotificationsSent)> AutoSubmitClosedMonthDraftsAsync(DateTime now, CancellationToken ct)
@@ -279,6 +281,34 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
         return (createdPacks.Count, createdSlots, notificationsSent);
     }
 
+    private async Task<int> SendDocumentRequirementRemindersAsync(DateTime now, CancellationToken ct)
+    {
+        // South African business dates; don't chase uploaded drafts or documents with the accountant.
+        var today = now.AddHours(2).Date;
+        var candidates = await (from slot in _db.DocumentSlots
+            join pack in _db.MonthlyPacks on slot.MonthlyPackId equals pack.Id
+            where pack.Status != "complete" && pack.Status != "closed" &&
+                (slot.Status == "rejected" || slot.Status == "reupload_required" ||
+                 slot.IsRequired && slot.Status == "not_started")
+            select slot).ToListAsync(ct);
+        var count = 0;
+        foreach (var slot in candidates)
+        {
+            var rejected = slot.Status is "rejected" or "reupload_required";
+            var dueDate = slot.DueDateUtc?.AddHours(2).Date;
+            if (!rejected && (!dueDate.HasValue || dueDate.Value > today.AddDays(7))) continue;
+            var overdue = dueDate.HasValue && dueDate.Value < today;
+            var type = rejected ? "document.rejected.reminder" : overdue ? "document.overdue.reminder" : "document.missing.reminder";
+            var message = rejected
+                ? $"Please replace {slot.Label}. Accountant feedback: {slot.RejectionReason ?? "Open the document to review the correction request."}"
+                : $"{slot.Label} is still missing" + (dueDate.HasValue ? $" (due {dueDate:yyyy-MM-dd})." : ".");
+            count += await SendNotificationIfMissingAsync(slot.ClientId, "client", type,
+                rejected ? "Document correction needed" : overdue ? "Overdue document" : "Missing document reminder",
+                message, $"/client/packs?slot={slot.Id}", new { slotId = slot.Id, slot.MonthlyPackId, dueDate }, now, ct);
+        }
+        return count;
+    }
+
     private async Task<int> SendMonthlyPackDeadlineRemindersAsync(DateTime now, CancellationToken ct)
     {
         var deadlineRule = await _db.DeadlineRules
@@ -306,6 +336,9 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
         var notificationsSent = 0;
         foreach (var pack in openPacks)
         {
+            var clientActionNeeded = await _db.DocumentSlots.AnyAsync(slot => slot.MonthlyPackId == pack.Id && slot.IsRequired &&
+                slot.Status != "submitted" && slot.Status != "under_review" && slot.Status != "accepted" && slot.Status != "not_applicable", ct);
+            if (!clientActionNeeded) continue;
             var dueDate = BuildUtcDate(pack.Year, pack.Month, deadlineRule.DueDayOfMonth);
             var daysUntilDue = (dueDate.Date - now.Date).TotalDays;
             if (daysUntilDue < 0)
@@ -443,6 +476,8 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
                         recipientId,
                         rule.TriggerType,
                         deadline.Value);
+                    var preference = await _db.NotificationPreferences.FirstOrDefaultAsync(p => p.UserId == recipientId, ct);
+                    if (!NotificationDeliveryPolicy.Allows(preference, "compliance.deadline_approaching", now)) continue;
                     reminder.SetStatus(ComplianceReminderStatus.Sent);
                     _db.ComplianceReminders.Add(reminder);
 
@@ -519,6 +554,8 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
 
         foreach (var recipientId in recipientIds.Distinct())
         {
+            var preference = await _db.NotificationPreferences.FirstOrDefaultAsync(p => p.UserId == recipientId, ct);
+            if (!NotificationDeliveryPolicy.Allows(preference, type, now)) continue;
             var exists = await _db.Notifications.AnyAsync(x =>
                 x.UserId == recipientId &&
                 x.Type == type &&

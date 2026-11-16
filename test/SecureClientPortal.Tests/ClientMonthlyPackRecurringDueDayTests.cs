@@ -30,7 +30,7 @@ public class ClientMonthlyPackRecurringDueDayTests
         db.MonthlyPacks.Add(august);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
 
         await service.AddItemAsync(

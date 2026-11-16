@@ -54,8 +54,55 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
     public DbSet<DeadlineRule> DeadlineRules => Set<DeadlineRule>();
     public DbSet<DocumentAccessLog> DocumentAccessLogs => Set<DocumentAccessLog>();
 
+    public DbSet<NotificationEmailDelivery> NotificationEmailDeliveries => Set<NotificationEmailDelivery>();
+
+    private void QueueNotificationEmails()
+    {
+        foreach (var entry in ChangeTracker.Entries<Notification>().Where(e => e.State == EntityState.Added).ToList())
+            if (!NotificationEmailDeliveries.Local.Any(x => x.NotificationId == entry.Entity.Id))
+                NotificationEmailDeliveries.Add(new NotificationEmailDelivery { NotificationId = entry.Entity.Id });
+    }
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        QueueNotificationEmails();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        QueueNotificationEmails();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<NotificationEmailDelivery>(entity =>
+        {
+            entity.ToTable("AppNotificationEmailDeliveries");
+            entity.HasKey(x => x.NotificationId);
+            entity.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.FailureCode).HasMaxLength(80);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasIndex(x => new { x.Status, x.NextAttemptAtUtc });
+            entity.HasOne<Notification>().WithOne().HasForeignKey<NotificationEmailDelivery>(x => x.NotificationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<InvoiceReviewSnapshot>(entity =>
+        {
+            entity.ToTable("AppInvoiceReviewSnapshots");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.DocumentId, x.Revision }).IsUnique();
+            entity.HasIndex(x => new { x.DocumentId, x.RequestId }).IsUnique();
+            entity.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(x => x.InputJson).IsRequired();
+            entity.Property(x => x.FindingsJson).IsRequired();
+        });
+        modelBuilder.Entity<DataMigrationBatch>(entity =>
+        {
+            entity.ToTable("AppDataMigrationBatches");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.Property(x => x.StateJson).IsRequired();
+            entity.HasIndex(x => x.CreatedAtUtc);
+        });
         modelBuilder.Entity<ComplianceObligation>(entity =>
         {
             entity.ToTable("AppComplianceObligations");
@@ -167,6 +214,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
         modelBuilder.Entity<Document>(entity =>
         {
             entity.ToTable("AppDocuments");
+            entity.Property(x => x.InvoiceDetailsJson).HasMaxLength(1000);
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id);
             entity.Property(x => x.ClientId).IsRequired();
@@ -179,7 +227,9 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.Property(x => x.StorageKey).HasMaxLength(500);
             entity.Property(x => x.UploadedByUserId).IsRequired();
             entity.Property(x => x.FiledByUserId);
-            entity.Property(x => x.CurrentVersionNumber).HasDefaultValue(1);
+            entity.Property(x => x.CurrentVersionNumber).HasDefaultValue(1).IsConcurrencyToken();
+            entity.Property(x => x.InvoiceReviewRevision).IsConcurrencyToken();
+            entity.Property(x => x.Status).IsConcurrencyToken();
             entity.Property(x => x.UploadedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.Property(x => x.UpdatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
             entity.HasIndex(x => new { x.ClientId, x.IsFiled });

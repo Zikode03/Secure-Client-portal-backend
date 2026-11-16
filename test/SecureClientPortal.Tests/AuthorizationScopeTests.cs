@@ -171,6 +171,8 @@ public class AuthorizationScopeTests
 
         Assert.Contains("\"role\":\"client\"", json);
         Assert.Contains(ClientAlphaId.ToString(), json);
+        Assert.Contains("\"company\":\"Alpha\"", json);
+        Assert.DoesNotContain("Beta", json);
         Assert.Contains("\"permissions\"", json);
         Assert.Contains("clients.read", json);
         Assert.Contains("assignments.read", json);

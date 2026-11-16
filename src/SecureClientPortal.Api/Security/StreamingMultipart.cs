@@ -44,7 +44,7 @@ public static class StreamingMultipart
                 var fileName = HeaderUtilities.RemoveQuotes(disposition.FileNameStar.HasValue ? disposition.FileNameStar : disposition.FileName).Value ?? "";
                 return (fields, new StreamingFormFile(section.Body, fileName, section.ContentType ?? "application/octet-stream"));
             }
-            if (fields.Count >= 8 || name.Length > 64 || fields.ContainsKey(name))
+            if (fields.Count >= 12 || name.Length > 64 || fields.ContainsKey(name))
                 throw new AppValidationException("Too many or duplicate upload fields.");
             var value = new byte[4097];
             var count = await section.Body.ReadAtLeastAsync(value, value.Length, false, ct);

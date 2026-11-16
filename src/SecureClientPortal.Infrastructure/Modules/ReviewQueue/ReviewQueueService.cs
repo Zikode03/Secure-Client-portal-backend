@@ -1,3 +1,5 @@
+using SecureClientPortal.Backend.Application.Contracts.Modules.Documents;
+using SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
@@ -88,12 +90,20 @@ public sealed class ReviewQueueService : IReviewQueueService
                  slot != null ? slot.RejectionReason : null))
             .ToListAsync(ct);
 
+        var pendingIds = items.Select(x => x.DocumentId).ToArray();
+        // One scoped query for saved findings; never download or OCR files in a queue request.
+        var savedChecks = await (from document in _db.Documents.AsNoTracking()
+            join snapshot in _db.Set<InvoiceReviewSnapshot>().AsNoTracking()
+                on new { DocumentId = document.Id, Revision = document.InvoiceReviewRevision } equals new { snapshot.DocumentId, snapshot.Revision }
+            where pendingIds.Contains(document.Id) && allowedClientIds.Contains(document.ClientId)
+            select snapshot).ToDictionaryAsync(x => x.DocumentId, ct);
         var now = DateTime.UtcNow;
         var filtered = items
             .Select(item =>
             {
                 var reviewAgeDays = Math.Max(0, (int)Math.Floor((now - (item.SubmittedAtUtc ?? item.UploadedAtUtc)).TotalDays));
                 var reviewPriority = GetPriority(reviewAgeDays);
+                var summary = Summarize(item, savedChecks.GetValueOrDefault(item.DocumentId));
                 return new ReviewQueueItemResponse(
                     item.DocumentId,
                     item.ClientId,
@@ -112,7 +122,10 @@ public sealed class ReviewQueueService : IReviewQueueService
                     item.CurrentVersionNumber,
                     item.UploadedAtUtc,
                     item.SubmittedAtUtc,
-                    item.RejectionReason);
+                    item.RejectionReason,
+                    summary.state,
+                    summary.attention,
+                    summary.unverified);
             });
 
         if (filter?.MinAgeDays is int minAgeDays)
@@ -130,6 +143,18 @@ public sealed class ReviewQueueService : IReviewQueueService
             : filtered.OrderByDescending(x => x.SubmittedAtUtc ?? x.UploadedAtUtc);
 
         return (false, filtered.ToList());
+    }
+
+    private static (string? state, int attention, int unverified) Summarize(PendingReviewProjection item, InvoiceReviewSnapshot? snapshot)
+    {
+        if (!InvoiceReviewRules.IsInvoice(item.DocumentCategory)) return (null, 0, 0);
+        if (snapshot is null) return ("not_started", 0, 0);
+        if (snapshot.VersionNumber != item.CurrentVersionNumber || snapshot.RuleSetVersion != InvoiceReviewRules.Version
+            || snapshot.Year != item.Year || snapshot.Month != item.Month) return ("stale", 0, 0);
+        var findings = JsonSerializer.Deserialize<InvoiceReviewFinding[]>(snapshot.FindingsJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+        var attention = findings.Count(x => x.Result == "needs_attention");
+        var unverified = findings.Count(x => x.Result == "unable_to_verify");
+        return (attention > 0 ? "needs_attention" : unverified > 0 ? "unable_to_verify" : "no_issue_detected", attention, unverified);
     }
 
     public async Task<ServiceResult<ReviewQueueWorkspaceResponse>> GetWorkspaceAsync(

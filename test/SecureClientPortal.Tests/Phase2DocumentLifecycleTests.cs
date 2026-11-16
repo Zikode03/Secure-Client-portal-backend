@@ -332,6 +332,35 @@ public class Phase2DocumentLifecycleTests
         Assert.Equal("Only uploaded documents can enter review.", error.Message);
     }
 
+    [Fact]
+    public async Task ConfirmedInvoiceDetails_PreserveOriginalName_WarnOnDuplicates_AndAllowAcknowledgedSeparateDocument()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var controller = BuildDocumentsController(db, new InMemoryFileStorage(), BuildUser(ClientUserId, "client", [ClientAlphaId]));
+        var request = new UploadDocumentRequest {
+            ClientId = ClientAlphaId, MonthlyPackId = MonthlyPackId, DocumentType = "invoices",
+            DisplayName = "Acme_2026-11-11_INV-1.pdf", File = BuildFormFile("scan.pdf", "Invoice photo"),
+            InvoiceDetailsJson = """{"supplierName":"Acme","invoiceNumber":"INV-1","invoiceDate":"2026-11-11","amount":"115"}"""
+        };
+        var unconfirmed = Assert.IsAssignableFrom<ObjectResult>(await controller.Upload(request, TestContext.Current.CancellationToken));
+        Assert.Equal(400, unconfirmed.StatusCode);
+        Assert.Empty(db.Documents);
+        request.DetailsConfirmed = true;
+        Assert.IsType<CreatedResult>(await controller.Upload(request, TestContext.Current.CancellationToken));
+        var saved = Assert.Single(db.Documents);
+        Assert.Equal(request.DisplayName, saved.Name);
+        Assert.Contains("115.00", saved.InvoiceDetailsJson);
+        Assert.Equal("scan.pdf", Assert.Single(db.DocumentVersions).OriginalFileName);
+        Assert.Equal(request.DisplayName, Assert.Single(db.DocumentVersions).Name);
+        var duplicate = Assert.IsAssignableFrom<ObjectResult>(await controller.Upload(request, TestContext.Current.CancellationToken));
+        Assert.Equal(409, duplicate.StatusCode);
+        Assert.Single(db.Documents);
+        request.AllowDuplicate = true;
+        Assert.IsType<CreatedResult>(await controller.Upload(request, TestContext.Current.CancellationToken));
+        Assert.Equal(2, db.Documents.Count());
+    }
+
     private static DocumentsController BuildDocumentsController(PortalDbContext db, IFileStorage storage, ClaimsPrincipal user)
     {
         return new DocumentsController(DocumentWorkflowTestFactory.Create(db, storage))

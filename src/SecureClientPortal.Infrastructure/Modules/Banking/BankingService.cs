@@ -9,7 +9,7 @@ using System.Security.Claims;
 
 namespace SecureClientPortal.Backend.Infrastructure.Modules.Banking;
 
-public sealed class BankingService(
+public sealed partial class BankingService(
     PortalDbContext portalDb,
     BankingDbContext bankingDb,
     IEnumerable<IBankDataProvider> providers,
@@ -47,8 +47,13 @@ public sealed class BankingService(
             ? periodStart.Date
             : periodEnd.Date < today ? periodEnd.Date : today;
 
+        if (!config.IntegrationEnabled)
+            return BankingOperationResult<MonthlyPackBankingStatusDto>.Ok(new(
+                clientId, year, month, "manual", false, false, 0, periodStart, periodEnd, requiredThrough,
+                null, null, null, null, "Upload statements for each business account. Document review controls readiness."));
+
         var connections = await bankingDb.BankConnections
-            .Where(x => x.ClientId == clientId && x.Status != "disconnected")
+            .Where(x => x.ClientId == clientId && x.Provider != "manual_csv" && x.Status != "disconnected")
             .OrderBy(x => x.ConnectedAtUtc)
             .ToListAsync(ct);
         if (connections.Count == 0)
@@ -155,7 +160,7 @@ public sealed class BankingService(
         if (pack is null)
             return BankingOperationResult<bool>.Fail("Monthly pack was not found.");
 
-        var hasActiveConnection = await bankingDb.BankConnections.AnyAsync(
+        var hasActiveConnection = config.IntegrationEnabled && await bankingDb.BankConnections.AnyAsync(
             x => x.ClientId == clientId && x.Status != "disconnected",
             ct);
         await ApplyBankStatementSlotStateAsync(pack, hasActiveConnection, ct);
@@ -164,7 +169,7 @@ public sealed class BankingService(
 
     public async Task<BankingOperationResult<BankingOverviewDto>> ConnectSandboxAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default)
     {
-        if (!config.SandboxEnabled || !providerByName.TryGetValue("sandbox", out var provider))
+        if (!config.IntegrationEnabled || !config.SandboxEnabled || !providerByName.TryGetValue("sandbox", out var provider))
             return BankingOperationResult<BankingOverviewDto>.Fail("Sandbox bank connections are disabled in this environment.");
 
         var resolved = await ResolveClientIdAsync(clientId, user, ct);
@@ -205,6 +210,8 @@ public sealed class BankingService(
 
     public async Task<BankingOperationResult<BankingOverviewDto>> SyncAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!config.IntegrationEnabled)
+            return BankingOperationResult<BankingOverviewDto>.Fail("Direct bank integration is paused. Upload statements instead.");
         var connection = await bankingDb.BankConnections.FirstOrDefaultAsync(x => x.Id == connectionId, ct);
         if (connection is null) return BankingOperationResult<BankingOverviewDto>.Fail("Bank connection was not found.");
         if (!await CanAccessClientAsync(connection.ClientId, user, ct)) return BankingOperationResult<BankingOverviewDto>.Denied();
@@ -241,6 +248,8 @@ public sealed class BankingService(
 
     public async Task<BankingOperationResult<BankingOverviewDto>> DisconnectAsync(Guid connectionId, ClaimsPrincipal user, CancellationToken ct = default)
     {
+        if (!config.IntegrationEnabled)
+            return BankingOperationResult<BankingOverviewDto>.Fail("Direct bank integration is paused. Existing history is retained.");
         var connection = await bankingDb.BankConnections.FirstOrDefaultAsync(x => x.Id == connectionId, ct);
         if (connection is null) return BankingOperationResult<BankingOverviewDto>.Fail("Bank connection was not found.");
         if (!await CanAccessClientAsync(connection.ClientId, user, ct)) return BankingOperationResult<BankingOverviewDto>.Denied();
@@ -278,6 +287,8 @@ public sealed class BankingService(
     private async Task ApplyBankStatementSlotStateAsync(MonthlyPack pack, bool connected, CancellationToken ct)
     {
         if (pack.Status is "under_review" or "complete" or "closed") return;
+        connected = config.IntegrationEnabled && connected;
+        await EnsureManualAccountSlotsAsync(pack, ct);
         var slot = await portalDb.DocumentSlots.FirstOrDefaultAsync(
             x => x.MonthlyPackId == pack.Id && x.Category == "bank_statement",
             ct);
@@ -291,6 +302,12 @@ public sealed class BankingService(
         var hasEvidence = slot.CurrentDocumentId.HasValue || slot.Status is not ("not_started" or "not_applicable") ||
             await portalDb.Documents.AnyAsync(x => x.DocumentSlotId == slot.Id, ct);
         BankStatementSlotPolicy.Apply(slot, connected, hasEvidence);
+        // Named account slots replace the general placeholder without deleting evidence.
+        if (!config.IntegrationEnabled && await bankingDb.BankAccounts.AnyAsync(x => x.ClientId == pack.ClientId && x.AccountType == "manual", ct))
+        {
+            slot.UpdateDefinition(slot.Category, slot.Label, false);
+            if (!hasEvidence && slot.Status == "not_started") slot.MarkNotApplicable();
+        }
 
         await portalDb.SaveChangesAsync(ct);
     }
@@ -378,13 +395,13 @@ public sealed class BankingService(
 
         return new BankingOverviewDto(
             clientId,
-            config.SandboxEnabled && providerByName.ContainsKey("sandbox"),
+            config.IntegrationEnabled && config.SandboxEnabled && providerByName.ContainsKey("sandbox"),
             connections.Select(x => new BankConnectionDto(x.Id, x.ClientId, x.Provider, x.Status, x.ConnectedAtUtc, x.LastSyncedAtUtc, x.ConsentExpiresAtUtc, x.DisconnectedAtUtc,
                 x.FailureReason is null ? null : "This bank connection needs attention.")).ToList(),
             accounts.Select(x => new BankAccountDto(x.Id, x.BankConnectionId, x.BankName, x.AccountName, x.AccountType, x.AccountNumberMasked, x.Currency, x.CurrentBalance, x.AvailableBalance, x.LastUpdatedAtUtc)).ToList(),
             transactions.Select(x => new BankTransactionDto(x.Id, x.BankAccountId, x.TransactionDateUtc, x.PostedDateUtc, x.Description, x.Reference, x.Amount, x.Direction, x.Balance, x.ProviderCategory)).ToList(),
             syncRuns.Select(x => new BankSyncRunDto(x.Id, x.BankConnectionId, x.Provider, x.StartedAtUtc, x.FinishedAtUtc, x.Status, x.TransactionsReceived, x.FromDateUtc, x.ToDateUtc,
-                x.ErrorMessage is null ? null : "Bank sync could not be completed.")).ToList());
+                x.ErrorMessage is null ? null : "Bank sync could not be completed.")).ToList(), config.IntegrationEnabled);
     }
 
     private static ConnectionCoverage CalculateCoverage(Guid connectionId, IReadOnlyList<CoverageInterval> intervals, DateTime requiredStart, DateTime requiredEnd)

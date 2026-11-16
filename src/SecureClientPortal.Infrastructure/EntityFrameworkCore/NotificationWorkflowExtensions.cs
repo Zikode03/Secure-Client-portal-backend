@@ -107,6 +107,8 @@ public static class NotificationWorkflowExtensions
             .Distinct()
             .ToList();
 
+        var preferences = await db.NotificationPreferences.Where(p => recipients.Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, ct);
+        recipients = recipients.Where(id => NotificationDeliveryPolicy.Allows(preferences.GetValueOrDefault(id), type, DateTime.UtcNow)).ToList();
         var batchId = Guid.NewGuid();
 
         foreach (var recipientUserId in recipients)
@@ -146,6 +148,8 @@ public static class NotificationWorkflowExtensions
         CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
+        var preferences = await db.NotificationPreferences.FirstOrDefaultAsync(p => p.UserId == userId, ct);
+        if (!NotificationDeliveryPolicy.Allows(preferences, "deadline.approaching", now)) return 0;
         var deadlineWindowEnd = now.AddDays(3);
 
         var requests = await db.Requests

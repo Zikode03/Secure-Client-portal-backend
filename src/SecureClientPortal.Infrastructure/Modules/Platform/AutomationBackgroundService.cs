@@ -52,13 +52,14 @@ public sealed class AutomationBackgroundService : BackgroundService
             var service = scope.ServiceProvider.GetRequiredService<IAutomationWorkflowService>();
             var result = await service.RunAsync(null, ct);
             _logger.LogInformation(
-                "Automation run completed at {RunAtUtc}. Packs={Packs}, Slots={Slots}, DraftsAutoSubmitted={DraftsAutoSubmitted}, RequestEscalations={Escalations}, ComplianceReminders={ComplianceReminders}",
+                "Automation run completed at {RunAtUtc}. Packs={Packs}, Slots={Slots}, DraftsAutoSubmitted={DraftsAutoSubmitted}, RequestEscalations={Escalations}, ComplianceReminders={ComplianceReminders}, DocumentReminders={DocumentReminders}",
                 result.RunAtUtc,
                 result.MonthlyPacksCreated,
                 result.DocumentSlotsCreated,
                 result.DraftSlotsAutoSubmitted,
                 result.RequestEscalationNotificationsSent,
-                result.ComplianceReminderNotificationsSent);
+                result.ComplianceReminderNotificationsSent,
+                result.DocumentRequirementNotificationsSent);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -105,34 +105,25 @@ public sealed class ProductionReadinessTests
     [Theory]
     [InlineData("Production")]
     [InlineData("Staging")]
-    public async Task DemoSeedCannotBeCalledOutsideDevelopment(string environment)
+    [InlineData("Development")]
+    public async Task SampleSeedIsDisabledInEveryEnvironment(string environment)
     {
         using var provider = Services();
         await Assert.ThrowsAsync<InvalidOperationException>(() => SeedData.InitializeDevelopmentAsync(provider, Env(environment)));
     }
 
     [Fact]
-    public async Task DevelopmentSeedDoesNotResetExistingPasswordsAndProductionRejectsItsRecords()
+    public async Task ConfigurationInitializationNeverCreatesSampleAccountsOrBusinesses()
     {
         using var provider = Services();
         await SeedData.InitializeAsync(provider);
-        await SeedData.InitializeDevelopmentAsync(provider, Env(Environments.Development));
-        var changedHash = PasswordHasher.Hash("Changed-long-password!2026");
-        using (var scope = provider.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
-            var admin = await db.Users.FirstAsync(x => x.Email == "admin@secureportal.local", TestContext.Current.CancellationToken);
-            admin.SetPasswordHash(changedHash);
-            admin.SetSecurityStatus(SecurityStatus.Disabled);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-        await SeedData.InitializeDevelopmentAsync(provider, Env(Environments.Development));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => SeedData.EnsureNoDemoDataAsync(provider));
-        using var checkScope = provider.CreateScope();
-        var check = checkScope.ServiceProvider.GetRequiredService<PortalDbContext>();
-        var user = await check.Users.FirstAsync(x => x.Email == "admin@secureportal.local", TestContext.Current.CancellationToken);
-        Assert.Equal(changedHash, user.PasswordHash);
-        Assert.Equal("disabled", UserSecurityProfile.GetStatus(user.SecurityJson));
+        await BusinessMonthlyPackSeedData.InitializeAsync(provider);
+        using var scope = provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
+        Assert.Empty(db.Users);
+        Assert.Empty(db.Clients);
+        Assert.Empty(db.MonthlyPacks);
+        Assert.Empty(db.Documents);
     }
 
     [Fact]

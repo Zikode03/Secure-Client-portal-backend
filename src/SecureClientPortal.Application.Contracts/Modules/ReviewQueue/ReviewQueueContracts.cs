@@ -26,7 +26,7 @@ public record ReviewQueueItemResponse(
     int CurrentVersionNumber,
     DateTime UploadedAtUtc,
     DateTime? SubmittedAtUtc,
-    string? RejectionReason);
+    string? RejectionReason, string? AssistantState = null, int AssistantAttentionCount = 0, int AssistantUnverifiedCount = 0);
 
 public record ReviewQueueVersionResponse(
     Guid Id,

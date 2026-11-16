@@ -9,6 +9,13 @@ public class ReviewDecision
     public string ReviewerRole { get; private set; } = string.Empty;
     public string? Reason { get; private set; }
     public string? InternalNote { get; private set; }
+    public int? DocumentVersionNumber { get; private set; }
+    public int? InvoiceReviewRevision { get; private set; }
+    public void RecordReviewedVersion(int versionNumber, int? invoiceReviewRevision)
+    {
+        DocumentVersionNumber = versionNumber;
+        InvoiceReviewRevision = invoiceReviewRevision;
+    }
     public DateTime DecidedAtUtc { get; private set; } = DateTime.UtcNow;
 
     public static ReviewDecision Create(

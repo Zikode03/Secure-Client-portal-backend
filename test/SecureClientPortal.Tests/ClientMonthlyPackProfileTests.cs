@@ -25,7 +25,7 @@ public class ClientMonthlyPackProfileTests
         db.MonthlyPacks.Add(august);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var clientUser = BuildUser(Guid.NewGuid(), "client", clientId);
 
         var added = await service.AddItemAsync(
@@ -82,7 +82,7 @@ public class ClientMonthlyPackProfileTests
         db.MonthlyPacks.Add(august);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var clientUser = BuildUser(Guid.NewGuid(), "client", clientId);
 
         await service.AddItemAsync(
@@ -138,7 +138,7 @@ public class ClientMonthlyPackProfileTests
             1));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var profileService = new ClientMonthlyPackProfileService(db);
+        var profileService = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         await profileService.UpdateAsync(
             clientId,
@@ -202,7 +202,7 @@ public class ClientMonthlyPackProfileTests
             MonthlyPackTemplateItem.Create(Guid.NewGuid(), retailTemplate.Id, posRequirement.Id, 1));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var profileService = new ClientMonthlyPackProfileService(db);
+        var profileService = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         await profileService.UpdateAsync(
             clientId,
@@ -245,7 +245,7 @@ public class ClientMonthlyPackProfileTests
             MonthlyPackTemplateItem.Create(Guid.NewGuid(), template.Id, inventory.Id, 2));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
@@ -293,7 +293,7 @@ public class ClientMonthlyPackProfileTests
         db.DocumentSlots.AddRange(pollutedPos, fuelWithEvidence);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
@@ -324,7 +324,7 @@ public class ClientMonthlyPackProfileTests
         db.MonthlyPackTemplates.Add(template);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         await service.UpdateAsync(
             clientId,
@@ -365,7 +365,7 @@ public class ClientMonthlyPackProfileTests
         db.MonthlyPackTemplates.AddRange(expected, professional);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
 
@@ -386,7 +386,7 @@ public class ClientMonthlyPackProfileTests
             MonthlyPackTemplate.Create(Guid.NewGuid(), "Professional Services", "Service baseline.", 1));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var service = new ClientMonthlyPackProfileService(db);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
         var admin = BuildUser(Guid.NewGuid(), "admin");
         var profile = await service.GetAsync(clientId, admin, TestContext.Current.CancellationToken);
 
@@ -448,5 +448,35 @@ public class ClientMonthlyPackProfileTests
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
+
+    [Theory]
+    [InlineData("this_month")]
+    [InlineData("every_month")]
+    public async Task ClientCanAddAnItemByNameWithoutChoosingACategory(string recurrence)
+    {
+        await using var db = BuildDb(); var clientId = Guid.NewGuid();
+        db.Clients.Add(BuildClient(clientId));
+        var pack = MonthlyPack.Create(Guid.NewGuid(), clientId, 2026, 8); db.MonthlyPacks.Add(pack);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var service = new ClientMonthlyPackProfileService(db, timeProvider: new FixedProfileTimeProvider());
+        var actor = BuildUser(Guid.NewGuid(), "client", clientId);
+        var result = await service.AddItemAsync(clientId, new(null, "Fuel card statement", false, recurrence, null), actor, TestContext.Current.CancellationToken);
+        Assert.Null(result.Error); Assert.NotNull(result.Value);
+        var slot = await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("Fuel card statement", slot.Label); Assert.Equal("fuel_card_statement", slot.Category);
+        Assert.Equal(recurrence == "every_month", result.Value!.RecurringRequestId.HasValue);
+        var profile = await service.GetAsync(clientId, actor, TestContext.Current.CancellationToken);
+        Assert.Equal(recurrence == "every_month" ? 1 : 0, profile.Value!.PendingRecurringItems.Count);
+    }
+    [Fact] public async Task NameOnlyItemsRespectDatabaseLengthsAndRejectBlankNames()
+    {
+        await using var db = BuildDb(); var clientId=Guid.NewGuid(); db.Clients.Add(BuildClient(clientId));
+        db.MonthlyPacks.Add(MonthlyPack.Create(Guid.NewGuid(),clientId,2026,8)); await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var service=new ClientMonthlyPackProfileService(db,timeProvider:new FixedProfileTimeProvider()); var actor=BuildUser(Guid.NewGuid(),"client",clientId);
+        var invalid=await service.AddItemAsync(clientId,new(null," ",false,"this_month",null),actor,TestContext.Current.CancellationToken);
+        Assert.NotNull(invalid.Error); Assert.Empty(db.DocumentSlots);
+        var result=await service.AddItemAsync(clientId,new(null,new string('a',180),false,"this_month",null),actor,TestContext.Current.CancellationToken);
+        Assert.Null(result.Error); Assert.InRange((await db.DocumentSlots.SingleAsync(TestContext.Current.CancellationToken)).Category.Length,1,80);
     }
 }

@@ -30,6 +30,12 @@ using SecureClientPortal.Backend.Api.Configuration;
 using SecureClientPortal.Backend.Api.Security;
 using Microsoft.AspNetCore.Antiforgery;
 
+if (args.Length == 2 && args[0] == "--export-openapi")
+{
+    await OpenApiContract.ExportAsync(args[1]);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration["DB_CONNECTION_STRING"];
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -83,7 +89,7 @@ if (corsOrigins.Length == 0)
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddPortalOpenApi();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
@@ -152,6 +158,10 @@ builder.Services.AddDbContext<PortalDbContext>(options =>
     options.UseSqlServer(connectionString, SqlServerMigrationConfiguration.Portal));
 builder.Services.AddDbContext<BankingDbContext>(options =>
     options.UseSqlServer(connectionString, SqlServerMigrationConfiguration.Banking));
+builder.Services.Configure<NotificationEmailOptions>(builder.Configuration.GetSection("NotificationEmail"));
+builder.Services.AddScoped<SecureClientPortal.Backend.Application.Modules.Notifications.INotificationEmailSender, SmtpNotificationEmailSender>();
+builder.Services.AddScoped<SecureClientPortal.Backend.Infrastructure.Modules.Notifications.NotificationEmailDispatcher>();
+builder.Services.AddHostedService<NotificationEmailBackgroundService>();
 builder.Services.AddScoped<AccessEmailSender>();
 builder.Services.AddScoped<SecureClientPortal.Backend.Application.Identity.IAccessEmailSender>(sp => sp.GetRequiredService<AccessEmailSender>());
 builder.Services.AddSingleton<SecureClientPortal.Backend.Application.Identity.IAccessLinkBuilder, AccessLinkBuilder>();
@@ -279,17 +289,9 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.UseMiddleware<CsrfProtectionMiddleware>((object)corsOrigins);
-app.MapGet("/api/auth/csrf", (HttpContext context, IAntiforgery antiforgery) =>
-{
-    var tokens = antiforgery.GetAndStoreTokens(context);
-    context.Response.Headers.CacheControl = "no-store";
-    return Results.Ok(new { requestToken = tokens.RequestToken });
-}).AllowAnonymous();
 app.MapControllers();
 
 await SeedData.InitializeAsync(app.Services);
-if (app.Environment.IsDevelopment())
-    await SeedData.InitializeDevelopmentAsync(app.Services, app.Environment);
 await BusinessMonthlyPackSeedData.InitializeAsync(app.Services);
 
 app.Run();

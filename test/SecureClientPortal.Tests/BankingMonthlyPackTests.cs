@@ -404,6 +404,90 @@ public class BankingMonthlyPackTests
         }
     }
 
+    [Fact]
+    public async Task ManualMode_IgnoresSavedConnectionsAndBlocksSync()
+    {
+        await using var f = await Fixture.Create(integrationEnabled: false);
+        var connection = await f.AddBank("test-alpha", (1, 31));
+        await f.Reconcile();
+        var status = await f.Status();
+        Assert.Equal("manual", status.Status);
+        Assert.False(status.HasActiveConnection);
+        Assert.True(f.Slot.IsRequired);
+        Assert.Equal("not_started", f.Slot.Status);
+        Assert.False((await f.Banking.SyncAsync(connection.Id, f.User, Ct)).Success);
+        Assert.False((await f.Banking.ConnectSandboxAsync(f.ClientId, f.User, Ct)).Success);
+        Assert.Equal(0, f.Alpha.SyncCount);
+    }
+
+    [Fact]
+    public async Task ManualImport_PreviewsWithoutSavingAndDeduplicatesRepeatImports()
+    {
+        await using var f = await Fixture.Create(integrationEnabled: false);
+        var added = await f.Banking.AddManualAccountAsync(new(f.ClientId, "Test bank", "Operating", "1234", Guid.NewGuid()), f.User, Ct);
+        Assert.True(added.Success);
+        var account = Assert.Single(added.Value!.Accounts);
+        var rows = new ManualTransactionRow[] { new("2026-08-05", "Rent", "R1", -1200m, 500m), new("2026-08-06", "Sale", "S1", 2000m, 2500m) };
+        var request = new ManualTransactionImportRequest(account.Id, "statement.csv", rows);
+        var preview = await f.Banking.ImportManualTransactionsAsync(request, f.User, Ct);
+        Assert.Equal(2, preview.Value!.Imported);
+        Assert.Empty(await f.Banks.BankTransactions.ToListAsync(Ct));
+        var imported = await f.Banking.ImportManualTransactionsAsync(request with { Preview = false }, f.User, Ct);
+        Assert.Equal(2, imported.Value!.Imported);
+        Assert.Equal(2000m, imported.Value.Credits);
+        Assert.Equal(1200m, imported.Value.Debits);
+        var repeated = await f.Banking.ImportManualTransactionsAsync(request with { Preview = false }, f.User, Ct);
+        Assert.Equal(0, repeated.Value!.Imported);
+        Assert.Equal(2, repeated.Value.Duplicates);
+        Assert.Equal(2, await f.Banks.BankTransactions.CountAsync(Ct));
+        Assert.All(await f.Banks.BankSyncRuns.ToListAsync(Ct), r => Assert.Null(r.FromDateUtc));
+        Assert.Equal("manual", (await f.Status()).Status);
+        var accountSlot = await f.Db.DocumentSlots.SingleAsync(s => s.Category.StartsWith("bank_statement_account_"), Ct);
+        Assert.True(accountSlot.IsRequired);
+        Assert.False(f.Slot.IsRequired);
+        var blocked = await f.Workflow.SubmitAsync(f.Pack.Id.ToString(), f.User, Ct);
+        Assert.True(blocked.invalid);
+    }
+
+    [Fact]
+    public async Task ManualImport_RejectsInvalidDatesAndOtherClients()
+    {
+        await using var f = await Fixture.Create(integrationEnabled: false);
+        var added = await f.Banking.AddManualAccountAsync(new(f.ClientId, "Test bank", "Operating", "1234", Guid.NewGuid()), f.User, Ct);
+        var account = Assert.Single(added.Value!.Accounts);
+        var request = new ManualTransactionImportRequest(account.Id, "statement.csv", [new("2026-02-30", "Invalid", "", 10m, null)], false);
+        Assert.False((await f.Banking.ImportManualTransactionsAsync(request, f.User, Ct)).Success);
+        var outsider = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()), new Claim(ClaimTypes.Role, "client")], "test"));
+        Assert.True((await f.Banking.ImportManualTransactionsAsync(request, outsider, Ct)).Forbidden);
+        Assert.Empty(await f.Banks.BankTransactions.ToListAsync(Ct));
+    }
+
+    [Fact]
+    public async Task ManualMode_AllAccountStatementsMustBeAcceptedBeforeClosure()
+    {
+        Assert.False(new BankingOptions().IntegrationEnabled);
+        await using var f = await Fixture.Create(integrationEnabled: false);
+        await f.Banking.AddManualAccountAsync(new(f.ClientId, "First bank", "Operating", "1234", Guid.NewGuid()), f.User, Ct);
+        await f.Banking.AddManualAccountAsync(new(f.ClientId, "Second bank", "Savings", "5678", Guid.NewGuid()), f.User, Ct);
+        var slots = await f.Db.DocumentSlots.Where(s => s.Category.StartsWith("bank_statement_account_")).ToListAsync(Ct);
+        Assert.Equal(2, slots.Count);
+        Assert.All(slots, s => Assert.True(s.IsRequired));
+        var firstDocument = Guid.NewGuid();
+        slots[0].MarkDraft(firstDocument);
+        slots[0].Submit(Guid.NewGuid());
+        slots[0].Accept(firstDocument);
+        await f.Db.SaveChangesAsync(Ct);
+        Assert.True((await f.Workflow.CloseAsync(f.Pack.Id.ToString(), f.User, Ct)).invalid);
+        var secondDocument = Guid.NewGuid();
+        slots[1].MarkDraft(secondDocument);
+        slots[1].Submit(Guid.NewGuid());
+        slots[1].Accept(secondDocument);
+        await f.Db.SaveChangesAsync(Ct);
+        var closed = await f.Workflow.CloseAsync(f.Pack.Id.ToString(), f.User, Ct);
+        Assert.False(closed.invalid);
+        Assert.Equal("closed", closed.pack!.Status);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public PortalDbContext Db { get; } = new(new DbContextOptionsBuilder<PortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -419,7 +503,7 @@ public class BankingMonthlyPackTests
         public TestProvider Alpha { get; private set; } = null!;
         public TestProvider Sandbox { get; private set; } = null!;
 
-        public static async Task<Fixture> Create(DateTime? now = null, int month = 8)
+        public static async Task<Fixture> Create(DateTime? now = null, int month = 8, bool integrationEnabled = true)
         {
             var f = new Fixture();
             f.Db.Clients.Add(Client.Create(f.ClientId, "Banking test", "Company", "Finance", "finance@example.test", ClientStatus.Active));
@@ -430,8 +514,8 @@ public class BankingMonthlyPackTests
             await f.Db.SaveChangesAsync(Ct);
             f.Alpha = new TestProvider("test-alpha", month);
             f.Sandbox = new TestProvider("sandbox", month);
-            f.Banking = new BankingService(f.Db, f.Banks, [f.Alpha, f.Sandbox], Options.Create(new BankingOptions { SandboxEnabled = true }), new FixedClock(now ?? Day(16, 9)));
-            f.Profile = new ClientMonthlyPackProfileService(f.Db, f.Banks);
+            f.Banking = new BankingService(f.Db, f.Banks, [f.Alpha, f.Sandbox], Options.Create(new BankingOptions { SandboxEnabled = true, IntegrationEnabled = integrationEnabled }), new FixedClock(now ?? Day(16, 9)));
+            f.Profile = new ClientMonthlyPackProfileService(f.Db, f.Banks, Options.Create(new BankingOptions { IntegrationEnabled = integrationEnabled }));
             f.Workflow = new BankAwareMonthlyPackService(new MonthlyPackService(f.Db, f.Profile, f.Banking), f.Banking, f.Db);
             return f;
         }

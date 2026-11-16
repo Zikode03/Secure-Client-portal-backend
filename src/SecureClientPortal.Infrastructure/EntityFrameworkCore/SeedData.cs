@@ -202,24 +202,8 @@ public static class SeedData
         await db.SaveChangesAsync();
     }
 
-    public static async Task InitializeDevelopmentAsync(IServiceProvider services, IHostEnvironment environment)
-    {
-        if (!environment.IsDevelopment())
-            throw new InvalidOperationException("Demo data can only be seeded in Development.");
-        using var scope = services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_admin_001"), "System Admin", "admin@secureportal.local", UserRole.Admin, SerializeClientIds()));
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_acc_001"), "Default Accountant", "accountant@secureportal.local", UserRole.Accountant, SerializeClientIds()));
-        await UpsertUser(db, CreateSeedUser(SeedGuid("u_client_001"), "Default Client", "client@secureportal.local", UserRole.Client, SerializeClientIds(SeedGuid("c_001"))));
-        if (!await db.Clients.AnyAsync(x => x.Id == SeedGuid("c_001"))) db.Clients.Add(CreateSeedClient());
-        await db.SaveChangesAsync();
-        await UpsertClientAssignment(db, ClientAssignment.Create(SeedGuid("ca_u_acc_001_c_001"), SeedGuid("u_acc_001"), SeedGuid("c_001")));
-        await UpsertMonthlyPack(db, CreateSeedMonthlyPack());
-        await db.SaveChangesAsync();
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_bank_statement"), "bank_statement", "Bank Statement"));
-        await UpsertDocumentSlot(db, CreateSeedDocumentSlot(SeedGuid("slot_mp_c001_2026_06_invoices"), "invoices", "Invoices"));
-        await db.SaveChangesAsync();
-    }
+    public static Task InitializeDevelopmentAsync(IServiceProvider services, IHostEnvironment environment) =>
+        throw new InvalidOperationException("Sample account and business creation has been retired. Use administrator onboarding.");
 
     public static async Task EnsureNoDemoDataAsync(IServiceProvider services)
     {
@@ -230,58 +214,6 @@ public static class SeedData
         if (await db.Users.AnyAsync(x => ids.Contains(x.Id) || emails.Contains(x.Email.ToLower())) ||
             await db.Clients.AnyAsync(x => x.Id == SeedGuid("c_001")))
             throw new InvalidOperationException("Development demo records exist in this database. Use a clean production database or explicitly retire the demo records before deployment. No records have been deleted.");
-    }
-
-    private static User CreateSeedUser(Guid id, string fullName, string email, UserRole role, string clientIdsJson)
-    {
-        var user = User.CreateInvited(id, fullName, email, role, PasswordHasher.Hash("Password123!"), clientIdsJson, null);
-        user.SetSecurityStatus(SecurityStatus.Active);
-        return user;
-    }
-
-    private static Client CreateSeedClient()
-    {
-        var client = Client.Create(SeedGuid("c_001"), "Acme Holdings", "Pty Ltd", "Jane Doe", "jane.doe@acme.test", ClientStatus.Active);
-        client.AssignAccountant(SeedGuid("u_acc_001"));
-        client.UpdateComplianceHealth(92);
-        return client;
-    }
-
-    private static MonthlyPack CreateSeedMonthlyPack()
-    {
-        var pack = MonthlyPack.Create(
-            SeedGuid("mp_c001_2026_06"),
-            SeedGuid("c_001"),
-            2026,
-            6);
-        pack.MarkNotStarted();
-        return pack;
-    }
-
-    private static DocumentSlot CreateSeedDocumentSlot(Guid id, string category, string label)
-    {
-        var slot = DocumentSlot.Create(
-            id,
-            SeedGuid("mp_c001_2026_06"),
-            SeedGuid("c_001"),
-            category,
-            label,
-            true,
-            null);
-        slot.MarkNotStarted();
-        return slot;
-    }
-
-    private static async Task UpsertUser(PortalDbContext db, User expected)
-    {
-        var byId = await db.Users.FirstOrDefaultAsync(x => x.Id == expected.Id);
-        if (byId is null)
-        {
-            db.Users.Add(expected);
-            return;
-        }
-
-        // Existing development accounts keep their password and access status.
     }
 
     private static async Task UpsertDefaultRoles(PortalDbContext db)
@@ -331,29 +263,6 @@ public static class SeedData
         byId.Update(expected.Category, expected.Description, expected.IsEnabled);
     }
 
-    private static async Task UpsertClientAssignment(PortalDbContext db, ClientAssignment expected)
-    {
-        var byPair = await db.ClientAssignments.FirstOrDefaultAsync(x =>
-            x.AccountantUserId == expected.AccountantUserId && x.ClientId == expected.ClientId);
-        if (byPair is null)
-        {
-            db.ClientAssignments.Add(expected);
-        }
-    }
-
-    private static async Task UpsertMonthlyPack(PortalDbContext db, MonthlyPack expected)
-    {
-        var existing = await db.MonthlyPacks.FirstOrDefaultAsync(x =>
-            x.ClientId == expected.ClientId && x.Year == expected.Year && x.Month == expected.Month);
-        if (existing is null)
-        {
-            db.MonthlyPacks.Add(expected);
-            return;
-        }
-
-        ApplyMonthlyPackStatus(existing, expected.Status);
-    }
-
     private static void ApplyMonthlyPackStatus(MonthlyPack pack, string status)
     {
         switch (status)
@@ -377,21 +286,6 @@ public static class SeedData
                 pack.MarkNotStarted();
                 break;
         }
-    }
-
-    private static async Task UpsertDocumentSlot(PortalDbContext db, DocumentSlot expected)
-    {
-        var existing = await db.DocumentSlots.FirstOrDefaultAsync(x =>
-            x.MonthlyPackId == expected.MonthlyPackId && x.Category == expected.Category);
-        if (existing is null)
-        {
-            db.DocumentSlots.Add(expected);
-            return;
-        }
-
-        existing.UpdateDefinition(expected.Category, expected.Label, expected.IsRequired);
-        existing.UpdateSchedule(expected.DueDateUtc);
-        ApplySlotStatus(existing, expected.Status);
     }
 
     private static void ApplySlotStatus(DocumentSlot slot, string status)
@@ -626,11 +520,6 @@ public static class SeedData
             expected.Priority,
             expected.IsEnabled);
     }
-    private static string SerializeClientIds(params Guid[] clientIds)
-    {
-        return JsonSerializer.Serialize(clientIds.Select(x => x.ToString()));
-    }
-
     private static Guid SeedGuid(string value)
     {
         using var md5 = MD5.Create();

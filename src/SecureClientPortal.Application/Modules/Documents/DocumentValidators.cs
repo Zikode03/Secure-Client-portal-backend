@@ -46,6 +46,16 @@ public static class DocumentValidators
         }
 
         ThrowIfAny(errors);
+        ValidateCategoryFile(request.DocumentType, request.File!);
+    }
+
+    public static void ValidateCategoryFile(string category, Microsoft.AspNetCore.Http.IFormFile file)
+    {
+        var key = System.Text.RegularExpressions.Regex.Replace(category.ToLowerInvariant(), "[^a-z0-9]", "");
+        if (key.Contains("bankstatement") &&
+            (!string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(file.ContentType) && file.ContentType is not ("application/pdf" or "application/octet-stream")))
+            throw new AppValidationException("Bank statements must be the original bank-issued PDF. Photos, screenshots and spreadsheets are not accepted as statement evidence.");
     }
 
     public static void ValidateCreate(CreateDocumentRequest request)

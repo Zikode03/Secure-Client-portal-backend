@@ -137,6 +137,35 @@ public class PlatformAutomationTests
         Assert.Equal("submitted", slot.Status);
     }
 
+    [Fact]
+    public async Task DocumentReminders_StopAfterUploadAndCorrection_AndDoNotRepeatWithin24Hours()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var service = new AutomationWorkflowService(db);
+        await service.RunAsync(RunAtUtc, TestContext.Current.CancellationToken);
+        var slots = await db.DocumentSlots.OrderBy(x => x.Label).ToListAsync(TestContext.Current.CancellationToken);
+        slots[0].UpdateSchedule(RunAtUtc.AddDays(-1));
+        slots[1].MarkDraft(Guid.NewGuid());
+        slots[1].Submit(ClientUserId, RunAtUtc);
+        slots[1].Reject(slots[1].CurrentDocumentId!.Value, "Unreadable photo");
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        // Remove reminders from the initial setup run to isolate this scenario.
+        db.Notifications.RemoveRange(db.Notifications.Where(x => x.Type.StartsWith("document.")));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var reminderRun = await service.RunAsync(RunAtUtc, TestContext.Current.CancellationToken);
+        Assert.Equal(2, reminderRun.DocumentRequirementNotificationsSent);
+        Assert.Contains(db.Notifications, x => x.Type == "document.overdue.reminder");
+        Assert.Contains(db.Notifications, x => x.Type == "document.rejected.reminder" && x.Message.Contains("Unreadable photo"));
+        var repeated = await service.RunAsync(RunAtUtc, TestContext.Current.CancellationToken);
+        Assert.Equal(0, repeated.DocumentRequirementNotificationsSent);
+        slots[0].MarkDraft(Guid.NewGuid());
+        slots[1].MarkDraft(Guid.NewGuid());
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var afterUpload = await service.RunAsync(RunAtUtc.AddHours(25), TestContext.Current.CancellationToken);
+        Assert.Equal(0, afterUpload.DocumentRequirementNotificationsSent);
+    }
+
     private static PortalDbContext BuildDb()
     {
         var options = new DbContextOptionsBuilder<PortalDbContext>()

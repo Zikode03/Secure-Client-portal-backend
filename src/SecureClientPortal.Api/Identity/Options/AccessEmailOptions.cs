@@ -5,7 +5,7 @@ public class AccessEmailOptions
     public const string Section = "AccessEmail";
 
     public bool Enabled { get; set; }
-    public string DeliveryMode { get; set; } = "log";
+    public string DeliveryMode { get; set; } = "disabled";
     public string FromEmail { get; set; } = "no-reply@secureportal.local";
     public string FromName { get; set; } = "Secure Client Portal";
     public string? SmtpHost { get; set; }

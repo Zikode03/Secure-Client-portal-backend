@@ -15,4 +15,5 @@ public sealed record AutomationRunSummary(
     int OverdueRequestsMarked,
     int RequestEscalationNotificationsSent,
     int ComplianceItemsUpdated,
-    int ComplianceReminderNotificationsSent);
+    int ComplianceReminderNotificationsSent,
+    int DocumentRequirementNotificationsSent = 0);

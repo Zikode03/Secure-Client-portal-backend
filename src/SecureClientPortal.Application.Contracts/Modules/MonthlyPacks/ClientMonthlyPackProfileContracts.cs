@@ -133,7 +133,7 @@ public record ClientMonthlyPackProfileItemInput(
 // Recurrence accepts "this_month" or "every_month".
 // Clients may request recurring items, while accountants/admins can add recurring items immediately.
 public record AddClientMonthlyPackItemRequest(
-    string Category,
+    string? Category,
     string Label,
     bool IsRequired,
     string Recurrence,

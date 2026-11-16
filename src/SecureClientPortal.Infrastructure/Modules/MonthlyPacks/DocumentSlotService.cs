@@ -314,7 +314,7 @@ public sealed class DocumentSlotService : IDocumentSlotService
         ReviewSlotAsync(slotId, new AddReviewDecisionRequest("under_review", null, request.InternalNote), user, ct);
 
     public Task<ServiceResult<object>> ApproveAsync(string slotId, ApproveDocumentSlotRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
-        ReviewSlotAsync(slotId, new AddReviewDecisionRequest("accepted", null, request.InternalNote), user, ct);
+        ReviewSlotAsync(slotId, new AddReviewDecisionRequest("accepted", null, request.InternalNote, request.InvoiceReview), user, ct);
 
     public Task<ServiceResult<object>> RejectAsync(string slotId, RejectDocumentSlotRequest request, ClaimsPrincipal user, CancellationToken ct = default) =>
         ReviewSlotAsync(slotId, new AddReviewDecisionRequest("rejected", request.Reason, request.InternalNote), user, ct);

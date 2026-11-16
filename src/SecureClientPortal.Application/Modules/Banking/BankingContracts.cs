@@ -55,7 +55,8 @@ public sealed record BankingOverviewDto(
     IReadOnlyList<BankConnectionDto> Connections,
     IReadOnlyList<BankAccountDto> Accounts,
     IReadOnlyList<BankTransactionDto> RecentTransactions,
-    IReadOnlyList<BankSyncRunDto> SyncRuns);
+    IReadOnlyList<BankSyncRunDto> SyncRuns,
+    bool IntegrationEnabled = false);
 
 public sealed record MonthlyPackBankingStatusDto(
     Guid ClientId,
@@ -126,8 +127,17 @@ public interface IBankDataProvider
     Task DisconnectAsync(string externalConnectionId, CancellationToken ct = default);
 }
 
+public sealed record ManualBankAccountRequest(Guid? ClientId, string BankName, string AccountName, string LastFourDigits, Guid RegistrationId);
+public sealed record ManualTransactionRow(string Date, string Description, string Reference, decimal Amount, decimal? Balance);
+public sealed record ManualTransactionImportRequest(Guid AccountId, string SourceName, IReadOnlyList<ManualTransactionRow> Rows, bool Preview = true);
+public sealed record ManualTransactionImportResult(int Imported, int Duplicates, int TotalRows, decimal Credits, decimal Debits, bool Preview);
+
 public interface IBankingService
 {
+    Task<BankingOperationResult<BankingOverviewDto>> AddManualAccountAsync(ManualBankAccountRequest request, ClaimsPrincipal user, CancellationToken ct = default)
+        => Task.FromResult(BankingOperationResult<BankingOverviewDto>.Fail("Manual accounts unavailable."));
+    Task<BankingOperationResult<ManualTransactionImportResult>> ImportManualTransactionsAsync(ManualTransactionImportRequest request, ClaimsPrincipal user, CancellationToken ct = default)
+        => Task.FromResult(BankingOperationResult<ManualTransactionImportResult>.Fail("Manual import unavailable."));
     Task<BankingOperationResult<BankingOverviewDto>> GetOverviewAsync(Guid? clientId, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<MonthlyPackBankingStatusDto>> GetMonthlyPackStatusAsync(Guid clientId, int year, int month, ClaimsPrincipal user, CancellationToken ct = default);
     Task<BankingOperationResult<bool>> ReconcileMonthlyPackBankSlotAsync(Guid clientId, Guid monthlyPackId, ClaimsPrincipal user, CancellationToken ct = default);

@@ -60,7 +60,9 @@ public class DatabaseMigrationTests
             .UseSqlServer("Server=localhost;Database=migration_model_checks;Integrated Security=true;Encrypt=true", SqlServerMigrationConfiguration.Banking).Options);
         var portalMigrations = portal.Database.GetMigrations().ToArray();
         var bankingMigrations = banking.Database.GetMigrations().ToArray();
-        Assert.Equal(10, portalMigrations.Length);
+        Assert.Equal(14, portalMigrations.Length);
+        Assert.Contains(portalMigrations, id => id.EndsWith("_NotificationEmailQueue"));
+        Assert.Contains("20261111075508_InvoiceScanDetails", portalMigrations);
         Assert.Equal([SqlServerMigrationConfiguration.BankingFoundationId], bankingMigrations);
         Assert.Empty(portalMigrations.Intersect(bankingMigrations));
         Assert.Contains("[dbo].[__EFMigrationsHistory]", portal.GetService<IHistoryRepository>().GetCreateScript());

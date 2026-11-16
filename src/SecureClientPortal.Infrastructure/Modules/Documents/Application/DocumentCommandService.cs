@@ -63,6 +63,12 @@ public sealed class DocumentCommandService : IDocumentCommandService
             return ServiceResult<object>.ErrorResult("A valid document slot is required for this document upload.");
         }
 
+        if (slot is not null)
+        {
+            // The resolved checklist slot is authoritative; a renamed request cannot bypass its rules.
+            DocumentValidators.ValidateCategoryFile(slot.Category, request.File);
+            normalizedCategory = slot.Category;
+        }
         Document? existingDocument = null;
         if (request.DocumentId.HasValue)
         {
@@ -77,6 +83,9 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 return ServiceResult<object>.ForbiddenResult();
             }
         }
+
+        if (existingDocument is not null)
+            DocumentValidators.ValidateCategoryFile(existingDocument.Category, request.File);
 
         var packIsLocked = pack.Status is "under_review" or "complete" or "closed";
         var slotAllowsCorrection =
@@ -96,6 +105,25 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 statusCode: StatusCodes.Status409Conflict);
         }
 
+        InvoiceScanDetails? details = null;
+        if (!string.IsNullOrWhiteSpace(request.InvoiceDetailsJson))
+        {
+            if (!request.DetailsConfirmed || !InvoiceScanDetails.TryParse(request.InvoiceDetailsJson, out details))
+                return ServiceResult<object>.ErrorResult("Confirm valid supplier, date and ZAR amount details before saving.");
+            var candidates = await _documents.Documents.AsNoTracking()
+                .Where(x => x.ClientId == request.ClientId && x.Id != request.DocumentId && x.InvoiceDetailsJson != null)
+                .Select(x => x.InvoiceDetailsJson).ToListAsync(ct);
+            if (!request.AllowDuplicate && candidates.Any(json => InvoiceScanDetails.TryParse(json!, out var previous) && details!.MatchingFields(previous!) >= 2))
+                return ServiceResult<object>.ErrorResult("Possible duplicate invoice: two or more supplier, invoice number, date or amount fields match an existing document. Review the match and confirm it is separate before saving.", statusCode: 409);
+        }
+        var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? request.File.FileName : request.DisplayName.Trim();
+        displayName = System.Text.RegularExpressions.Regex.Replace(displayName, @"[\\/:*?""<>|\p{Cc}]", "_");
+        if (displayName.Length > 200 || !string.Equals(Path.GetExtension(displayName), Path.GetExtension(request.File.FileName), StringComparison.OrdinalIgnoreCase))
+            return ServiceResult<object>.ErrorResult("Use a display name under 200 characters with the original file extension.");
+
+        string contentHash;
+        await using (var source = request.File.OpenReadStream())
+            contentHash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(source, ct));
         var stored = await _fileStorage.SaveAsync(request.File, request.ClientId.ToString(), ct);
         var actorUserId = user.GetUserId() ?? throw new InvalidOperationException("Authenticated user id is required.");
         var now = DateTime.UtcNow;
@@ -108,7 +136,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 Guid.NewGuid(),
                 request.ClientId,
                 pack.Id,
-                stored.OriginalFileName,
+                displayName,
                 normalizedCategory,
                 slot?.Id,
                 stored.ContentType,
@@ -122,7 +150,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
             document = existingDocument!;
             document.ReplaceUpload(
                 pack.Id,
-                stored.OriginalFileName,
+                displayName,
                 normalizedCategory,
                 slot?.Id,
                 stored.ContentType,
@@ -139,11 +167,13 @@ public sealed class DocumentCommandService : IDocumentCommandService
             }
         }
 
+        document.SetContentSha256(contentHash);
+        document.SetInvoiceDetails(details is null ? null : JsonSerializer.Serialize(details, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         _documents.DocumentVersions.Add(DocumentVersion.Create(
             Guid.NewGuid(),
             document.Id,
             document.CurrentVersionNumber,
-            stored.OriginalFileName,
+            displayName,
             stored.OriginalFileName,
             stored.StoredFileName,
             stored.ContentType,
@@ -183,6 +213,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
                 monthlyPackId = pack.Id,
                 documentSlotId = slot?.Id,
                 isSupportingDocument = slot is null,
+                invoiceDetailsConfirmed = request.DetailsConfirmed,
+                duplicateAcknowledged = request.AllowDuplicate,
                 isCorrection = !isNewDocument,
                 versionNumber = document.CurrentVersionNumber,
                 document.StorageKey
@@ -268,6 +300,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
             request.StorageKey,
             request.UploadedByUserId);
 
+        if (created.InvoiceReviewRequired && NormalizeDocumentStatus(request.Status) is "accepted" or "filed")
+            return ServiceResult<Document>.ErrorResult("Invoice acceptance requires a saved accountant review through the review endpoint.");
         switch (NormalizeDocumentStatus(request.Status))
         {
             case "under_review":
@@ -336,6 +370,8 @@ public sealed class DocumentCommandService : IDocumentCommandService
 
         if (!string.IsNullOrWhiteSpace(request.StorageKey) && request.StorageKey != item.StorageKey)
             return ServiceResult<Document>.ErrorResult("Replace files through the scanned upload endpoint.");
+        if (item.InvoiceReviewRequired && NormalizeDocumentStatus(request.Status) != item.Status)
+            return ServiceResult<Document>.ErrorResult("Use the document review endpoint to change an invoice's review or filing status.");
         item.UpdateMetadata(
             request.Name,
             DocumentDomainValues.NormalizeCategory(request.Category),

@@ -49,6 +49,7 @@ public static class BackendModuleServiceCollectionExtensions
     public static IServiceCollection AddPlatformModule(this IServiceCollection services)
     {
         services.AddSingleton<ICurrentUserContextFactory, CurrentUserContextFactory>();
+        services.AddScoped<SecureClientPortal.Backend.Infrastructure.Modules.Migration.DataMigrationService>();
         services.AddScoped<IHealthService, HealthService>();
         services.AddScoped<IAutomationWorkflowService, ProfileAwareAutomationWorkflowService>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
@@ -81,6 +82,7 @@ public static class BackendModuleServiceCollectionExtensions
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IDocumentModuleDbContext>(sp => sp.GetRequiredService<PortalDbContext>());
         services.AddScoped<IDocumentQueryService, DocumentQueryService>();
+        services.AddScoped<InvoiceReviewService>();
         services.AddScoped<IDocumentCommandService, DocumentCommandService>();
         services.AddScoped<IDocumentLifecycleService, DocumentLifecycleService>();
         services.AddScoped<IDocumentWorkflowService, DocumentWorkflowService>();

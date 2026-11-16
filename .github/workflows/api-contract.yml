@@ -1,0 +1,20 @@
+name: Backend OpenAPI contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build src/SecureClientPortal.Api/SecureClientPortal.Api.csproj --configuration Release
+      - run: dotnet run --project tools/ContractMetadata/ContractMetadata.csproj --configuration Release -- . --check
+      - run: dotnet src/SecureClientPortal.Api/bin/Release/net8.0/SecureClientPortal.Api.dll --export-openapi openapi/portal-api.json
+      - run: git diff --exit-code -- openapi/portal-api.json
+      - run: dotnet test test/SecureClientPortal.Tests/SecureClientPortal.Tests.csproj --configuration Release --verbosity quiet

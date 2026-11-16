@@ -55,7 +55,10 @@ public class DocumentsController : ControllerBase
             var request = new UploadDocumentRequest {
                 ClientId = Parse("ClientId") ?? Guid.Empty, MonthlyPackId = Parse("MonthlyPackId"),
                 DocumentSlotId = Parse("DocumentSlotId"), DocumentId = Parse("DocumentId"),
-                DocumentType = fields.GetValueOrDefault("DocumentType", ""), File = file
+                DocumentType = fields.GetValueOrDefault("DocumentType", ""), File = file,
+                DisplayName = fields.GetValueOrDefault("DisplayName"), InvoiceDetailsJson = fields.GetValueOrDefault("InvoiceDetailsJson"),
+                DetailsConfirmed = bool.TryParse(fields.GetValueOrDefault("DetailsConfirmed"), out var confirmed) && confirmed,
+                AllowDuplicate = bool.TryParse(fields.GetValueOrDefault("AllowDuplicate"), out var allowDuplicate) && allowDuplicate
             };
             return await Upload(request, ct);
         });

@@ -14,6 +14,20 @@ public class Document : IHasDomainEvents
     public Guid ClientId { get; private set; }
     public Guid MonthlyPackId { get; private set; }
     public string Name { get; private set; } = string.Empty;
+    [System.ComponentModel.DataAnnotations.MaxLength(64)]
+    public string? ContentSha256 { get; private set; }
+    public void SetContentSha256(string hash) => ContentSha256 = hash;
+    public bool InvoiceReviewRequired { get; private set; }
+    public int InvoiceReviewRevision { get; private set; }
+    public void RecordInvoiceReview()
+    {
+        InvoiceReviewRequired = true;
+        InvoiceReviewRevision++;
+        Touch();
+    }
+    public string? InvoiceDetailsJson { get; private set; }
+    public void SetInvoiceDetails(string? json) => InvoiceDetailsJson = json;
+
     public string Category { get; private set; } = "general";
     public Guid? DocumentSlotId { get; private set; }
     public string Status { get; private set; } = DocumentStatus.Uploaded.ToStorageValue();
@@ -55,6 +69,7 @@ public class Document : IHasDomainEvents
 
         Name = name.Trim();
         Category = DocumentDomainValues.NormalizeCategory(category);
+        InvoiceReviewRequired |= Category.Contains("invoice", StringComparison.OrdinalIgnoreCase);
         Status = status.ToStorageValue();
         SizeBytes = sizeBytes;
         StorageKey = string.IsNullOrWhiteSpace(storageKey) ? null : storageKey.Trim();
@@ -137,11 +152,13 @@ public class Document : IHasDomainEvents
         MonthlyPackId = monthlyPackId;
         Name = name.Trim();
         Category = DocumentDomainValues.NormalizeCategory(category);
+        InvoiceReviewRequired |= Category.Contains("invoice", StringComparison.OrdinalIgnoreCase);
         DocumentSlotId = documentSlotId == Guid.Empty ? null : documentSlotId;
         Status = DocumentStatus.Uploaded.ToStorageValue();
         FileType = fileType.Trim();
         SizeBytes = sizeBytes;
         StorageKey = string.IsNullOrWhiteSpace(storageKey) ? null : storageKey.Trim();
+        ContentSha256 = null;
         UploadedByUserId = uploadedByUserId;
         CurrentVersionNumber = versionNumber;
         ClearFiling();

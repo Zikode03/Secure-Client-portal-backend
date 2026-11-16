@@ -17,7 +17,7 @@ This repository contains the ASP.NET Core backend for the Secure Client Portal.
 docker compose -f docker-compose.sqlserver.yml up -d
 ```
 
-SQL Server is exposed at `localhost:1433` with:
+SQL Server is exposed at `localhost:14330` with:
 - Database: `secure_client_portal_dev`
 - User: `sa`
 - Password: `StrongPass!12345`

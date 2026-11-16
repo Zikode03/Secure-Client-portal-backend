@@ -192,6 +192,28 @@ public sealed class TransportSecurityTests
         });
     }
 
+    [Fact]
+    public async Task DocumentedCsrfController_IssuesATokenThatProtectsTheSameCookieSession()
+    {
+        using var services = Services();
+        var issuing = Context(services, "GET");
+        var controller = new SecureClientPortal.Backend.Api.Modules.Auth.CsrfController {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = issuing }
+        };
+        var result = controller.GetToken(services.GetRequiredService<IAntiforgery>());
+        var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result.Result);
+        var token = Assert.IsType<SecureClientPortal.Backend.Api.Modules.Auth.CsrfTokenResponse>(ok.Value);
+        Assert.False(string.IsNullOrWhiteSpace(token.RequestToken));
+        Assert.Contains("no-store", issuing.Response.Headers.CacheControl.ToString());
+        var destination = Context(services, "POST");
+        destination.Request.Headers.Cookie = issuing.Response.Headers.SetCookie[0]!.Split(';')[0];
+        destination.Request.Headers[CsrfProtectionMiddleware.HeaderName] = token.RequestToken;
+        var called = false;
+        await new CsrfProtectionMiddleware(_ => { called = true; return Task.CompletedTask; }, [])
+            .InvokeAsync(destination, services.GetRequiredService<IAntiforgery>());
+        Assert.True(called);
+    }
+
     private static void IssueToken(IServiceProvider services, HttpContext destination, string? user = null)
     {
         var issuing = Context(services, "GET", user);

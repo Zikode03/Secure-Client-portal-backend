@@ -5,6 +5,8 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.Banking;
 public sealed class BankingOptions
 {
     public const string Section = "Banking";
+    // Revisit after 10 November 2027; never re-enable automatically by date.
+    public bool IntegrationEnabled { get; set; }
     public bool SandboxEnabled { get; set; }
 }
 

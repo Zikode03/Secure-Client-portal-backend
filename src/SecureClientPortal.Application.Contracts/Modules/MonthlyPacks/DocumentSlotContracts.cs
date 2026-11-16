@@ -16,7 +16,7 @@ public class UploadDocumentSlotRequest
 }
 
 public record StartDocumentSlotReviewRequest(string? InternalNote);
-public record ApproveDocumentSlotRequest(string? InternalNote);
+public record ApproveDocumentSlotRequest(string? InternalNote, SecureClientPortal.Backend.Application.Contracts.Modules.Documents.InvoiceReviewContext? InvoiceReview = null);
 public record RejectDocumentSlotRequest(string Reason, string? InternalNote);
 public record RequestDocumentSlotReuploadRequest(string Reason, string? InternalNote);
 

@@ -9,7 +9,7 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "StrongPass!12345"
     ports:
-      - "1433:1433"
+      - "14330:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
 

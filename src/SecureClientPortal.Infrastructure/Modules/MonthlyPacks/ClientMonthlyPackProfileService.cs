@@ -21,12 +21,17 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 {
     private readonly PortalDbContext _db;
     private readonly BankingDbContext? _bankingDb;
+    private readonly bool _integrationEnabled;
+    private readonly TimeProvider _timeProvider;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ClientMonthlyPackProfileService(PortalDbContext db, BankingDbContext? bankingDb = null)
+    public ClientMonthlyPackProfileService(PortalDbContext db, BankingDbContext? bankingDb = null,
+        Microsoft.Extensions.Options.IOptions<SecureClientPortal.Backend.Infrastructure.Modules.Banking.BankingOptions>? bankingOptions = null, TimeProvider? timeProvider = null)
     {
         _db = db;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _bankingDb = bankingDb;
+        _integrationEnabled = bankingOptions?.Value.IntegrationEnabled ?? false;
     }
 
     public async Task<ServiceResult<ClientMonthlyPackProfileDto>> GetAsync(Guid clientId, ClaimsPrincipal user, CancellationToken ct = default)
@@ -75,6 +80,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
         var state = await LoadStateAsync(clientId, ct);
         state.TemplateId = request.TemplateId;
+        var defaultEffectiveDate = await DefaultEffectiveDateAsync(clientId, ct);
         state.RecurringItems = request.RecurringItems
             .Where(x => !string.IsNullOrWhiteSpace(x.Label) && !string.IsNullOrWhiteSpace(x.Category))
             .Select(x =>
@@ -90,7 +96,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                     IsRequired = x.IsRequired,
                     DefaultDueDayOfMonth = NormalizeDueDay(x.DefaultDueDayOfMonth),
                     Cadence = NormalizeCadence(x.Cadence),
-                    EffectiveFromUtc = NormalizeEffectiveDate(x.EffectiveFromUtc) ?? existing?.EffectiveFromUtc ?? NormalizeEffectiveDate(DateTime.UtcNow)!.Value,
+                    EffectiveFromUtc = NormalizeEffectiveDate(x.EffectiveFromUtc) ?? existing?.EffectiveFromUtc ?? defaultEffectiveDate,
                     EffectiveToUtc = NormalizeEffectiveDate(x.EffectiveToUtc),
                     Source = "client_specific"
                 };
@@ -99,7 +105,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
         if (request.OperatingProfile is not null)
         {
-            var effectiveFrom = NormalizeEffectiveDate(request.EffectiveFromUtc) ?? NormalizeEffectiveDate(DateTime.UtcNow)!.Value;
+            var effectiveFrom = NormalizeEffectiveDate(request.EffectiveFromUtc) ?? defaultEffectiveDate;
             state.OperatingProfiles.RemoveAll(x => x.EffectiveFromUtc == effectiveFrom);
             state.OperatingProfiles.Add(OperatingProfileState.FromInput(request.OperatingProfile, effectiveFrom));
             state.OperatingProfiles = state.OperatingProfiles.OrderBy(x => x.EffectiveFromUtc).ToList();
@@ -143,11 +149,16 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         }
 
         var label = request.Label?.Trim() ?? string.Empty;
-        var category = DocumentDomainValues.NormalizeCategory(request.Category ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(category))
-        {
-            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult("Document name and category are required.");
-        }
+        if (string.IsNullOrWhiteSpace(label))
+            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult("Enter the name of the document or item you need.");
+        if (label.Length > 200 || label.Any(char.IsControl))
+            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult("Use an item name of at most 200 characters without control characters.");
+        // Clients name the item once. Explicit staff categories remain backwards compatible.
+        var category = string.IsNullOrWhiteSpace(request.Category)
+            ? CategoryFromItemName(label)
+            : DocumentDomainValues.NormalizeCategory(request.Category);
+        if (category.Length > 80)
+            return ServiceResult<AddClientMonthlyPackItemResponse>.ErrorResult("The document category is too long.");
 
         var recurrence = NormalizeRecurrence(request.Recurrence);
         if (recurrence is null)
@@ -212,7 +223,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             if (user.IsAdmin() || user.IsAccountant())
             {
                 // A professional user can approve the recurring rule at the same time they add it.
-                AddOrReplaceRecurringItem(state, category, label, request.IsRequired, recurringDueDay);
+                AddOrReplaceRecurringItem(state, category, label, request.IsRequired, recurringDueDay, new DateTime(pack.Year, pack.Month, 1, 0, 0, 0, DateTimeKind.Utc));
             }
             else
             {
@@ -382,7 +393,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
                 pending.Category,
                 pending.Label,
                 pending.IsRequired,
-                pending.DefaultDueDayOfMonth);
+                pending.DefaultDueDayOfMonth, await DefaultEffectiveDateAsync(clientId, ct));
         }
         state.PendingRecurringItems.RemoveAll(x => x.Id == requestId);
         state.UpdatedAtUtc = DateTime.UtcNow;
@@ -635,6 +646,8 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
 
         foreach (var slot in existing)
         {
+            // Account-specific statement evidence is owned by Banking reconciliation.
+            if (slot.Category.StartsWith("bank_statement_account_", StringComparison.Ordinal)) continue;
             if (expected.Remove(slot.Category, out var requirement))
             {
                 if (slot.Label != requirement.Label || slot.IsRequired != requirement.IsRequired)
@@ -914,7 +927,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
     }
 
     private Task<bool> HasActiveBankConnectionAsync(Guid clientId, CancellationToken ct) =>
-        _bankingDb is null ? Task.FromResult(false) :
+        !_integrationEnabled || _bankingDb is null ? Task.FromResult(false) :
         _bankingDb.BankConnections.AnyAsync(x => x.ClientId == clientId && x.Status != "disconnected", ct);
 
     private async Task<MonthlyPackTemplate?> ResolveTemplateAsync(Guid? selectedTemplateId, CancellationToken ct)
@@ -972,12 +985,19 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
         await _db.SaveChangesAsync(ct);
     }
 
+    private async Task<DateTime> DefaultEffectiveDateAsync(Guid clientId, CancellationToken ct)
+    {
+        var pack = await _db.MonthlyPacks.Where(x => x.ClientId == clientId && x.Status != "closed" && x.Status != "complete" && x.Status != "under_review")
+            .OrderByDescending(x => x.Year).ThenByDescending(x => x.Month).FirstOrDefaultAsync(ct);
+        return pack is null ? NormalizeEffectiveDate(_timeProvider.GetUtcNow().UtcDateTime)!.Value : new DateTime(pack.Year, pack.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+    }
+
     private static void AddOrReplaceRecurringItem(
         ProfileState state,
         string category,
         string label,
         bool isRequired,
-        int? defaultDueDayOfMonth)
+        int? defaultDueDayOfMonth, DateTime effectiveFrom)
     {
         var normalized = DocumentDomainValues.NormalizeCategory(category);
         state.RecurringItems.RemoveAll(x => string.Equals(x.Category, normalized, StringComparison.OrdinalIgnoreCase));
@@ -989,7 +1009,7 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             IsRequired = isRequired,
             DefaultDueDayOfMonth = NormalizeDueDay(defaultDueDayOfMonth),
             Cadence = "monthly",
-            EffectiveFromUtc = NormalizeEffectiveDate(DateTime.UtcNow)!.Value,
+            EffectiveFromUtc = NormalizeEffectiveDate(effectiveFrom)!.Value,
             Source = "client_specific"
         });
     }
@@ -1022,6 +1042,15 @@ public sealed class ClientMonthlyPackProfileService : IClientMonthlyPackProfileS
             "event" or "event_based" => "event_based",
             _ => "monthly"
         };
+
+    private static string CategoryFromItemName(string label)
+    {
+        var slug = System.Text.RegularExpressions.Regex.Replace(label.ToLowerInvariant(), "[^a-z0-9]+", "_").Trim('_');
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(label.ToLowerInvariant())))[..8].ToLowerInvariant();
+        if (slug.Length == 0) return "client_item_" + hash;
+        if (slug.Length > 70) slug = slug[..70] + "_" + hash;
+        return DocumentDomainValues.NormalizeCategory(slug);
+    }
 
     private static string BuildUniqueSlotCategory(string category)
     {

@@ -36,7 +36,12 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.Property<Guid>("ClientId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int>("CurrentVersionNumber")
+                        .IsConcurrencyToken()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(1);
@@ -55,6 +60,17 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.Property<Guid?>("FiledByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("InvoiceDetailsJson")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("InvoiceReviewRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("InvoiceReviewRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsFiled")
                         .HasColumnType("bit");
 
@@ -70,6 +86,7 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                         .HasColumnType("bigint");
 
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
@@ -315,9 +332,15 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.Property<Guid>("DocumentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("DocumentVersionNumber")
+                        .HasColumnType("int");
+
                     b.Property<string>("InternalNote")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int?>("InvoiceReviewRevision")
+                        .HasColumnType("int");
 
                     b.Property<string>("Reason")
                         .HasMaxLength(1000)
@@ -1083,6 +1106,46 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.ToTable("AppComplianceVerifications", (string)null);
                 });
 
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.DataMigrationBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("StateJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.ToTable("AppDataMigrationBatches", (string)null);
+                });
+
             modelBuilder.Entity("SecureClientPortal.Backend.Models.DeadlineRule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1136,6 +1199,68 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
 
                             t.HasCheckConstraint("CK_AppDeadlineRules_Priority", "Priority IN ('low','medium','high','urgent','critical')");
                         });
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.InvoiceReviewSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FindingsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RuleSetVersion")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("DocumentId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("AppInvoiceReviewSnapshots", (string)null);
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.MonthlyPackTemplate", b =>
@@ -1262,6 +1387,40 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.HasIndex("UserId", "IsRead", "CreatedAtUtc");
 
                     b.ToTable("AppNotifications", (string)null);
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.NotificationEmailDelivery", b =>
+                {
+                    b.Property<Guid>("NotificationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("SentAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("NotificationId");
+
+                    b.HasIndex("Status", "NextAttemptAtUtc");
+
+                    b.ToTable("AppNotificationEmailDeliveries", (string)null);
                 });
 
             modelBuilder.Entity("SecureClientPortal.Backend.Models.NotificationPreference", b =>
@@ -2093,6 +2252,24 @@ namespace SecureClientPortal.Infrastructure.EntityFrameworkCore.MigrationsSqlSer
                     b.HasOne("SecureClientPortal.Backend.Models.Client", null)
                         .WithMany()
                         .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.InvoiceReviewSnapshot", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Domain.Modules.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SecureClientPortal.Backend.Models.NotificationEmailDelivery", b =>
+                {
+                    b.HasOne("SecureClientPortal.Backend.Models.Notification", null)
+                        .WithOne()
+                        .HasForeignKey("SecureClientPortal.Backend.Models.NotificationEmailDelivery", "NotificationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

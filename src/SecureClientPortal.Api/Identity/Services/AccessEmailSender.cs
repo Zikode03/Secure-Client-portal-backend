@@ -65,6 +65,11 @@ public class AccessEmailSender : IAccessEmailSender
             "Enter this one-time code in the portal SMTP verification screen within 10 minutes: " + code,
             "<p>Enter this one-time code in the portal SMTP verification screen within 10 minutes:</p><p>" + WebUtility.HtmlEncode(code) + "</p>", "", ct);
 
+    public Task<AccessEmailDispatchResult> SendNotificationAsync(string email, string name, string title, string url, Guid id, CancellationToken ct) =>
+        SendAsync(email, name, $"{BrandName}: {title}",
+            $"Hello {name},\n\n{title}\n\nSign in to view the update securely: {url}\n\nReference: {id}",
+            $"<h2>{BrandName}</h2><p>Hello {WebUtility.HtmlEncode(name)},</p><p>{WebUtility.HtmlEncode(title)}</p><p><a href=\"{WebUtility.HtmlEncode(url)}\">View your notifications securely</a></p><p>Reference: {id}</p>", url, ct);
+
     private async Task<AccessEmailDispatchResult> SendAsync(
         string recipientEmail,
         string recipientName,
@@ -75,13 +80,7 @@ public class AccessEmailSender : IAccessEmailSender
         CancellationToken ct)
     {
         if (!_options.Enabled || !string.Equals(_options.DeliveryMode, "smtp", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation(
-                "Access email not sent via SMTP. Mode={Mode}; Subject={Subject}",
-                _options.DeliveryMode,
-                subject);
-            return new AccessEmailDispatchResult(_options.DeliveryMode, previewUrl);
-        }
+            throw new InvalidOperationException("Email delivery is not configured. Configure and verify SMTP before sending invitations or resets.");
 
         if (string.IsNullOrWhiteSpace(_options.SmtpHost))
         {

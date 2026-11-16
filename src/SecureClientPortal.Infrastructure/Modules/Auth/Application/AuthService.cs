@@ -382,6 +382,11 @@ public sealed partial class AuthService : IAuthService
                 await PermissionResolution.ResolvePermissionsAsync(_db, role, user.Role, ct))
             .ToArray();
 
+        var roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role);
+        var primaryClientId = accessibleClientIds.OrderBy(x => x).FirstOrDefault();
+        var company = roleScope == "client" && primaryClientId != Guid.Empty
+            ? await _db.Clients.AsNoTracking().Where(x => x.Id == primaryClientId).Select(x => x.Name).FirstOrDefaultAsync(ct) ?? ""
+            : "";
         return ServiceResult<object>.Success(new
         {
             user = new
@@ -391,8 +396,9 @@ public sealed partial class AuthService : IAuthService
                 title = PersonalProfileField(user.ProfileJson, "title"),
                 phone = PersonalProfileField(user.ProfileJson, "phone"),
                 email = user.Email,
+                company,
                 role = user.Role,
-                roleScope = role?.Scope ?? RolePermissions.ScopeForRole(user.Role),
+                roleScope,
                 permissions = effectivePermissions,
                 clientIds = accessibleClientIds.OrderBy(x => x).ToArray()
             }

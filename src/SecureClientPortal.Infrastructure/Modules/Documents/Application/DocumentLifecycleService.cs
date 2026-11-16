@@ -52,7 +52,18 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             return ServiceResult<Document>.ForbiddenResult();
         }
 
-        await ApplyLifecycleDecisionAsync(document, NormalizeDocumentStatus(request.Status), null, null, user, ct);
+        if (NormalizeDocumentStatus(request.Status) == "filed")
+        {
+            await using var transaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
+            await InvoiceReviewService.EnsureFilingAsync(_db, document, ct);
+            document.File(user.GetUserId()!.Value);
+            _db.AuditLogs.Add(AuditLog.Create(Guid.NewGuid(), user.GetUserId(), user.IsAdmin() ? "admin" : "accountant",
+                "documents.filed", "document", document.Id, document.ClientId, null));
+            await _documents.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return ServiceResult<Document>.Success(document);
+        }
+        await ApplyLifecycleDecisionAsync(document, NormalizeDocumentStatus(request.Status), null, null, user, ct, request.InvoiceReview);
         return ServiceResult<Document>.Success(document);
     }
 
@@ -77,7 +88,7 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             return ServiceResult<object>.ForbiddenResult();
         }
 
-        var reviewDecision = await ApplyLifecycleDecisionAsync(document, request.Decision, request.Reason, request.InternalNote, user, ct);
+        var reviewDecision = await ApplyLifecycleDecisionAsync(document, request.Decision, request.Reason, request.InternalNote, user, ct, request.InvoiceReview);
         return ServiceResult<object>.Success(new
         {
             reviewDecision.Id,
@@ -124,13 +135,18 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
         });
     }
 
-    private async Task<ReviewDecision> ApplyLifecycleDecisionAsync(Document document, string decision, string? reason, string? internalNote, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct)
+    private async Task<ReviewDecision> ApplyLifecycleDecisionAsync(Document document, string decision, string? reason, string? internalNote, System.Security.Claims.ClaimsPrincipal user, CancellationToken ct, InvoiceReviewContext? invoiceReview = null)
     {
+        await using var transaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         var currentUser = _currentUserContextFactory.Create(user);
         var reviewerUserId = currentUser.UserId ?? throw new InvalidOperationException("Authenticated user id is required.");
         var reviewerRole = currentUser.IsAdmin ? "admin" : "accountant";
         var now = DateTime.UtcNow;
         var normalizedDecision = DocumentReviewPolicy.NormalizeDecision(decision);
+        if (invoiceReview is not null && invoiceReview.ExpectedVersionNumber != document.CurrentVersionNumber)
+            throw new DbUpdateConcurrencyException("The document version changed. Refresh before recording a review decision.");
+        if (normalizedDecision == "accepted")
+            await InvoiceReviewService.EnsureAcceptanceAsync(_db, document, invoiceReview, ct);
 
         var slot = !document.DocumentSlotId.HasValue
             ? null
@@ -150,7 +166,11 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             internalNote,
             now);
 
+        reviewDecision.RecordReviewedVersion(document.CurrentVersionNumber, document.InvoiceReviewRequired ? document.InvoiceReviewRevision : null);
         document.RecordReviewDecision(normalizedDecision, reviewDecision.Reason, reviewerUserId, reviewerRole, now);
+        // Persist the document transition first to acquire its concurrency lock before
+        // inserting the dependent decision. Both saves remain inside this transaction.
+        await _documents.SaveChangesAsync(ct);
         _documents.ReviewDecisions.Add(reviewDecision);
 
         if (pack is not null)
@@ -182,7 +202,9 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
                 decision = normalizedDecision,
                 reason = reviewDecision.Reason,
                 internalNote = reviewDecision.InternalNote,
-                document.Status
+                document.Status,
+                document.CurrentVersionNumber,
+                document.InvoiceReviewRevision
             }),
             ct);
 
@@ -194,6 +216,7 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             await _domainEventDispatcher.DispatchAsync(requestEvents, ct);
         }
 
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return reviewDecision;
     }
 
