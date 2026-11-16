@@ -46,6 +46,18 @@ jobs:
         timeout-minutes: 5
         shell: bash
         run: dotnet run --project tools/PortalRecovery/PortalRecovery.csproj -c Release -- smoke --server localhost,14433 --user sa --trust-server-certificate --sql-staging /var/opt/mssql/backup --local-staging "$RUNNER_TEMP/portal-recovery-sql"
+      - name: Active HTTP security assessment
+        timeout-minutes: 5
+        env:
+          PORTAL_SECURITY_TEST_SQL: "Server=localhost,14433;User ID=sa;Password=${{ env.SQLCMDPASSWORD }};Encrypt=true;TrustServerCertificate=true"
+        run: dotnet run --project tools/SecurityProbe/SecurityProbe.csproj -c Release -- .
+      - name: Save HTTP security assessment
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-http-assessment
+          path: TestResults/security-http-assessment.json
+          if-no-files-found: ignore
       - name: Recovery SQL diagnostics
         if: failure()
         run: docker logs portal-recovery-sql 2>&1 | tail -60 || true

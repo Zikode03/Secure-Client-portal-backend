@@ -244,7 +244,7 @@ builder.Services
 
                 var mfa = await db.AccountSecurities.FindAsync([user.Id], context.HttpContext.RequestAborted);
                 var session = await db.UserSessions.FirstOrDefaultAsync(x => x.JwtId == jwtId, context.HttpContext.RequestAborted);
-                if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= DateTime.UtcNow ||
+                if (session is null || session.UserId != user.Id || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= DateTime.UtcNow ||
                     ((user.Role is "admin" or "accountant" || mfa?.MfaSecret is not null) && !session.MfaVerified))
                 {
                     context.Fail("Session has expired.");
