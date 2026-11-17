@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -185,7 +186,7 @@ public class Phase5AdministrationTests
         await using var db = BuildDb();
         Seed(db);
 
-        var controller = new RolesController(new RoleService(db), new CurrentUserContextFactory())
+        var controller = new RolesController(new RoleService(db, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?>{{"Administration:OwnerUserId",AdminUserId.ToString()}}).Build()), new CurrentUserContextFactory())
         {
             ControllerContext = BuildControllerContext(BuildUser(AdminUserId, "admin"))
         };

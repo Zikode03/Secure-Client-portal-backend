@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
@@ -14,15 +15,18 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.UsersRoles.Applicati
 public sealed partial class AdminService : IAdminService
 {
     private readonly PortalDbContext _db;
+    private readonly IConfiguration? _configuration;
     private readonly IAccessEmailSender _accessEmailSender;
     private readonly IAccessLinkBuilder _accessLinkBuilder;
 
     public AdminService(
         PortalDbContext db,
         IAccessEmailSender accessEmailSender,
-        IAccessLinkBuilder accessLinkBuilder)
+        IAccessLinkBuilder accessLinkBuilder,
+        IConfiguration? configuration = null)
     {
         _db = db;
+        _configuration = configuration;
         _accessEmailSender = accessEmailSender;
         _accessLinkBuilder = accessLinkBuilder;
     }
@@ -153,6 +157,8 @@ public sealed partial class AdminService : IAdminService
 
         if (user.Role == "admin" && roleName != "admin" && !await HasOtherActiveAdminAsync(user.Id, ct))
             return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator before changing this role.");
+        if (AdministrationAccess.IsOwner(_configuration, user.Id) && roleName != user.Role)
+            return ServiceResult<object>.ForbiddenResult("Transfer installation ownership before changing the system owner role.");
         user.AssignRole(IdentityDomainValues.ToUserRole(roleName));
         var activeSessions = await _db.UserSessions
             .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow)
@@ -194,6 +200,8 @@ public sealed partial class AdminService : IAdminService
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
         if (user.Role == "admin" && normalizedStatus != "active" && !await HasOtherActiveAdminAsync(user.Id, ct))
             return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator before disabling this account.");
+        if (AdministrationAccess.IsOwner(_configuration, user.Id) && normalizedStatus != "active")
+            return ServiceResult<object>.ForbiddenResult("Transfer installation ownership before disabling the system owner.");
         user.SetSecurityStatus(IdentityDomainValues.ToSecurityStatus(normalizedStatus));
 
         if (normalizedStatus is "disabled" or "locked")
@@ -310,8 +318,7 @@ public sealed partial class AdminService : IAdminService
 
     private async Task<bool> HasOtherActiveAdminAsync(Guid except, CancellationToken ct)
     {
-        var candidates = await _db.Users.Where(x => x.Role == "admin" && x.Id != except).Select(x => x.SecurityJson).ToListAsync(ct);
-        return candidates.Any(json => UserSecurityProfile.GetStatus(json) == "active");
+        return await AdministrationAccess.HasOtherActiveAdminAsync(_db, except, ct);
     }
 
     public async Task<object> GetSettingAsync(string key, CancellationToken ct = default)

@@ -22,7 +22,7 @@ public class AssignmentsController : ControllerBase
 
     [HttpGet]
     [SecureClientPortal.Backend.Api.Security.RequirePermission("assignments.read")]
-    public async Task<ActionResult<IEnumerable<object>>> GetAll([FromQuery] string? clientId = null)
+    public async Task<ActionResult<IEnumerable<AssignmentResponse>>> GetAll([FromQuery] string? clientId = null)
     {
         var result = await _assignments.GetAllAsync(User, clientId);
         return result.forbidden ? Forbid() : Ok(result.results);

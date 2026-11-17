@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application;
 using SecureClientPortal.Backend.Auth;
@@ -15,12 +16,15 @@ public sealed class RoleService : IRoleService
 {
     private readonly PortalDbContext _db;
 
-    public RoleService(PortalDbContext db)
+    private readonly IConfiguration? _configuration;
+
+    public RoleService(PortalDbContext db, IConfiguration? configuration = null)
     {
         _db = db;
+        _configuration = configuration;
     }
 
-    public async Task<IReadOnlyList<object>> GetAllAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<RoleResponse>> GetAllAsync(CancellationToken ct = default)
     {
         var roles = await _db.RoleDefinitions
             .OrderBy(x => x.Scope)
@@ -38,7 +42,7 @@ public sealed class RoleService : IRoleService
                     .ToArray(),
                 ct);
 
-        var payload = new List<object>(roles.Count);
+        var payload = new List<RoleResponse>(roles.Count);
         foreach (var role in roles)
         {
             var configuredPermissions = rolePermissionMap.TryGetValue(role.Name, out var permissions) && permissions.Count > 0
@@ -46,25 +50,29 @@ public sealed class RoleService : IRoleService
                 : RolePermissions.ParsePermissions(role.PermissionsJson, role.Name);
             var effectivePermissions = await PermissionResolution.ResolvePermissionsAsync(_db, role, role.Name, ct);
 
-            payload.Add(new
-            {
-                role.Name,
-                role.DisplayName,
-                role.Scope,
-                permissions = effectivePermissions,
-                configuredPermissions,
-                role.IsSystemRole,
-                role.IsActive,
-                role.CreatedAtUtc,
-                role.UpdatedAtUtc
-            });
+            payload.Add(new RoleResponse(role.Name, role.DisplayName, role.Scope,
+                effectivePermissions, configuredPermissions, role.IsSystemRole, role.IsActive,
+                role.CreatedAtUtc, role.UpdatedAtUtc));
         }
 
         return payload;
     }
 
+    public async Task<RoleManagementAccess> GetAccessAsync(CurrentUserContext actor, CancellationToken ct = default)
+    {
+        async Task<bool> Allowed(string permission)
+        {
+            try { await AdministrationAccess.RequireOwnerAsync(_db, _configuration, actor, permission, ct); return true; }
+            catch (SecureClientPortal.Backend.Application.Common.AppForbiddenException) { return false; }
+        }
+        return new(await Allowed("roles.create"), await Allowed("roles.update"), await Allowed("roles.activate"), await Allowed("roles.deactivate"));
+    }
+
     public async Task<object> CreateAsync(CreateRoleRequest request, CurrentUserContext actor, CancellationToken ct = default)
     {
+
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
+        await AdministrationAccess.RequireOwnerAsync(_db, _configuration, actor, "roles.create", ct);
         var roleName = NormalizeRoleName(request.Name);
         if (string.IsNullOrWhiteSpace(roleName))
         {
@@ -114,6 +122,9 @@ public sealed class RoleService : IRoleService
 
     public async Task<object?> UpdateAsync(string name, UpdateRoleRequest request, CurrentUserContext actor, CancellationToken ct = default)
     {
+
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
+        await AdministrationAccess.RequireOwnerAsync(_db, _configuration, actor, "roles.update", ct);
         var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == name, ct);
         if (role is null)
         {
@@ -124,8 +135,8 @@ public sealed class RoleService : IRoleService
         var normalizedPermissions = RolePermissions.NormalizePermissions(
             request.Permissions ?? RolePermissions.ParsePermissions(role.PermissionsJson));
 
-        if (role.Name == "admin" && (normalizedScope != "admin" || !normalizedPermissions.Contains("access.admin")))
-            throw new ArgumentException("The administrator role must retain administrator workspace access.");
+        if (role.Name == "admin" && (normalizedScope != "admin" || AdministrationAccess.RequiredAdminPermissions.Any(permission => !normalizedPermissions.Contains(permission))))
+            throw new ArgumentException("The administrator role must retain sign-in, user administration and role management permissions to prevent lockout.");
         role.UpdateDefinition(
             string.IsNullOrWhiteSpace(request.DisplayName) ? role.DisplayName : request.DisplayName,
             normalizedScope,
@@ -158,6 +169,9 @@ public sealed class RoleService : IRoleService
 
     public async Task<object?> UpdateActivationAsync(string name, bool isActive, CurrentUserContext actor, CancellationToken ct = default)
     {
+
+        await using var administrationGate = await AccountAttemptLock.AcquireAsync(_db, "firm-admin-continuity", ct);
+        await AdministrationAccess.RequireOwnerAsync(_db, _configuration, actor, isActive ? "roles.activate" : "roles.deactivate", ct);
         var role = await _db.RoleDefinitions.FirstOrDefaultAsync(x => x.Name == name, ct);
         if (role is null)
         {

@@ -4,7 +4,8 @@ namespace SecureClientPortal.Backend.Application.Modules.UsersRoles;
 
 public interface IRoleService
 {
-    Task<IReadOnlyList<object>> GetAllAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<RoleResponse>> GetAllAsync(CancellationToken ct = default);
+    Task<RoleManagementAccess> GetAccessAsync(CurrentUserContext actor, CancellationToken ct = default);
     Task<object> CreateAsync(CreateRoleRequest request, CurrentUserContext actor, CancellationToken ct = default);
     Task<object?> UpdateAsync(string name, UpdateRoleRequest request, CurrentUserContext actor, CancellationToken ct = default);
     Task<object?> UpdateActivationAsync(string name, bool isActive, CurrentUserContext actor, CancellationToken ct = default);

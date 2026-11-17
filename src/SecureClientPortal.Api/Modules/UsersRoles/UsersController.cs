@@ -72,7 +72,7 @@ public class UsersController : ControllerBase
 
     private IActionResult FromResult<T>(ServiceResult<T> result)
     {
-        if (result.Forbidden) return Forbid();
+        if (result.Forbidden) return string.IsNullOrWhiteSpace(result.Error) ? Forbid() : StatusCode(403, new { code = result.ErrorCode ?? "ACCESS_DENIED", error = result.Error });
         if (result.NotFound) return string.IsNullOrWhiteSpace(result.Error) ? NotFound() : NotFound(new { error = result.Error });
         if (result.Unauthorized) return StatusCode(result.StatusCode ?? StatusCodes.Status401Unauthorized, new { code = result.ErrorCode, message = result.Error });
         if (!string.IsNullOrWhiteSpace(result.Error)) return StatusCode(result.StatusCode ?? StatusCodes.Status400BadRequest, new { code = result.ErrorCode, error = result.Error });

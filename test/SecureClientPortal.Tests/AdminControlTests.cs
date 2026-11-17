@@ -64,7 +64,7 @@ public sealed class AdminControlTests
         await using var db=Db();var u=Person(UserRole.Admin);db.Users.Add(u);db.RoleDefinitions.Add(RoleDefinition.Create("accountant","Accountant","accountant","[]",true));await db.SaveChangesAsync(Ct);
         Assert.True((await Service(db).UpdateUserStatusAsync(u.Id.ToString(),new("disabled"),Actor("users.update"),Ct)).Forbidden);
         Assert.True((await Service(db).UpdateUserRoleAsync(u.Id.ToString(),new("accountant"),Actor("users.update"),Ct)).Forbidden);
-        var other=Person(UserRole.Admin);db.Users.Add(other);await db.SaveChangesAsync(Ct);
+        var other=Person(UserRole.Admin);db.RoleDefinitions.Add(RoleDefinition.Create("admin","Admin","admin",RolePermissions.SerializePermissions(RolePermissions.ForRole("admin")),true));db.Users.Add(other);await db.SaveChangesAsync(Ct);
         Assert.Null((await Service(db).UpdateUserStatusAsync(u.Id.ToString(),new("disabled"),Actor("users.update"),Ct)).Error);
     }
     [Fact] public async Task Setting_changes_are_audited_without_values_and_operational_results_are_read_only()

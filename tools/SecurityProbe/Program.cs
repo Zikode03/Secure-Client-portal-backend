@@ -113,6 +113,9 @@ try
     using (var c = Client(url)) await Status(c, "/api/auth/complete-invite", 401, "Fabricated setup token rejected", HttpMethod.Post, JsonContent.Create(new { email = "a@example.invalid", token = "fabricated-security-test-token", fullName = "Security test", password }), true);
     using (var c = Client(url)) await Status(c, "/api/auth/mfa/verify", 401, "Fabricated MFA challenge rejected", HttpMethod.Post, JsonContent.Create(new { challengeToken = "fabricated-security-test-token", code = "123456" }), true);
     await using (var db = Db()) { var unverified = UserSession.Start(Guid.NewGuid(), staffId, Guid.NewGuid(), DateTime.UtcNow.AddMinutes(30), null, null); db.UserSessions.Add(unverified); await db.SaveChangesAsync(); using var c = Client(url, Token(staffId, unverified.JwtId)); await Status(c, "/api/auth/me", 401, "Staff session requires verified MFA"); }
+    await Status(admin,"/api/admin/team-progress",200,"Administrator can view team progress through real SQL aggregation");
+    await Status(staff,"/api/admin/team-progress",403,"Accountant cannot access firm-wide team progress");
+    await Status(ca,"/api/admin/team-progress",403,"Client cannot access team progress");
     await Status(admin,"/api/admin/operations",200,"Administrator can view live operations");
     await Status(staff,"/api/admin/operations",403,"Accountant cannot inspect admin operational status");
     await Status(ca,"/api/admin/operations",403,"Client cannot inspect admin operational status");

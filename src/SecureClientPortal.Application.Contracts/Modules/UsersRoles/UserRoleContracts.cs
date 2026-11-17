@@ -19,3 +19,9 @@ public record AdminSettingRequest(string ValueJson);
 
 public record CreateRoleRequest(string Name, string DisplayName, string Scope, string[]? Permissions);
 public record UpdateRoleRequest(string? DisplayName, string Scope, string[]? Permissions);
+
+public sealed record RoleResponse(string Name, string DisplayName, string Scope,
+    IReadOnlyList<string> Permissions, IReadOnlyList<string> ConfiguredPermissions,
+    bool IsSystemRole, bool IsActive, DateTime CreatedAtUtc, DateTime UpdatedAtUtc);
+
+public sealed record RoleManagementAccess(bool CanCreate, bool CanUpdate, bool CanActivate, bool CanDeactivate);

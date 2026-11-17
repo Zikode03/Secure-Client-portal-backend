@@ -22,9 +22,17 @@ public class RolesController : ControllerBase
 
     [HttpGet]
     [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.read")]
-    public async Task<ActionResult<IEnumerable<object>>> GetAll()
+    public async Task<ActionResult<IEnumerable<RoleResponse>>> GetAll()
     {
         return Ok(await _roles.GetAllAsync());
+    }
+
+    [HttpGet("access")]
+    [SecureClientPortal.Backend.Api.Security.RequirePermission("roles.read")]
+    public async Task<ActionResult<RoleManagementAccess>> Access(CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Ok(await _roles.GetAccessAsync(_currentUserContextFactory.Create(User, HttpContext), ct));
     }
 
     [HttpPost]
@@ -79,9 +87,15 @@ public class RolesController : ControllerBase
 
     private async Task<IActionResult> UpdateActivationAsync(string name, bool isActive)
     {
-        if (string.Equals(name, "admin", StringComparison.OrdinalIgnoreCase) && !isActive) return BadRequest(new { error = "The administrator role cannot be disabled." });
-        var actor = _currentUserContextFactory.Create(User, HttpContext);
-        var updated = await _roles.UpdateActivationAsync(name, isActive, actor);
-        return updated is null ? NotFound() : Ok(updated);
+        try
+        {
+            var actor = _currentUserContextFactory.Create(User, HttpContext);
+            var updated = await _roles.UpdateActivationAsync(name, isActive, actor);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 }

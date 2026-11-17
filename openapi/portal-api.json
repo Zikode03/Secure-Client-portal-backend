@@ -123,6 +123,62 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentHandoverRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accountantName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "accountantUserId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accountantUserId",
+          "clientId",
+          "createdAtUtc",
+          "id",
+          "isPrimary"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.CreateAssignmentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -133,6 +189,9 @@
           "clientId": {
             "format": "uuid",
             "type": "string"
+          },
+          "handover": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentHandoverRequest"
           },
           "isPrimary": {
             "type": "boolean"
@@ -155,6 +214,9 @@
           "fromAccountantUserId": {
             "format": "uuid",
             "type": "string"
+          },
+          "handover": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentHandoverRequest"
           },
           "makePrimary": {
             "type": "boolean"
@@ -2838,6 +2900,77 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AccountantProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "accountStatus": {
+            "type": "string"
+          },
+          "accountantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "approvedItems": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "awaitingReview": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "backupClients": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "clients": {
+            "items": {
+              "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.ClientWorkProgress"
+            },
+            "type": "array"
+          },
+          "decisionsToday": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "inReview": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "latestActivity": {
+            "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamActivity"
+          },
+          "name": {
+            "type": "string"
+          },
+          "primaryClients": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "requiredItems": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "waitingOnClient": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountantId",
+          "accountStatus",
+          "approvedItems",
+          "awaitingReview",
+          "backupClients",
+          "clients",
+          "decisionsToday",
+          "inReview",
+          "name",
+          "primaryClients",
+          "requiredItems",
+          "waitingOnClient"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminCreateUserRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3011,6 +3144,34 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.ClientWorkProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment": {
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "packs": {
+            "items": {
+              "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.PackProgress"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assignment",
+          "clientId",
+          "clientName",
+          "packs"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.CreateRoleRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3091,6 +3252,184 @@
         "required": [
           "atUtc",
           "status"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.PackProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "approvedItems": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "awaitingReview": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "inReview": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "month": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "packId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "requiredItems": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "waitingOnClient": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "approvedItems",
+          "awaitingReview",
+          "inReview",
+          "month",
+          "packId",
+          "requiredItems",
+          "status",
+          "waitingOnClient",
+          "year"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleManagementAccess": {
+        "additionalProperties": false,
+        "properties": {
+          "canActivate": {
+            "type": "boolean"
+          },
+          "canCreate": {
+            "type": "boolean"
+          },
+          "canDeactivate": {
+            "type": "boolean"
+          },
+          "canUpdate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canActivate",
+          "canCreate",
+          "canDeactivate",
+          "canUpdate"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "configuredPermissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isSystemRole": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "updatedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuredPermissions",
+          "createdAtUtc",
+          "displayName",
+          "isActive",
+          "isSystemRole",
+          "name",
+          "permissions",
+          "scope",
+          "updatedAtUtc"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamActivity": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "atUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "clientName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "documentName": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "atUtc"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamProgressResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accountants": {
+            "items": {
+              "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AccountantProgress"
+            },
+            "type": "array"
+          },
+          "checkedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "unassignedClients": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountants",
+          "checkedAtUtc",
+          "unassignedClients"
         ],
         "type": "object"
       },
@@ -4734,57 +5073,6 @@
         ],
         "type": "object"
       },
-      "Source.Anonymous_6F0564D7759F2524": {
-        "properties": {
-          "configuredPermissions": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "createdAtUtc": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "isSystemRole": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "permissions": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "updatedAtUtc": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "configuredPermissions",
-          "createdAtUtc",
-          "displayName",
-          "isActive",
-          "isSystemRole",
-          "name",
-          "permissions",
-          "scope",
-          "updatedAtUtc"
-        ],
-        "type": "object"
-      },
       "Source.Anonymous_6F4CA6E344941AF7": {
         "properties": {
           "message": {
@@ -6079,6 +6367,47 @@
         "required": [
           "firmName",
           "logoDataUrl"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentResponse": {
+        "properties": {
+          "accountantName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "accountantUserId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accountantName",
+          "accountantUserId",
+          "clientId",
+          "clientName",
+          "createdAtUtc",
+          "id",
+          "isPrimary"
         ],
         "type": "object"
       },
@@ -8963,6 +9292,74 @@
         ],
         "type": "object"
       },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AccountantProgress": {
+        "properties": {
+          "accountStatus": {
+            "type": "string"
+          },
+          "accountantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "approvedItems": {
+            "type": "integer"
+          },
+          "awaitingReview": {
+            "type": "integer"
+          },
+          "backupClients": {
+            "type": "integer"
+          },
+          "clients": {
+            "items": {
+              "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.ClientWorkProgress"
+            },
+            "type": "array"
+          },
+          "decisionsToday": {
+            "type": "integer"
+          },
+          "inReview": {
+            "type": "integer"
+          },
+          "latestActivity": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamActivity"
+              }
+            ],
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "primaryClients": {
+            "type": "integer"
+          },
+          "requiredItems": {
+            "type": "integer"
+          },
+          "waitingOnClient": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountStatus",
+          "accountantId",
+          "approvedItems",
+          "awaitingReview",
+          "backupClients",
+          "clients",
+          "decisionsToday",
+          "inReview",
+          "latestActivity",
+          "name",
+          "primaryClients",
+          "requiredItems",
+          "waitingOnClient"
+        ],
+        "type": "object"
+      },
       "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AdminOperationsResponse": {
         "properties": {
           "accessEmailEnabled": {
@@ -9059,6 +9456,33 @@
         ],
         "type": "object"
       },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.ClientWorkProgress": {
+        "properties": {
+          "assignment": {
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "packs": {
+            "items": {
+              "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.PackProgress"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assignment",
+          "clientId",
+          "clientName",
+          "packs"
+        ],
+        "type": "object"
+      },
       "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.OperationResult": {
         "properties": {
           "atUtc": {
@@ -9076,6 +9500,173 @@
           "atUtc",
           "status",
           "verified"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.PackProgress": {
+        "properties": {
+          "approvedItems": {
+            "type": "integer"
+          },
+          "awaitingReview": {
+            "type": "integer"
+          },
+          "inReview": {
+            "type": "integer"
+          },
+          "month": {
+            "type": "integer"
+          },
+          "packId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "requiredItems": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "waitingOnClient": {
+            "type": "integer"
+          },
+          "year": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "approvedItems",
+          "awaitingReview",
+          "inReview",
+          "month",
+          "packId",
+          "requiredItems",
+          "status",
+          "waitingOnClient",
+          "year"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleManagementAccess": {
+        "properties": {
+          "canActivate": {
+            "type": "boolean"
+          },
+          "canCreate": {
+            "type": "boolean"
+          },
+          "canDeactivate": {
+            "type": "boolean"
+          },
+          "canUpdate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canActivate",
+          "canCreate",
+          "canDeactivate",
+          "canUpdate"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleResponse": {
+        "properties": {
+          "configuredPermissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isSystemRole": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "updatedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuredPermissions",
+          "createdAtUtc",
+          "displayName",
+          "isActive",
+          "isSystemRole",
+          "name",
+          "permissions",
+          "scope",
+          "updatedAtUtc"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamActivity": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "atUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "clientName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "documentName": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "atUtc",
+          "clientName",
+          "documentName"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamProgressResponse": {
+        "properties": {
+          "accountants": {
+            "items": {
+              "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.AccountantProgress"
+            },
+            "type": "array"
+          },
+          "checkedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "unassignedClients": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountants",
+          "checkedAtUtc",
+          "unassignedClients"
         ],
         "type": "object"
       },
@@ -12182,6 +12773,47 @@
         ]
       }
     },
+    "/api/admin/team-progress": {
+      "get": {
+        "operationId": "TeamProgress_Get_GET_api_admin_team_progress",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamProgressResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamProgressResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.TeamProgressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "TeamProgress"
+        ]
+      }
+    },
     "/api/admin/users": {
       "get": {
         "operationId": "Admin_GetUsers_GET_api_admin_users",
@@ -12706,19 +13338,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentResponse"
+                  },
                   "type": "array"
                 }
               },
               "text/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentResponse"
+                  },
                   "type": "array"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Assignments.AssignmentResponse"
+                  },
                   "type": "array"
                 }
               }
@@ -20158,19 +20796,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleResponse"
+                  },
                   "type": "array"
                 }
               },
               "text/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleResponse"
+                  },
                   "type": "array"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleResponse"
+                  },
                   "type": "array"
                 }
               }
@@ -20236,6 +20880,47 @@
         "security": [
           {
             "csrfToken": [],
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "Roles"
+        ]
+      }
+    },
+    "/api/roles/access": {
+      "get": {
+        "operationId": "Roles_Access_GET_api_roles_access",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleManagementAccess"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleManagementAccess"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.UsersRoles.RoleManagementAccess"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
             "portalCookie": []
           }
         ],

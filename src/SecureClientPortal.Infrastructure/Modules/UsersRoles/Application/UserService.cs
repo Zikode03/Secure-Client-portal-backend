@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SecureClientPortal.Backend.Application.Common;
@@ -14,15 +15,18 @@ namespace SecureClientPortal.Backend.Infrastructure.Modules.UsersRoles.Applicati
 public sealed class UserService : IUserService
 {
     private readonly PortalDbContext _db;
+    private readonly IConfiguration? _configuration;
     private readonly IAccessEmailSender _accessEmailSender;
     private readonly IAccessLinkBuilder _accessLinkBuilder;
 
     public UserService(
         PortalDbContext db,
         IAccessEmailSender accessEmailSender,
-        IAccessLinkBuilder accessLinkBuilder)
+        IAccessLinkBuilder accessLinkBuilder,
+        IConfiguration? configuration = null)
     {
         _db = db;
+        _configuration = configuration;
         _accessEmailSender = accessEmailSender;
         _accessLinkBuilder = accessLinkBuilder;
     }
@@ -171,9 +175,10 @@ public sealed class UserService : IUserService
 
         if (!request.IsActive && user.Role == "admin")
         {
-            var otherAdmins = await _db.Users.Where(x => x.Role == "admin" && x.Id != user.Id).Select(x => x.SecurityJson).ToListAsync(ct);
-            if (!otherAdmins.Any(json => UserSecurityProfile.GetStatus(json) == "active")) return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator.");
+            if (!await AdministrationAccess.HasOtherActiveAdminAsync(_db, user.Id, ct)) return ServiceResult<object>.ForbiddenResult("Keep at least one active administrator.");
         }
+        if (!request.IsActive && AdministrationAccess.IsOwner(_configuration, user.Id))
+            return ServiceResult<object>.ForbiddenResult("Transfer installation ownership before disabling the system owner.");
         user.SetSecurityStatus(request.IsActive ? SecurityStatus.Active : SecurityStatus.Disabled, request.Reason);
 
         if (!request.IsActive)

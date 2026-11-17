@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using SecureClientPortal.Backend.Infrastructure.Modules.Clients;
@@ -25,6 +26,14 @@ public sealed class PermissionRevocationTests
     private static PortalDbContext Db() => new(new DbContextOptionsBuilder<PortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
     private static readonly CurrentUserContext Admin = new(Guid.NewGuid(),"admin","admin",["access.admin"],null,null);
 
+    private static async Task<RoleService> OwnerService(PortalDbContext db)
+    {
+        var owner = User.CreateInvited(Admin.UserId!.Value,"Owner","owner@example.invalid",UserRole.Admin,"hash","[]",null);
+        owner.CompleteSetup("Owner","hash"); db.Users.Add(owner);
+        db.RoleDefinitions.Add(RoleDefinition.Create("admin","Admin","admin",RolePermissions.SerializePermissions(RolePermissions.ForRole("admin")),true));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return new RoleService(db,new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?>{{"Administration:OwnerUserId",owner.Id.ToString()}}).Build());
+    }
     [Fact] public void Explicit_permissions_never_fall_back_to_scope_defaults()
     {
         var user=Principal("access.accountant","clients.read");
@@ -80,7 +89,7 @@ public sealed class PermissionRevocationTests
         var second=UserSession.Start(Guid.NewGuid(),staff.Id,Guid.NewGuid(),DateTime.UtcNow.AddHours(2),null,null);
         var unaffected=UserSession.Start(Guid.NewGuid(),other.Id,Guid.NewGuid(),DateTime.UtcNow.AddHours(1),null,null);
         db.UserSessions.AddRange(first,second,unaffected); await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var service=new RoleService(db);
+        var service=await OwnerService(db);
         if(disable) await service.UpdateActivationAsync("accountant",false,Admin,TestContext.Current.CancellationToken);
         else await service.UpdateAsync("accountant",new UpdateRoleRequest("Accountant","accountant",["access.accountant","clients.read"]),Admin,TestContext.Current.CancellationToken);
         Assert.NotNull(first.RevokedAtUtc); Assert.NotNull(second.RevokedAtUtc); Assert.Null(unaffected.RevokedAtUtc);
@@ -90,8 +99,8 @@ public sealed class PermissionRevocationTests
     {
         await using var db=Db(); db.RoleDefinitions.Add(RoleDefinition.Create("accountant","Accountant","accountant","[\"access.accountant\"]",true));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await new RoleService(db).UpdateAsync("accountant",new UpdateRoleRequest("Accountant","accountant",[]),Admin,TestContext.Current.CancellationToken);
-        Assert.Empty(RolePermissions.ParsePermissions((await db.RoleDefinitions.SingleAsync(TestContext.Current.CancellationToken)).PermissionsJson));
+        await (await OwnerService(db)).UpdateAsync("accountant",new UpdateRoleRequest("Accountant","accountant",[]),Admin,TestContext.Current.CancellationToken);
+        Assert.Empty(RolePermissions.ParsePermissions((await db.RoleDefinitions.SingleAsync(x=>x.Name=="accountant",TestContext.Current.CancellationToken)).PermissionsJson));
     }
     [Fact] public async Task Read_only_staff_cannot_create_clients_even_when_calling_the_service_directly()
     {

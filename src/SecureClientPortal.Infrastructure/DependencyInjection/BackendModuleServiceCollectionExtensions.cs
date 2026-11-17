@@ -71,6 +71,7 @@ public static class BackendModuleServiceCollectionExtensions
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IAdminService, AdminService>();
         services.AddScoped<AdminOperationsService>();
+        services.AddScoped<TeamProgressService>();
         return services;
     }
 
