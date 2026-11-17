@@ -29,6 +29,7 @@ var master = new SqlConnectionStringBuilder(Environment.GetEnvironmentVariable("
 var name = "scp_security_test_" + Guid.NewGuid().ToString("N");
 var connection = new SqlConnectionStringBuilder(master.ConnectionString) { InitialCatalog = name }.ConnectionString;
 var owned = RecoveryBundle.PrivateDirectory(Path.GetTempPath());
+var ownerId = Guid.NewGuid(); // Owner exists only inside this disposable assessment database.
 var signing = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
 var password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) + "aA1!";
 var checks = new List<object>(); var failures = 0; var created = false; Process? process = null;
@@ -45,7 +46,7 @@ try
     var portListener = new TcpListener(IPAddress.Loopback, 0); portListener.Start(); var port = ((IPEndPoint)portListener.LocalEndpoint).Port; portListener.Stop(); var url = $"http://127.0.0.1:{port}";
     var start = new ProcessStartInfo("dotnet") { WorkingDirectory = Path.Combine(root, "src/SecureClientPortal.Api"), RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
     start.ArgumentList.Add(Path.Combine(root, "src/SecureClientPortal.Api/bin/Release/net8.0/SecureClientPortal.Api.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
-    foreach (var item in new Dictionary<string, string> { { "ASPNETCORE_ENVIRONMENT", "Development" }, { "DOTNET_ENVIRONMENT", "Development" }, { "DB_CONNECTION_STRING", connection }, { "JWT_SIGNING_KEY", signing }, { "Jwt__Issuer", "SecureClientPortal" }, { "Jwt__Audience", "SecureClientPortal.Client" }, { "Storage__RootPath", Path.Combine(owned, "documents") }, { "Storage__KeyRingPath", Path.Combine(owned, "keys") }, { "Storage__Scanner", "baseline" }, { "AccessEmail__Enabled", "false" }, { "NotificationEmail__Enabled", "false" }, { "CipcApi__Enabled", "false" }, { "Logging__LogLevel__Default", "Warning" } }) start.Environment[item.Key] = item.Value;
+    foreach (var item in new Dictionary<string, string> { { "Administration__OwnerUserId", ownerId.ToString() }, { "ASPNETCORE_ENVIRONMENT", "Development" }, { "DOTNET_ENVIRONMENT", "Development" }, { "DB_CONNECTION_STRING", connection }, { "JWT_SIGNING_KEY", signing }, { "Jwt__Issuer", "SecureClientPortal" }, { "Jwt__Audience", "SecureClientPortal.Client" }, { "Storage__RootPath", Path.Combine(owned, "documents") }, { "Storage__KeyRingPath", Path.Combine(owned, "keys") }, { "Storage__Scanner", "baseline" }, { "AccessEmail__Enabled", "false" }, { "NotificationEmail__Enabled", "false" }, { "CipcApi__Enabled", "false" }, { "Logging__LogLevel__Default", "Warning" } }) start.Environment[item.Key] = item.Value;
     process = new Process { StartInfo = start }; process.OutputDataReceived += (_, e) => { lock (log) log.AppendLine(e.Data); }; process.ErrorDataReceived += (_, e) => { lock (log) log.AppendLine(e.Data); }; process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
     using var anon = Client(url); bool ready = false;
     for (var i = 0; i < 120; i++) { if (process.HasExited) throw new Exception("Isolated API exited during startup. See private diagnostic log."); try { using var r = await anon.GetAsync("/api/auth/csrf"); if (r.IsSuccessStatusCode) { ready = true; break; } } catch (HttpRequestException) { } await Task.Delay(500); }
@@ -144,7 +145,22 @@ try
     await Status(cb, "/api/auth/me", 401, "Disabled account loses existing session");
     await using (var db = Db()) { (await db.UserSessions.SingleAsync(x => x.JwtId == ja)).Revoke("security_test"); await db.SaveChangesAsync(); }
     await Status(ca, "/api/auth/me", 401, "Revoked session blocked immediately");
-    await Status(admin, "/api/roles/accountant", 200, "Administrator can restrict accountant role", HttpMethod.Put, JsonContent.Create(new { displayName = "Accountant", scope = "accountant", permissions = new[] { "access.accountant", "clients.read" } }), true);
+    // Keep the sole-administrator protection above meaningful: add the owner only now.
+    var ownerJti = Guid.NewGuid();
+    await using (var db = Db())
+    {
+        var ownerUser = User.CreateInvited(ownerId, "Security test owner", "owner@example.invalid", UserRole.Admin, PasswordHasher.Hash(password), "[]", null);
+        ownerUser.CompleteSetup("Security test owner", ownerUser.PasswordHash);
+        db.Users.Add(ownerUser);
+        var ownerSession = UserSession.Start(Guid.NewGuid(), ownerId, ownerJti, DateTime.UtcNow.AddMinutes(30), null, null);
+        ownerSession.MarkMfaVerified();
+        db.UserSessions.Add(ownerSession);
+        await db.SaveChangesAsync();
+    }
+    using var ownerClient = Client(url, Token(ownerId, ownerJti));
+    await Status(admin, "/api/roles/accountant", 403, "Ordinary administrator cannot edit role permissions", HttpMethod.Put, JsonContent.Create(new { displayName = "Accountant", scope = "accountant", permissions = new[] { "access.accountant", "clients.read" } }), true);
+    await Status(staff, "/api/auth/me", 200, "Denied role edit preserves existing staff session");
+    await Status(ownerClient, "/api/roles/accountant", 200, "Configured system owner can restrict accountant role", HttpMethod.Put, JsonContent.Create(new { displayName = "Accountant", scope = "accountant", permissions = new[] { "access.accountant", "clients.read" } }), true);
     await Status(staff, "/api/auth/me", 401, "Role edit revokes existing staff session over HTTP");
     Guid restrictedJti = Guid.NewGuid(); await using (var db = Db()) { var session = UserSession.Start(Guid.NewGuid(), staffId, restrictedJti, DateTime.UtcNow.AddMinutes(30), null, null); session.MarkMfaVerified(); db.UserSessions.Add(session); await db.SaveChangesAsync(); }
     using (var restricted = Client(url, Token(staffId, restrictedJti))) { await Status(restricted, "/api/clients", 200, "Restricted role retains granted read operation"); await Status(restricted, "/api/clients", 403, "Restricted role cannot bypass removed create permission", HttpMethod.Post, JsonContent.Create(new { }), true); }
