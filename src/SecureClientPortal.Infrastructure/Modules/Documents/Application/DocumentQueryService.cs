@@ -27,10 +27,13 @@ public sealed class DocumentQueryService : IDocumentQueryService
     public async Task<IReadOnlyList<Document>> GetAllAsync(System.Security.Claims.ClaimsPrincipal user, CancellationToken ct = default)
     {
         var allowedClientIds = await user.GetAccessibleClientIdsAsync(_db, ct);
-        return await _documents.Documents
+        var items = await _documents.Documents
             .Where(x => allowedClientIds.Contains(x.ClientId))
             .OrderByDescending(x => x.UploadedAtUtc)
             .ToListAsync(ct);
+        await RestoreArchivePlacements(items,ct);
+        await RestoreHistoricalProvenance(items, ct);
+        return items;
     }
 
     public async Task<ServiceResult<IReadOnlyList<Document>>> GetFilingRegisterAsync(System.Security.Claims.ClaimsPrincipal user, string? clientId = null, CancellationToken ct = default)
@@ -47,10 +50,26 @@ public sealed class DocumentQueryService : IDocumentQueryService
             query = query.Where(x => x.ClientId == parsedClientId);
         }
 
-        return ServiceResult<IReadOnlyList<Document>>.Success(
-            await query.OrderByDescending(x => x.FiledAtUtc).ThenByDescending(x => x.UploadedAtUtc).ToListAsync(ct));
+        var items = await query.OrderByDescending(x => x.FiledAtUtc).ThenByDescending(x => x.UploadedAtUtc).ToListAsync(ct);
+        await RestoreArchivePlacements(items,ct);
+        await RestoreHistoricalProvenance(items,ct);
+        return ServiceResult<IReadOnlyList<Document>>.Success(items);
     }
 
+    private async Task RestoreArchivePlacements(IReadOnlyList<Document> items,CancellationToken ct) {
+        var ids=items.Select(d=>d.Id).ToArray();if(ids.Length==0)return;
+        var events=await _db.AuditLogs.AsNoTracking().Where(a=>a.Action=="documents.archive_classified"&&ids.Contains(a.EntityId)).OrderByDescending(a=>a.CreatedAtUtc).ToListAsync(ct);
+        foreach(var document in items){var latest=events.FirstOrDefault(e=>e.EntityId==document.Id);if(latest?.MetadataJson is null)continue;
+            using var json=JsonDocument.Parse(latest.MetadataJson);var value=json.RootElement;
+            document.RestoreArchivePlacement(value.GetProperty("scope").GetString()!,value.GetProperty("year").ValueKind==JsonValueKind.Number?value.GetProperty("year").GetInt32():null,value.GetProperty("month").ValueKind==JsonValueKind.Number?value.GetProperty("month").GetInt32():null);
+        }
+    }
+    private async Task RestoreHistoricalProvenance(IReadOnlyList<Document> items,CancellationToken ct) {
+        var ids=items.Where(d=>d.IsFiled&&d.CurrentVersionNumber==1).Select(d=>d.Id).ToArray();
+        if(ids.Length==0)return;
+        var historical=await _db.AuditLogs.Where(a=>a.Action=="migration.historical_filing_confirmed"&&ids.Contains(a.EntityId)).Select(a=>a.EntityId).ToListAsync(ct);
+        foreach(var item in items.Where(d=>historical.Contains(d.Id)))item.RestoreHistoricalFilingProvenance();
+    }
     public async Task<IReadOnlyList<FilingRule>> GetFilingRulesAsync(CancellationToken ct = default)
     {
         return await _documents.FilingRules.OrderBy(x => x.Category).ToListAsync(ct);
@@ -223,6 +242,8 @@ public sealed class DocumentQueryService : IDocumentQueryService
 
     private async Task<object> BuildDocumentResponseAsync(Document item, CancellationToken ct)
     {
+        await RestoreArchivePlacements([item],ct);
+        await RestoreHistoricalProvenance([item],ct);
         DocumentSlot? slot = null;
         MonthlyPack? pack = null;
 
@@ -235,8 +256,11 @@ public sealed class DocumentQueryService : IDocumentQueryService
             }
         }
 
+        pack ??= await _documents.MonthlyPacks.FirstOrDefaultAsync(x=>x.Id==item.MonthlyPackId,ct);
         return new
         {
+            item.ArchiveScope, item.ArchiveYear, item.ArchiveMonth,
+            item.IsHistoricallyFiled,
             item.Id,
             item.ClientId,
             monthlyPackId = pack?.Id,

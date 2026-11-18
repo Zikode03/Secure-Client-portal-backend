@@ -57,7 +57,7 @@ public record RequestWorkspaceDocumentVersionResponse(
 public record RequestWorkspaceRelatedDocumentResponse(
     Guid Id,
     Guid ClientId,
-    Guid MonthlyPackId,
+    Guid? MonthlyPackId,
     Guid? DocumentSlotId,
     string Name,
     string Category,

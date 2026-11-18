@@ -564,7 +564,7 @@ public sealed class AutomationWorkflowService : IAutomationWorkflowService
                 x.UserId == recipientId &&
                 x.Type == type &&
                 x.LinkUrl == linkUrl &&
-                x.CreatedAtUtc >= now.AddHours(-24), ct);
+                x.Message == message, ct);
 
             if (!exists)
             {

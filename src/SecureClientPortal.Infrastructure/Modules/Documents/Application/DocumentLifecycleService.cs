@@ -155,6 +155,7 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             ? null
             : await _documents.MonthlyPacks.FirstOrDefaultAsync(x => x.Id == slot.MonthlyPackId, ct);
 
+        var linkedDocuments = slot is null ? null : await _documents.Documents.Where(x=>x.DocumentSlotId==slot.Id).ToListAsync(ct);
         var reviewDecision = DocumentReviewPolicy.ApplyDecision(
             document,
             slot,
@@ -164,7 +165,8 @@ public sealed class DocumentLifecycleService : IDocumentLifecycleService
             reviewerRole,
             reason,
             internalNote,
-            now);
+            now,
+            linkedDocuments);
 
         reviewDecision.RecordReviewedVersion(document.CurrentVersionNumber, document.InvoiceReviewRequired ? document.InvoiceReviewRevision : null);
         document.RecordReviewDecision(normalizedDecision, reviewDecision.Reason, reviewerUserId, reviewerRole, now);

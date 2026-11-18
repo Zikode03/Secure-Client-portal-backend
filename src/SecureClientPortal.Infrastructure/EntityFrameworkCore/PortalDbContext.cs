@@ -218,7 +218,7 @@ public class PortalDbContext : DbContext, IDocumentModuleDbContext, IRequestModu
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id);
             entity.Property(x => x.ClientId).IsRequired();
-            entity.Property(x => x.MonthlyPackId).IsRequired();
+            entity.Property(x => x.MonthlyPackId).IsRequired(false);
             entity.Property(x => x.Name).HasMaxLength(260).IsRequired();
             entity.Property(x => x.Category).HasMaxLength(80).IsRequired();
             entity.Property(x => x.DocumentSlotId);

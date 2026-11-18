@@ -19,9 +19,9 @@ public sealed class ReviewQueueService : IReviewQueueService
         Guid DocumentId,
         Guid ClientId,
         string ClientName,
-        Guid MonthlyPackId,
-        int Year,
-        int Month,
+        Guid? MonthlyPackId,
+        int? Year,
+        int? Month,
         Guid? DocumentSlotId,
         string? SlotLabel,
         string DocumentName,
@@ -60,11 +60,13 @@ public sealed class ReviewQueueService : IReviewQueueService
         var items = await
             (from document in _db.Documents
              join client in _db.Clients on document.ClientId equals client.Id
-             join pack in _db.MonthlyPacks on document.MonthlyPackId equals pack.Id
+             join packLeft in _db.MonthlyPacks on document.MonthlyPackId equals packLeft.Id into packGroup
+             from pack in packGroup.DefaultIfEmpty()
              join slotLeft in _db.DocumentSlots on document.DocumentSlotId equals slotLeft.Id into slotGroup
              from slot in slotGroup.DefaultIfEmpty()
              let effectiveReviewStatus = slot != null ? slot.Status : document.Status
              where allowedClientIds.Contains(document.ClientId)
+                 && document.Status != "accepted" && document.Status != "filed" && document.Status != "rejected"
                  && (!requestedClientId.HasValue || document.ClientId == requestedClientId.Value)
                  && (normalizedCategory == null || document.Category == normalizedCategory)
                  && (normalizedStatus == null || effectiveReviewStatus == normalizedStatus)
@@ -75,9 +77,9 @@ public sealed class ReviewQueueService : IReviewQueueService
                  document.Id,
                  client.Id,
                  client.Name,
-                 pack.Id,
-                 pack.Year,
-                 pack.Month,
+                 pack != null ? pack.Id : null,
+                 pack != null ? pack.Year : null,
+                 pack != null ? pack.Month : null,
                  slot != null ? slot.Id : null,
                  slot != null ? slot.Label : "Supporting document",
                  document.Name,
@@ -172,7 +174,8 @@ public sealed class ReviewQueueService : IReviewQueueService
         var item = await
             (from document in _db.Documents
              join client in _db.Clients on document.ClientId equals client.Id
-             join pack in _db.MonthlyPacks on document.MonthlyPackId equals pack.Id
+             join packLeft in _db.MonthlyPacks on document.MonthlyPackId equals packLeft.Id into packGroup
+             from pack in packGroup.DefaultIfEmpty()
              join slotLeft in _db.DocumentSlots on document.DocumentSlotId equals slotLeft.Id into slotGroup
              from slot in slotGroup.DefaultIfEmpty()
              where document.Id == parsedDocumentId
@@ -180,9 +183,9 @@ public sealed class ReviewQueueService : IReviewQueueService
                  document.Id,
                  client.Id,
                  client.Name,
-                 pack.Id,
-                 pack.Year,
-                 pack.Month,
+                 pack != null ? pack.Id : null,
+                 pack != null ? pack.Year : null,
+                 pack != null ? pack.Month : null,
                  slot != null ? slot.Id : null,
                  slot != null ? slot.Label : "Supporting document",
                  document.Name,

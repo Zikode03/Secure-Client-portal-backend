@@ -30,13 +30,23 @@ public sealed class DataMigrationTests
         var c=Models.Client.Create(Guid.NewGuid(),"Historical test client","Company","Contact","client@example.invalid",ClientStatus.Active);db.Clients.Add(c);db.SaveChanges();return c.Id;
     }
     private static async Task<MigrationBatchDetail> New(DataMigrationService service,ClaimsPrincipal actor)=>await service.CreateAsync(new(Guid.NewGuid(),"Isolated import test"),actor,Ct);
+    [Fact]
+    public async Task SpreadsheetColumnMismatch_ExplainsHowToCorrectTheFile()
+    {
+        var error = await Assert.ThrowsAsync<AppValidationException>(() =>
+            ClientSpreadsheetReader.ReadAsync(File("clients.csv", "name,email\nUbuntu Bay,client@example.invalid"), Ct));
+        Assert.Contains("Download the client template", error.Message);
+        Assert.Contains("No clients have been added", error.Message);
+        Assert.DoesNotContain("contactEmail", error.Message);
+    }
+
     [Fact] public async Task StagedFilesArePrivate_AndUnknownOwnershipBlocksApproval() {
         await using var db=Db();var storage=new Storage();var service=new DataMigrationService(db,storage);var actor=Actor();var b=await New(service,actor);
         b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,File("invoice.pdf","contents"),actor,Ct);
         Assert.Empty(db.Documents);Assert.Empty(db.MonthlyPacks);Assert.Contains(b.Documents[0].Errors,e=>e.Contains("Select an existing client"));
         await Assert.ThrowsAsync<AppValidationException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(()=>service.GetAsync(b.Summary.Id,Actor("client"),Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(()=>service.DownloadAsync(b.Summary.Id,b.Documents[0].Id,Actor("accountant"),Ct));
+        await Assert.ThrowsAsync<AppForbiddenException>(()=>service.GetAsync(b.Summary.Id,Actor("client"),Ct));
+        await Assert.ThrowsAsync<AppForbiddenException>(()=>service.DownloadAsync(b.Summary.Id,b.Documents[0].Id,Actor("accountant"),Ct));
         Assert.DoesNotContain("storageKey",JsonSerializer.Serialize(b),StringComparison.OrdinalIgnoreCase);
     }
     [Fact] public async Task ApprovalCreatesUploadedHistoricalDocument_WithoutReviewOrFiling_AndIsIdempotent() {
@@ -66,6 +76,42 @@ public sealed class DataMigrationTests
         b=await service.SpreadsheetAsync(b.Summary.Id,b.Summary.Version,File("clients.csv",Csv(v)),actor,Ct);
         Assert.Contains(b.Clients[0].Errors,e=>e.Contains("existing client"));
         await Assert.ThrowsAsync<AppValidationException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));Assert.Single(db.Clients);
+    }
+    [Fact] public async Task ExistingClientCanBeLinkedAndAssignedWithoutOverwritingItsProfile() {
+        await using var db=Db();Accountant(db);var v=Values();
+        var existing=Models.Client.Create(Guid.NewGuid(),"Registered business","Company","Original contact","original@example.invalid",ClientStatus.Active);
+        existing.UpdateComplianceIdentifiers(v.RegistrationNumber, "ORIGINAL-TAX");db.Clients.Add(existing);await db.SaveChangesAsync(Ct);
+        var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.SpreadsheetAsync(b.Summary.Id,b.Summary.Version,File("clients.csv",Csv(v)),actor,Ct);
+        Assert.Equal(existing.Id,b.Clients[0].ExistingClientId);
+        b=await service.EditClientAsync(b.Summary.Id,b.Clients[0].Id,new(b.Summary.Version,v,false,true),actor,Ct);
+        Assert.Empty(b.Clients[0].Errors);
+        b=await service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct);
+        Assert.Single(db.Clients);Assert.Equal("Registered business",existing.Name);Assert.Equal("original@example.invalid",existing.Email);Assert.Equal("ORIGINAL-TAX",existing.TaxNumber);
+        var assignment=Assert.Single(db.ClientAssignments);Assert.Equal(existing.Id,assignment.ClientId);Assert.Equal(assignment.AccountantUserId,existing.AssignedAccountantId);
+        Assert.Equal(0,b.Summary.ImportedClients);Assert.Equal(1,b.Summary.LinkedClients);
+        var accountantActor=new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier,assignment.AccountantUserId.ToString()),new("role","accountant"),new("role_scope","accountant")],"test"));
+        Assert.Contains(existing.Id,await SecureClientPortal.Backend.Auth.UserScopeExtensions.GetAccessibleClientIdsAsync(accountantActor,db,Ct));
+        await service.ApproveAsync(b.Summary.Id,new(0,true),actor,Ct);Assert.Single(db.ClientAssignments);
+        Assert.Contains(db.AuditLogs,x=>x.Action=="assignments.assigned");
+    }
+    [Fact] public async Task ExistingClientLinkRevalidatesAndDoesNotReplaceAnotherPrimaryAccountant() {
+        await using var db=Db();Accountant(db);var v=Values();
+        var existing=Models.Client.Create(Guid.NewGuid(),v.Name,v.EntityType,v.ContactName,v.ContactEmail,ClientStatus.Active);db.Clients.Add(existing);await db.SaveChangesAsync(Ct);
+        var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.SpreadsheetAsync(b.Summary.Id,b.Summary.Version,File("clients.csv",Csv(v)),actor,Ct);
+        b=await service.EditClientAsync(b.Summary.Id,b.Clients[0].Id,new(b.Summary.Version,v,false,true),actor,Ct);
+        var otherId=Guid.NewGuid();existing.AssignAccountant(otherId);await db.SaveChangesAsync(Ct);
+        await Assert.ThrowsAsync<AppValidationException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));
+        Assert.Equal(otherId,existing.AssignedAccountantId);Assert.Empty(db.ClientAssignments);Assert.Single(db.Clients);
+    }
+    [Fact] public async Task ExistingClientLinkCannotCreateAProfileWhenNoMatchExists() {
+        await using var db=Db();Accountant(db);var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.SpreadsheetAsync(b.Summary.Id,b.Summary.Version,File("clients.csv",Csv(Values())),actor,Ct);
+        b=await service.EditClientAsync(b.Summary.Id,b.Clients[0].Id,new(b.Summary.Version,Values(),false,true),actor,Ct);
+        Assert.NotEmpty(b.Clients[0].Errors);
+        await Assert.ThrowsAsync<AppValidationException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));
+        Assert.Empty(db.Clients);Assert.Empty(db.ClientAssignments);
     }
     [Fact] public async Task DuplicateContentWarningsRequireAcknowledgement() {
         await using var db=Db();var client=Client(db);var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
@@ -100,8 +146,97 @@ public sealed class DataMigrationTests
         var good=await ClientSpreadsheetReader.ReadAsync(Workbook(false),Ct);Assert.Equal("Workbook client",Assert.Single(good).Values.Name);
         await Assert.ThrowsAsync<AppValidationException>(()=>ClientSpreadsheetReader.ReadAsync(Workbook(true),Ct));
     }
-    [Fact] public void EveryMigrationEndpointRequiresAdminPolicy() {
-        var policy=Assert.Single(typeof(DataMigrationController).GetCustomAttributes(typeof(AuthorizeAttribute),true).Cast<AuthorizeAttribute>());Assert.Equal("AdminOnly",policy.Policy);
+    [Fact] public void DocumentImportsAllowStaffButClientImportsRemainAdminOnly() {
+        var policy=Assert.Single(typeof(DataMigrationController).GetCustomAttributes(typeof(AuthorizeAttribute),true).Cast<AuthorizeAttribute>());Assert.Equal("AccountantOnly",policy.Policy);
+        foreach(var methodName in new[]{"Spreadsheet","EditClient"}) Assert.Contains(typeof(DataMigrationController).GetMethod(methodName)!.GetCustomAttributes(typeof(AuthorizeAttribute),true).Cast<AuthorizeAttribute>(),x=>x.Policy=="AdminOnly");
+    }
+    [Fact] public async Task AccountantCanImportAssignedClientDocuments_AndClientCanReadThem() {
+        await using var db=Db();Accountant(db);var client=Client(db);var accountant=db.Users.Single();
+        var actor=new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier,accountant.Id.ToString()),new(ClaimTypes.Role,"accountant"),new("role_scope","accountant")],"test"));
+        db.ClientAssignments.Add(ClientAssignment.Create(Guid.NewGuid(),accountant.Id,client));
+        var user=User.CreateInvited(Guid.NewGuid(),"Client","client-reader@example.invalid",UserRole.Client,"unused",JsonSerializer.Serialize(new[]{client.ToString()}),null);user.CompleteSetup("Client","unused");db.Users.Add(user);await db.SaveChangesAsync(Ct);
+        var storage=new Storage();var service=new DataMigrationService(db,storage);var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,File("historical.pdf","private"),actor,Ct);
+        b=await service.EditDocumentAsync(b.Summary.Id,b.Documents[0].Id,new(b.Summary.Version,new(client,2025,1,"invoices","historical.pdf",true,false,false)),actor,Ct);
+        await service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct);
+        var clientActor=new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier,user.Id.ToString()),new(ClaimTypes.Role,"client"),new("role_scope","client")],"test"));
+        var documents=await new SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application.DocumentQueryService(db,db,storage).GetAllAsync(clientActor,Ct);
+        Assert.Equal(client,Assert.Single(documents).ClientId);
+        var notice=Assert.Single(db.Notifications);Assert.Equal(user.Id,notice.UserId);Assert.Equal("documents.imported",notice.Type);Assert.Equal("/client/documents",notice.LinkUrl);
+        await service.ApproveAsync(b.Summary.Id,new(0,true),actor,Ct);Assert.Single(db.Notifications);Assert.Single(db.Documents);
+        Assert.Contains(db.AuditLogs,x=>x.Action=="migration.approved"&&x.ActorRole=="accountant");
+        var stranger=Actor("accountant");await Assert.ThrowsAsync<AppForbiddenException>(()=>service.DownloadAsync(b.Summary.Id,b.Documents[0].Id,stranger,Ct));
+    }
+    [Fact] public async Task AccountantCannotImportForUnassignedClient_AndLosesBatchAccessWhenUnassigned() {
+        await using var db=Db();Accountant(db);var client=Client(db);var accountant=db.Users.Single();
+        var actor=new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier,accountant.Id.ToString()),new(ClaimTypes.Role,"accountant"),new("role_scope","accountant")],"test"));
+        var service=new DataMigrationService(db,new Storage());var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,File("historical.pdf","private"),actor,Ct);
+        var input=new MigrationDocumentInput(client,2025,1,"invoices","historical.pdf",true,false,false);
+        await Assert.ThrowsAsync<AppForbiddenException>(()=>service.EditDocumentAsync(b.Summary.Id,b.Documents[0].Id,new(b.Summary.Version,input),actor,Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(()=>service.SpreadsheetAsync(b.Summary.Id,b.Summary.Version,File("clients.csv",Csv(Values())),actor,Ct));
+        var assignment=ClientAssignment.Create(Guid.NewGuid(),accountant.Id,client);db.ClientAssignments.Add(assignment);await db.SaveChangesAsync(Ct);
+        b=await service.EditDocumentAsync(b.Summary.Id,b.Documents[0].Id,new(b.Summary.Version,input),actor,Ct);
+        db.ClientAssignments.Remove(assignment);await db.SaveChangesAsync(Ct);
+        await Assert.ThrowsAsync<AppForbiddenException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));
+        Assert.Empty(db.Documents);
+    }
+    private static IFormFile Archive(params (string Path,string Text)[] files) {
+        var buffer=new MemoryStream();using(var zip=new ZipArchive(buffer,ZipArchiveMode.Create,true))foreach(var item in files){using var writer=new StreamWriter(zip.CreateEntry(item.Path).Open());writer.Write(item.Text);}
+        buffer.Position=0;return new FormFile(buffer,0,buffer.Length,"file","history.zip"){Headers=new HeaderDictionary(),ContentType="application/zip"};
+    }
+    [Fact] public async Task ArchiveStagesPrivatelySuggestsPeriodsAndRetriesSafely() {
+        await using var db=Db();var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);var archiveId=Guid.NewGuid();var oldVersion=b.Summary.Version;
+        b=await service.UploadAsync(b.Summary.Id,archiveId,oldVersion,Archive(("2005/03/Bank Statements/statement.pdf","bank"),("2015/07/Invoices/invoice.pdf","invoice")),actor,Ct);
+        Assert.Equal(2,b.Documents.Length);Assert.Empty(db.Documents);Assert.Empty(db.MonthlyPacks);
+        Assert.Contains(b.Documents,r=>r.Values.Year==2005&&r.Values.Month==3&&r.Values.Category=="bank_statement");
+        Assert.All(b.Documents,r=>Assert.False(r.Values.OwnershipConfirmed));
+        var retry=await service.UploadAsync(b.Summary.Id,archiveId,oldVersion,Archive(("2005/03/Bank Statements/statement.pdf","bank")),actor,Ct);Assert.Equal(2,retry.Documents.Length);
+    }
+    [Fact] public async Task ArchiveMetadataIsReportedInsteadOfBecomingClientDocuments() {
+        await using var db=Db();var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,Archive(("manifest.json","{}"),("2015/01/invoice.pdf","invoice")),actor,Ct);
+        Assert.Single(b.Documents);Assert.Contains(b.ArchiveWarnings!,w=>w.Contains("manifest.json"));
+    }
+    [Theory][InlineData("../escape.pdf")][InlineData("2005/01/app.exe")]
+    public async Task UnsafeOrUnsupportedArchivesCannotBeApproved(string path) {
+        await using var db=Db();var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        await Assert.ThrowsAsync<AppValidationException>(()=>service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,Archive((path,"content")),actor,Ct));
+        Assert.Empty((await service.GetAsync(b.Summary.Id,actor,Ct)).Documents);Assert.Empty(db.Documents);
+    }
+    [Fact] public async Task BulkHistoricalFilingNeedsReviewPermissionAndExplicitAttestation() {
+        await using var db=Db();var client=Client(db);var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,Archive(("2005/03/Invoices/invoice.pdf","invoice")),actor,Ct);
+        ((ClaimsIdentity)actor.Identity!).AddClaim(new("permission","documents.upload"));
+        ((ClaimsIdentity)actor.Identity!).AddClaim(new("permission","access.admin"));
+        var request=new BulkMigrationDocumentRequest(b.Summary.Version,client,null,null,null,true,true,true,"Previous firm accountant",null,"Imported from established firm archive");
+        await Assert.ThrowsAsync<AppForbiddenException>(()=>service.BulkEditDocumentsAsync(b.Summary.Id,request,actor,Ct));
+        ((ClaimsIdentity)actor.Identity!).AddClaim(new("permission","documents.review"));
+        b=await service.BulkEditDocumentsAsync(b.Summary.Id,request with {HistoricalStatusConfirmed=false},actor,Ct);
+        await Assert.ThrowsAsync<AppValidationException>(()=>service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct));
+        b=await service.BulkEditDocumentsAsync(b.Summary.Id,request with {Version=b.Summary.Version},actor,Ct);
+        b=await service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct);
+        var doc=Assert.Single(db.Documents);Assert.Equal("filed",doc.Status);Assert.True(doc.IsFiled);Assert.Empty(db.ReviewDecisions);Assert.Empty(db.DocumentSlots);
+        Assert.Contains(db.AuditLogs,a=>a.Action=="migration.historical_filing_confirmed");
+        db.ChangeTracker.Clear();
+        var query=new SecureClientPortal.Backend.Infrastructure.Modules.Documents.Application.DocumentQueryService(db,db,new Storage());
+        Assert.True(Assert.Single(await query.GetAllAsync(actor,Ct)).IsHistoricallyFiled);
+    }
+    [Fact] public async Task NeedsReviewArchiveDoesNotFabricateFilingOrMonthlyRequirements() {
+        await using var db=Db();var client=Client(db);var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,Archive(("2015/07/Invoices/invoice.pdf","invoice")),actor,Ct);
+        b=await service.BulkEditDocumentsAsync(b.Summary.Id,new(b.Summary.Version,client,null,null,null,true,false,false,null,null,null),actor,Ct);
+        await service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct);
+        Assert.Equal("under_review",Assert.Single(db.Documents).Status);Assert.Empty(db.DocumentSlots);Assert.Empty(db.ReviewDecisions);
+    }
+    [Theory][InlineData("annual",2015)][InlineData("permanent",null)][InlineData("uncertain",null)]
+    public async Task NonMonthlyArchivesDoNotInventMonthsOrRequirements(string scope,int? year) {
+        await using var db=Db();var client=Client(db);var service=new DataMigrationService(db,new Storage());var actor=Actor();var b=await New(service,actor);
+        b=await service.UploadAsync(b.Summary.Id,Guid.NewGuid(),b.Summary.Version,File("company.pdf","company record"),actor,Ct);
+        b=await service.EditDocumentAsync(b.Summary.Id,b.Documents[0].Id,new(b.Summary.Version,new(client,year,null,"general","company.pdf",true,false,false,RecordScope:scope)),actor,Ct);
+        Assert.Empty(b.Documents[0].Errors);
+        await service.ApproveAsync(b.Summary.Id,new(b.Summary.Version,true),actor,Ct);
+        var doc=Assert.Single(db.Documents);Assert.Null(doc.MonthlyPackId);Assert.Equal(scope,doc.ArchiveScope);Assert.Empty(db.MonthlyPacks);Assert.Empty(db.DocumentSlots);Assert.Equal("under_review",doc.Status);
     }
     private static IFormFile Workbook(bool formula) {
         var stream=new MemoryStream();using(var zip=new ZipArchive(stream,ZipArchiveMode.Create,true)) {

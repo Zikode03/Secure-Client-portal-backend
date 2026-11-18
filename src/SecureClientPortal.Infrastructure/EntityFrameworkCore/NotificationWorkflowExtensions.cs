@@ -167,11 +167,13 @@ public static class NotificationWorkflowExtensions
         foreach (var request in requests)
         {
             var linkUrl = $"/requests/{request.Id}";
+            var message = $"Request '{request.Title}' is due on {request.DueDateUtc:yyyy-MM-dd HH:mm} UTC.";
+            // One alert per request/deadline; reading or signing in must not recreate it.
             var alreadyExists = await db.Notifications.AnyAsync(x =>
                 x.UserId == userId &&
                 x.Type == "deadline.approaching" &&
                 x.LinkUrl == linkUrl &&
-                x.CreatedAtUtc >= now.AddHours(-24), ct);
+                x.Message == message, ct);
 
             if (alreadyExists)
             {
@@ -184,7 +186,7 @@ public static class NotificationWorkflowExtensions
                 request.ClientId,
                 "deadline.approaching",
                 "Deadline approaching",
-                $"Request '{request.Title}' is due on {request.DueDateUtc:yyyy-MM-dd HH:mm} UTC.",
+                message,
                 linkUrl,
                 now));
 

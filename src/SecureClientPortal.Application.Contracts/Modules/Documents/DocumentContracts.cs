@@ -38,3 +38,5 @@ public class UploadDocumentRequest
     public bool AllowDuplicate { get; set; }
     public IFormFile File { get; set; } = default!;
 }
+
+public record LinkDocumentChecklistRequest(Guid DocumentSlotId);

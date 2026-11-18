@@ -120,6 +120,18 @@ public class DocumentSlot
         Touch();
     }
 
+    public void RecalculateReview(IReadOnlyCollection<SecureClientPortal.Backend.Domain.Modules.Documents.Document> documents)
+    {
+        if(Status is not ("submitted" or "under_review" or "accepted" or "rejected" or "reupload_required"))throw new DomainRuleException("Submit the checklist item before reviewing its documents.");
+        var linked=documents.Where(d=>d.DocumentSlotId==Id).ToArray();
+        if(linked.Length==0)return;
+        if(linked.All(d=>d.Status is "accepted" or "filed")) {Status="accepted";RejectionReason=null;}
+        else if(linked.Any(d=>d.Status=="rejected"))Status="reupload_required";
+        else Status="under_review";
+        CurrentDocumentId=linked.FirstOrDefault(d=>d.Status is not ("accepted" or "filed"))?.Id??linked[^1].Id;
+        Touch();
+    }
+
     public void Reject(Guid documentId, string? reason = null)
     {
         if (documentId == Guid.Empty) throw new DomainRuleException("Document id is required.");

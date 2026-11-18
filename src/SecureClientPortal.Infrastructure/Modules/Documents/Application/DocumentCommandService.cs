@@ -58,6 +58,11 @@ public sealed class DocumentCommandService : IDocumentCommandService
         }
 
         var slot = await ResolveSlotAsync(request.ClientId, pack.Id, request.DocumentSlotId, ct);
+        if (!request.DocumentSlotId.HasValue && slot is null)
+        {
+            var matches = await _documents.DocumentSlots.Where(x=>x.ClientId==request.ClientId&&x.MonthlyPackId==pack.Id&&x.Category==normalizedCategory&&x.Status=="not_started").Take(2).ToListAsync(ct);
+            if(matches.Count==1)slot=matches[0];
+        }
         if (request.DocumentSlotId.HasValue && slot is null)
         {
             return ServiceResult<object>.ErrorResult("A valid document slot is required for this document upload.");
@@ -186,6 +191,7 @@ public sealed class DocumentCommandService : IDocumentCommandService
         if (slot is not null)
         {
             slot.MarkDraft(document.Id);
+            await SecureClientPortal.Backend.Infrastructure.Modules.MonthlyPacks.DocumentChecklistLinker.ClearReceivedRemindersAsync(_db,slot,ct);
             var slots = await _documents.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
             pack.RecalculateStatus(slots);
         }

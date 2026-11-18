@@ -290,6 +290,9 @@ public sealed class MonthlyPackService : IMonthlyPackService
         }
 
         var slots = await _db.DocumentSlots.Where(x => x.MonthlyPackId == pack.Id).ToListAsync(ct);
+        var requiredSlotIds=slots.Where(x=>x.IsRequired&&x.Status!="not_applicable").Select(x=>x.Id).ToArray();
+        if(await _db.Documents.AnyAsync(x=>x.MonthlyPackId==pack.Id&&x.DocumentSlotId.HasValue&&requiredSlotIds.Contains(x.DocumentSlotId.Value)&&x.Status!="accepted"&&x.Status!="filed",ct))
+            return (false,true,"Review and accept every document linked to the required checklist items before closing this month.",null);
         try
         {
             pack.CloseIfReady(slots);

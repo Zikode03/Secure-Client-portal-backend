@@ -1459,6 +1459,19 @@
         ],
         "type": "object"
       },
+      "SecureClientPortal.Backend.Application.Contracts.Modules.Documents.LinkDocumentChecklistRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "documentSlotId": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentSlotId"
+        ],
+        "type": "object"
+      },
       "SecureClientPortal.Backend.Application.Contracts.Modules.Documents.RequestReuploadRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1890,6 +1903,9 @@
           "skip": {
             "type": "boolean"
           },
+          "useExistingClient": {
+            "type": "boolean"
+          },
           "values": {
             "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Migration.MigrationClientInput"
           },
@@ -1993,6 +2009,11 @@
             },
             "type": "array"
           },
+          "existingClientId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
@@ -2008,6 +2029,9 @@
           "sourceRow": {
             "format": "int32",
             "type": "integer"
+          },
+          "useExistingClient": {
+            "type": "boolean"
           },
           "values": {
             "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Migration.MigrationClientInput"
@@ -2134,6 +2158,10 @@
             "type": "integer"
           },
           "importedDocuments": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "linkedClients": {
             "format": "int32",
             "type": "integer"
           },
@@ -3949,6 +3977,108 @@
           "requiredThroughUtc",
           "status",
           "year"
+        ],
+        "type": "object"
+      },
+      "SecureClientPortal.Backend.Domain.Modules.MonthlyPacks.DocumentSlot": {
+        "additionalProperties": false,
+        "properties": {
+          "canCurrentlyBeSubmitted": {
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "category": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "currentDocumentId": {
+            "format": "uuid",
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "dueDateUtc": {
+            "format": "date-time",
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
+          "isRequired": {
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "label": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "monthlyPackId": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
+          "rejectionReason": {
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "reviewStatus": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "status": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "submittedAtUtc": {
+            "format": "date-time",
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "submittedByUserId": {
+            "format": "uuid",
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "updatedAtUtc": {
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "canCurrentlyBeSubmitted",
+          "category",
+          "clientId",
+          "createdAtUtc",
+          "currentDocumentId",
+          "dueDateUtc",
+          "id",
+          "isRequired",
+          "label",
+          "monthlyPackId",
+          "rejectionReason",
+          "reviewStatus",
+          "status",
+          "submittedAtUtc",
+          "submittedByUserId",
+          "updatedAtUtc"
         ],
         "type": "object"
       },
@@ -7877,6 +8007,11 @@
             },
             "type": "array"
           },
+          "existingClientId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
@@ -7892,16 +8027,21 @@
           "sourceRow": {
             "type": "integer"
           },
+          "useExistingClient": {
+            "type": "boolean"
+          },
           "values": {
             "$ref": "#/components/schemas/Source.SecureClientPortal.Backend.Application.Contracts.Modules.Migration.MigrationClientInput"
           }
         },
         "required": [
           "errors",
+          "existingClientId",
           "id",
           "importedId",
           "skip",
           "sourceRow",
+          "useExistingClient",
           "values"
         ],
         "type": "object"
@@ -8015,6 +8155,9 @@
           "importedDocuments": {
             "type": "integer"
           },
+          "linkedClients": {
+            "type": "integer"
+          },
           "name": {
             "type": "string"
           },
@@ -8036,6 +8179,7 @@
           "id",
           "importedClients",
           "importedDocuments",
+          "linkedClients",
           "name",
           "status",
           "updatedAtUtc",
@@ -10266,6 +10410,91 @@
           "description",
           "id",
           "isEnabled",
+          "updatedAtUtc"
+        ],
+        "type": "object"
+      },
+      "Source.SecureClientPortal.Backend.Domain.Modules.MonthlyPacks.DocumentSlot": {
+        "properties": {
+          "canCurrentlyBeSubmitted": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "clientId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currentDocumentId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "dueDateUtc": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "isRequired": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "monthlyPackId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rejectionReason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "reviewStatus": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "submittedAtUtc": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "submittedByUserId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "updatedAtUtc": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canCurrentlyBeSubmitted",
+          "category",
+          "clientId",
+          "createdAtUtc",
+          "currentDocumentId",
+          "dueDateUtc",
+          "id",
+          "isRequired",
+          "label",
+          "monthlyPackId",
+          "rejectionReason",
+          "reviewStatus",
+          "status",
+          "submittedAtUtc",
+          "submittedByUserId",
           "updatedAtUtc"
         ],
         "type": "object"
@@ -18107,6 +18336,79 @@
         ],
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/documents/{id}/checklist-link": {
+      "post": {
+        "operationId": "DocumentChecklist_Link_POST_api_documents_id_checklist_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Documents.LinkDocumentChecklistRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Documents.LinkDocumentChecklistRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecureClientPortal.Backend.Application.Contracts.Modules.Documents.LinkDocumentChecklistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Domain.Modules.MonthlyPacks.DocumentSlot"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Domain.Modules.MonthlyPacks.DocumentSlot"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureClientPortal.Backend.Domain.Modules.MonthlyPacks.DocumentSlot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Client access denied, role denied, or CSRF validation failed."
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "portalCookie": []
+          }
+        ],
+        "tags": [
+          "DocumentChecklist"
         ]
       }
     },

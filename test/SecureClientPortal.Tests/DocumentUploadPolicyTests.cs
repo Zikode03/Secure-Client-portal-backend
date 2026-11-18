@@ -42,6 +42,14 @@ public sealed class DocumentUploadPolicyTests
         var accepted=await service.UploadAsync(new UploadDocumentRequest {ClientId=clientId,MonthlyPackId=pack.Id,DocumentSlotId=slot.Id,DocumentType="invoices",File=File("statement.pdf","application/pdf")},actor,TestContext.Current.CancellationToken);
         Assert.Null(accepted.Error);Assert.Equal(1,storage.Saves);Assert.Equal(slot.Category,Assert.Single(db.Documents).Category);
     }
+    [Fact] public async Task UploadWithoutExplicitSlotReceivesTheMatchingMonthlyRequirement() {
+        await using var db=new PortalDbContext(new DbContextOptionsBuilder<PortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var client=Guid.NewGuid();db.Clients.Add(Client.Create(client,"Upload test","Company","Contact","upload@example.invalid",ClientStatus.Active));var pack=MonthlyPack.Create(Guid.NewGuid(),client,2026,11);db.MonthlyPacks.Add(pack);
+        var slot=DocumentSlot.Create(Guid.NewGuid(),pack.Id,client,"bank_statement","Bank statement",true,null);db.DocumentSlots.Add(slot);await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var actor=new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier,Guid.NewGuid().ToString()),new(ClaimTypes.Role,"admin"),new("role_scope","admin")],"test"));
+        var result=await new DocumentCommandService(db,db,new Storage()).UploadAsync(new(){ClientId=client,MonthlyPackId=pack.Id,DocumentType="bank_statement",File=File("statement.pdf","application/pdf")},actor,TestContext.Current.CancellationToken);
+        Assert.Null(result.Error);var document=Assert.Single(db.Documents);Assert.Equal(slot.Id,document.DocumentSlotId);Assert.Equal(document.Id,slot.CurrentDocumentId);Assert.Equal("draft",slot.Status);Assert.Equal("uploaded",document.Status);
+    }
     private sealed class Storage : IFileStorage {
         public int Saves;
         public Task<StoredFile> SaveAsync(IFormFile file,string clientId,CancellationToken ct=default) { Saves++;return Task.FromResult(new StoredFile("private-key",file.FileName,file.FileName,file.ContentType,file.Length)); }

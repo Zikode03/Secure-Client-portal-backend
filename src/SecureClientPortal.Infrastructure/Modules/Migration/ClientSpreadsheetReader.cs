@@ -35,10 +35,10 @@ public static class ClientSpreadsheetReader
         var expected = Header.Split(',');
         var headers = rows[0].Select(x => x.Trim().TrimStart('\uFEFF')).ToArray();
         if (headers.Length != expected.Length || expected.Any(h => headers.Count(v => v.Equals(h, StringComparison.OrdinalIgnoreCase)) != 1))
-            throw new AppValidationException("Headers must be: " + Header + ". Columns may be reordered.");
+            throw new AppValidationException("The column headings in your client list do not match the import template. Download the client template, copy your client details into it without changing the headings, then upload it again. No clients have been added.");
         var indices = expected.Select(h => Array.FindIndex(headers, v => v.Equals(h, StringComparison.OrdinalIgnoreCase))).ToArray();
         return rows.Skip(1).Select((r, i) => {
-            if (r.Count != headers.Length) throw new AppValidationException($"Spreadsheet row {i + 2} must contain exactly seven columns.");
+            if (r.Count != headers.Length) throw new AppValidationException($"Row {i + 2} does not match the client template. Check that the details are in the seven template columns, then upload the file again.");
             var v = indices.Select(j => r[j].Trim()).ToArray();
             if (v.Any(s => s.Length > 500)) throw new AppValidationException($"Spreadsheet row {i + 2} contains an excessively long cell.");
             return (i + 2, new MigrationClientInput(v[0],v[1],v[2],v[3],v[4],v[5],v[6]));

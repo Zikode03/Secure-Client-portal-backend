@@ -14,7 +14,8 @@ public static class DocumentReviewPolicy
         string reviewerRole,
         string? reason,
         string? internalNote,
-        DateTime decidedAtUtc)
+        DateTime decidedAtUtc,
+        IReadOnlyCollection<Document>? linkedDocuments = null)
     {
         var normalizedDecision = NormalizeDecision(decision);
         var reviewDecision = ReviewDecision.Create(
@@ -27,32 +28,35 @@ public static class DocumentReviewPolicy
             internalNote,
             decidedAtUtc);
 
+        var aggregate = slot is not null && linkedDocuments is { Count: > 1 };
+        var targetSlot = aggregate ? null : slot;
         switch (normalizedDecision)
         {
             case "under_review":
                 document.MarkUnderReview();
-                slot?.MarkUnderReview();
+                targetSlot?.MarkUnderReview();
                 pack?.MarkUnderReview();
                 break;
             case "accepted":
                 document.Accept();
-                if (slot is not null)
+                if (targetSlot is not null)
                 {
-                    slot.Accept(document.Id);
+                    targetSlot.Accept(document.Id);
                 }
                 break;
             case "rejected":
             case "request_reupload":
                 document.Reject();
-                if (slot is not null)
+                if (targetSlot is not null)
                 {
-                    slot.RequestReupload(document.Id, reason);
+                    targetSlot.RequestReupload(document.Id, reason);
                 }
                 break;
             default:
                 throw new DomainRuleException("Unsupported document lifecycle decision.");
         }
 
+        if(aggregate)slot!.RecalculateReview(linkedDocuments!);
         return reviewDecision;
     }
 

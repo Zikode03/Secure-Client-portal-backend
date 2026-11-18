@@ -138,7 +138,7 @@ public class PlatformAutomationTests
     }
 
     [Fact]
-    public async Task DocumentReminders_StopAfterUploadAndCorrection_AndDoNotRepeatWithin24Hours()
+    public async Task DocumentReminders_StopAfterUploadAndCorrection_AndDoNotRepeatUnchangedAcrossDays()
     {
         await using var db = BuildDb();
         Seed(db);
@@ -159,11 +159,43 @@ public class PlatformAutomationTests
         Assert.Contains(db.Notifications, x => x.Type == "document.rejected.reminder" && x.Message.Contains("Unreadable photo"));
         var repeated = await service.RunAsync(RunAtUtc, TestContext.Current.CancellationToken);
         Assert.Equal(0, repeated.DocumentRequirementNotificationsSent);
+        foreach (var notification in db.Notifications.Where(x => x.Type.StartsWith("document."))) notification.MarkRead();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var nextDay = await service.RunAsync(RunAtUtc.AddHours(25), TestContext.Current.CancellationToken);
+        Assert.Equal(0, nextDay.DocumentRequirementNotificationsSent);
+        slots[0].UpdateSchedule(RunAtUtc.AddDays(-2));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var changedDeadline = await service.RunAsync(RunAtUtc.AddHours(26), TestContext.Current.CancellationToken);
+        Assert.Equal(1, changedDeadline.DocumentRequirementNotificationsSent);
         slots[0].MarkDraft(Guid.NewGuid());
         slots[1].MarkDraft(Guid.NewGuid());
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var afterUpload = await service.RunAsync(RunAtUtc.AddHours(25), TestContext.Current.CancellationToken);
         Assert.Equal(0, afterUpload.DocumentRequirementNotificationsSent);
+    }
+
+    [Fact]
+    public async Task DeadlineRefresh_DoesNotRecreateAnOldReadReminder()
+    {
+        await using var db = BuildDb();
+        Seed(db);
+        var now = DateTime.UtcNow;
+        var due = now.AddDays(2);
+        var request = RequestItem.Create(Guid.NewGuid(), ClientAlphaId, "clarification_needed", null,
+            "Provide records", "Please provide records", RequestPriority.Medium, ClientUserId,
+            RequestStatus.WaitingOnClient, due);
+        db.Requests.Add(request);
+        var message = $"Request '{request.Title}' is due on {due:yyyy-MM-dd HH:mm} UTC.";
+        var notification = Notification.Create(Guid.NewGuid(), ClientUserId, ClientAlphaId,
+            "deadline.approaching", "Deadline approaching", message, $"/requests/{request.Id}", now.AddDays(-2));
+        notification.MarkRead();
+        db.Notifications.Add(notification);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        for (var attempt = 0; attempt < 3; attempt++)
+            Assert.Equal(0, await db.AddDeadlineApproachingNotificationsAsync(
+                new System.Security.Claims.ClaimsPrincipal(), ClientUserId, [ClientAlphaId], TestContext.Current.CancellationToken));
+        Assert.Single(await db.Notifications.Where(x => x.Type == "deadline.approaching").ToListAsync(TestContext.Current.CancellationToken));
+        Assert.True(notification.IsRead);
     }
 
     private static PortalDbContext BuildDb()
